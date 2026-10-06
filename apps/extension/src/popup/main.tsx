@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { EngineClient, isOllama, LANGUAGES, ollamaLoaded, ollamaUnloadAll, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
+import { checkReadiness, EngineClient, isOllama, LANGUAGES, nativeName, ollamaLoaded, ollamaUnloadAll, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
 import './popup.css';
+import type { PageLangs } from '../shared/messages';
 import { db, hostOf, loadSettings, saveSettings, secrets } from '../shared/store';
 
 /** What Ollama holds in video memory right now, with a button to free it. */
@@ -47,6 +48,8 @@ function Popup() {
   const [usage, setUsage] = useState<UsageTotals | null>(null);
   const [busy, setBusy] = useState(0);
   const [unloaded, setUnloaded] = useState<string[] | null>(null);
+  const [langs, setLangs] = useState<PageLangs | null>(null);
+  const [preflight, setPreflight] = useState(false);
 
   useEffect(() => {
     void loadSettings().then((x) => {
@@ -62,6 +65,8 @@ function Popup() {
       setTab(t ?? null);
       // The badge counts pictures in work on this tab.
       if (t?.id !== undefined) void chrome.action.getBadgeText({ tabId: t.id }).then((n) => setBusy(Number(n) || 0));
+      // Which languages the page shows: the button names the one a click switches to.
+      if (t?.id !== undefined) void chrome.tabs.sendMessage(t.id, { type: 'get-langs' }).then((l: PageLangs) => setLangs(l ?? null), () => undefined);
     });
     void db.get<UsageTotals>('usage', 'totals').then((u) => setUsage(u ?? null));
   }, []);
@@ -77,8 +82,20 @@ function Popup() {
     setS(next);
     void saveSettings(next);
   };
-  const command = (command: 'translate-page' | 'select-area' | 'toggle-original') => {
+  const command = async (command: 'translate-page' | 'select-area' | 'toggle-original') => {
     if (!tab?.id) return;
+    if (command !== 'toggle-original') {
+      // Before a local translation: is everything installed and running? If not, open the helper,
+      // which offers the downloads and continues this translation once ready.
+      setPreflight(true);
+      const ready = await checkReadiness(s);
+      setPreflight(false);
+      if (!ready.ok) {
+        void chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?view=settings&setup=1&resume=${tab.id}&cmd=${command}`) });
+        window.close();
+        return;
+      }
+    }
     void chrome.runtime.sendMessage({ type: 'popup-command', command, tabId: tab.id });
     if (command !== 'toggle-original') window.close();
   };
@@ -134,12 +151,23 @@ function Popup() {
       {engine === 'down' ? <div className="ait-error">Движок не отвечает по адресу {s.engine.url}. Запустите его или переключитесь в режим без движка.</div> : null}
       {engine === 'unpaired' ? <div className="ait-notice">Движок запущен, но код сопряжения не подходит. Введите его в настройках.</div> : null}
 
-      <button className="ait-bubble-btn pp-main" disabled={!canRun || missing} onClick={() => command('translate-page')}>
-        Перевести страницу
+      <button className="ait-bubble-btn pp-main" disabled={!canRun || missing} onClick={() => void command('translate-page')}>
+        {preflight ? 'Проверяю программы…' : 'Перевести страницу'}
       </button>
       <div className="pp-row">
-        <button className="ait-btn" disabled={!canRun} onClick={() => command('select-area')}>Перевести область</button>
-        <button className="ait-btn" disabled={!canRun} onClick={() => command('toggle-original')}>Оригинал ⇄</button>
+        <button className="ait-btn" disabled={!canRun} onClick={() => void command('select-area')}>Перевести область</button>
+        <button
+          className="ait-btn"
+          disabled={!canRun}
+          data-testid="toggle-langs"
+          title={langs?.showingOriginal ? 'Показать перевод' : 'Показать оригинал'}
+          onClick={() => {
+            void command('toggle-original');
+            if (langs) setLangs({ ...langs, showingOriginal: !langs.showingOriginal });
+          }}
+        >
+          {langs?.translated ? `⇄ ${langs.showingOriginal ? nativeName(langs.target) : nativeName(langs.source) || 'Оригинал'}` : `${nativeName(s.sourceLang === 'auto' ? undefined : s.sourceLang) || 'Оригинал'} ⇄ ${nativeName(s.targetLang)}`}
+        </button>
       </div>
       {busy && tab?.id !== undefined ? (
         <button

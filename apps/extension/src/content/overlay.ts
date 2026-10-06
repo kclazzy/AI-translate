@@ -38,6 +38,9 @@ export class Overlay {
   private urls: string[] = [];
   private compareAt: number | null = null;
   showingOriginal = false;
+  /** Languages for the ⇄ button: it shows the name of the language a click switches to. */
+  private langs: { source: string; target: string } | null = null;
+  private toggleBtn: HTMLButtonElement | null = null;
   hasResult = false;
 
   constructor(
@@ -112,7 +115,7 @@ export class Overlay {
     }
   }
 
-  error(message: string, detail?: string): void {
+  error(message: string, detail?: string, action?: [string, () => void]): void {
     this.bar.className = 'bar err';
     this.pill = document.createElement('span');
     this.pill.className = 'pill err';
@@ -122,13 +125,14 @@ export class Overlay {
       d.textContent = detail;
       this.pill.append(d);
     }
-    const defs: [string, string, () => void][] = [['Повторить', 'Попробовать ещё раз', this.actions.onRetry]];
+    const defs: [string, string, () => void][] = action ? [[action[0], action[0], action[1]]] : [['Повторить', 'Попробовать ещё раз', this.actions.onRetry]];
     if (this.actions.onClose) defs.push(['✕', 'Закрыть', this.actions.onClose]);
     else if (!this.hasResult) defs.push(['✕', 'Скрыть', () => this.destroy()]);
     this.buttons(defs);
   }
 
-  setTiles(tiles: { y: number; h: number; dataUrl: string }[]): void {
+  setTiles(tiles: { y: number; h: number; dataUrl: string }[], langs?: { source: string; target: string }): void {
+    if (langs) this.langs = langs;
     this.revoke();
     const imgs = tiles.map((t) => {
       const img = document.createElement('img');
@@ -152,12 +156,19 @@ export class Overlay {
     ];
     if (this.actions.onClose) defs.push(['✕', 'Закрыть', this.actions.onClose]);
     this.buttons(defs);
+    this.toggleBtn = this.bar.querySelector('button');
     this.setOriginal(false);
   }
 
   setOriginal(show: boolean): void {
     this.showingOriginal = show;
     this.tiles.classList.toggle('hidden', show);
+    const b = this.toggleBtn;
+    if (b && this.langs) {
+      const next = show ? this.langs.target : this.langs.source;
+      b.textContent = `⇄ ${next}`;
+      b.title = show ? `Показать перевод (${this.langs.target})` : `Показать оригинал (${this.langs.source})`;
+    }
   }
 
   private toggleCompare(): void {

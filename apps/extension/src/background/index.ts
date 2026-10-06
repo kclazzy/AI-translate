@@ -1,4 +1,4 @@
-import { AppError, bytesToBase64, dataUrlToBytes, isOllama, ollamaUnloadAll, toAppError } from '@ait/core';
+import { AppError, bytesToBase64, checkReadiness, dataUrlToBytes, isOllama, ollamaUnloadAll, readinessText, toAppError, type Readiness } from '@ait/core';
 import type { BackgroundToContent, ContentToBackground, FromOffscreen, JobStatus, ToOffscreen, UiToBackground } from '../shared/messages';
 import { hostOf, loadSettings, saveSettings } from '../shared/store';
 
@@ -130,6 +130,12 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
         sendToTab(tabId, { type: 'job-error', id: msg.image.id, error: OFF_ERROR().toJSON() });
         return { queued: false };
       }
+      const ready = await readiness();
+      if (!ready.ok) {
+        sendToTab(tabId, { type: 'job-error', id: msg.image.id, error: new AppError('SETUP_NEEDED', { retryable: false, detail: readinessText(ready) }).toJSON() });
+        void offerSetup(tabId);
+        return { queued: false };
+      }
       track(tabId, jobId, true);
       try {
         let bytes: Uint8Array | null = null;
@@ -164,6 +170,12 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
         sendToTab(tabId, { type: 'job-error', id: msg.image.id, error: OFF_ERROR().toJSON() });
         return { queued: false };
       }
+      const readyArea = await readiness();
+      if (!readyArea.ok) {
+        sendToTab(tabId, { type: 'job-error', id: msg.image.id, error: new AppError('SETUP_NEEDED', { retryable: false, detail: readinessText(readyArea) }).toJSON() });
+        void offerSetup(tabId);
+        return { queued: false };
+      }
       track(tabId, jobId, true);
       try {
         const shot = await capture(windowId);
@@ -183,8 +195,12 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       return toOffscreen({ target: 'offscreen', type: 'cancel', jobId: `${tabId}|${msg.id}` });
     case 'get-page-state': {
       const s = await loadSettings();
-      return { autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(msg.host), minImageSize: s.minImageSize, enabled: s.enabled !== false };
+      return { autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(msg.host), minImageSize: s.minImageSize, enabled: s.enabled !== false, targetLang: s.targetLang };
     }
+    case 'open-setup':
+      readyCache = null;
+      await offerSetup(tabId, true);
+      return null;
     case 'open-editor':
       await chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?key=${encodeURIComponent(msg.key)}`), index: (sender.tab?.index ?? 0) + 1 });
       return null;
@@ -199,7 +215,7 @@ async function broadcastState() {
   for (const t of tabs) {
     if (t.id === undefined) continue;
     const host = hostOf(t.url);
-    sendToTab(t.id, { type: 'state', autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(host), minImageSize: s.minImageSize, enabled: s.enabled !== false });
+    sendToTab(t.id, { type: 'state', autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(host), minImageSize: s.minImageSize, enabled: s.enabled !== false, targetLang: s.targetLang });
   }
   showEnabled(s.enabled !== false);
 }
@@ -224,6 +240,24 @@ async function setEnabled(enabled: boolean): Promise<{ unloaded: string[] }> {
   }
   await broadcastState();
   return { unloaded };
+}
+
+let readyCache: { at: number; r: Readiness } | null = null;
+/** Are the local programs this setup needs running? Cached briefly: it runs for every picture. */
+async function readiness(): Promise<Readiness> {
+  const now = Date.now();
+  if (readyCache && now - readyCache.at < (readyCache.r.ok ? 30_000 : 4_000)) return readyCache.r;
+  const r = await checkReadiness(await loadSettings());
+  readyCache = { at: now, r };
+  return r;
+}
+
+/** Open the setup helper (at most every 10 minutes unless the user asks). */
+async function offerSetup(tabId: number | undefined, force = false) {
+  const { setupOfferedAt } = (await chrome.storage.session.get('setupOfferedAt').catch(() => ({}))) as { setupOfferedAt?: number };
+  if (!force && setupOfferedAt && Date.now() - setupOfferedAt < 10 * 60_000) return;
+  await chrome.storage.session.set({ setupOfferedAt: Date.now() }).catch(() => undefined);
+  await chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?view=settings&setup=1${tabId !== undefined ? `&resume=${tabId}&cmd=translate-page` : ''}`) });
 }
 
 const OFF_ERROR = () => new AppError('NOT_CONFIGURED', { retryable: false, detail: 'AI Translate выключен. Включите его в окне расширения (значок на панели).' });

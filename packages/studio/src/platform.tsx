@@ -17,6 +17,8 @@ export interface StudioPlatform {
   version: string;
   /** Optional: install an update from inside the app (reports progress as text + percent). */
   installUpdate?(info: UpdateInfo, progress: (text: string, pct?: number) => void): Promise<void>;
+  /** Optional: the setup helper finished; continue what the user started (params of the page URL). */
+  setupReady?(params: URLSearchParams): void;
 }
 
 export const PlatformContext = createContext<StudioPlatform | null>(null);

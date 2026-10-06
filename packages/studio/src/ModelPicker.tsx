@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   browserBackend,
   checkForUpdate,
+  checkReadiness,
   checkVisionModel,
   DEFAULT_KEEP_ALIVE_MIN,
   configFromPreset,
@@ -17,12 +18,15 @@ import {
   ollamaPull,
   ollamaStatus,
   providerById,
+  readinessText,
+  SETUP_LINKS,
   tierForVram,
   type AppSettings,
   type DiscoveredModel,
   type ModelCheck,
   type OllamaStatus,
   type ProviderConfig,
+  type Readiness,
   type UpdateInfo,
 } from '@ait/core';
 import { FoldPanel } from './ui';
@@ -610,5 +614,158 @@ export function UpdateCheck({ current, compact, install, autoCheck }: { current:
       ) : null}
       {state.error ? <span style={{ color: 'var(--err)' }}>{state.error}</span> : null}
     </span>
+  );
+}
+
+/**
+ * "What is missing for local translation": checks Ollama / LM Studio / the engine every few
+ * seconds, offers the download and the next step, downloads the model, and reports when
+ * everything is ready (the extension then continues the translation that was started).
+ */
+export function LocalSetup({ settings, update, getKey, onReady }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; getKey?: KeyGetter; onReady?: () => void }) {
+  const [state, setState] = useState<Readiness | null>(null);
+  const [pull, setPull] = useState<{ status: string; completed?: number; total?: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const readyFired = useRef(false);
+  const latest = useRef(settings);
+  latest.current = settings;
+  const { run, running } = useModelCheck(settings, update, getKey);
+
+  const refresh = useCallback(async () => {
+    setChecking(true);
+    try {
+      setState(await checkReadiness(latest.current));
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const t = setInterval(() => {
+      if (!pull) void refresh();
+    }, 3000);
+    return () => clearInterval(t);
+  }, [refresh, pull]);
+
+  useEffect(() => {
+    if (state?.ok && !readyFired.current) {
+      readyFired.current = true;
+      const v = providerById(latest.current, latest.current.visionProviderId);
+      // Prove it works, then continue.
+      void (async () => {
+        if (v && latest.current.pipeline === 'standalone') await run(v);
+        onReady?.();
+      })();
+    }
+  }, [state, onReady, run]);
+
+  const download = async (model: string, baseUrl: string) => {
+    setError(null);
+    setPull({ status: 'начинаю' });
+    try {
+      await ollamaPull(baseUrl, model, (p) => setPull(p));
+      // Use the model that was just downloaded for reading pictures.
+      const cur = latest.current;
+      const v = providerById(cur, cur.visionProviderId);
+      if (v && isOllama(v) && !isSameModel(v.model, model)) {
+        const next = { ...cur, providers: cur.providers.map((p) => (p.id === v.id ? { ...p, model, vision: true } : p)) };
+        latest.current = next;
+        update({ providers: next.providers });
+      }
+      setPull(null);
+      await refresh();
+    } catch (e) {
+      setPull(null);
+      setError(`${errorMessage(e)} ${(e as { detail?: string }).detail ?? (e as Error).message ?? ''}`.trim());
+    }
+  };
+
+  const win = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
+  const step = (n: number, done: boolean, title: string, body?: ReactNode) => (
+    <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr', gap: 8, alignItems: 'start' }}>
+      <span className={`ait-badge ${done ? 'ok' : ''}`} style={{ justifyContent: 'center' }}>{done ? '✓' : n}</span>
+      <div style={{ display: 'grid', gap: 6 }}>
+        <b>{title}</b>
+        {body}
+      </div>
+    </div>
+  );
+
+  const need = state && !state.ok ? state.need : null;
+  const [gpu] = useState(detectGpu);
+  const missingModel = state && !state.ok && state.need === 'ollama-model' ? state.model : '';
+  // The configured model is only the default: suggest the one that fits this video card.
+  const suggested = missingModel && missingModel === configFromPreset('ollama').model ? tierForVram(settings.gpuVramGb ?? gpu.vramGb).model : missingModel;
+  const programOk = state?.ok || need === 'ollama-model';
+  const checkKey = (() => {
+    const v = providerById(settings, settings.visionProviderId);
+    return v ? modelCheckKey(v) : '';
+  })();
+  const check = settings.modelChecks?.[checkKey];
+  const pct = pull?.total ? Math.round(((pull.completed ?? 0) / pull.total) * 100) : null;
+
+  return (
+    <div className="ait-panel" data-testid="local-setup" style={{ display: 'grid', gap: 14, borderColor: state?.ok ? 'var(--ok)' : 'var(--magenta)' }}>
+      <h2 style={{ margin: 0 }}>Подготовка к переводу на этом компьютере</h2>
+      {!state ? <span className="ait-muted">Проверяю программы…</span> : <span>{readinessText(state)}</span>}
+
+      {need === 'engine' ? (
+        step(1, false, 'Запустите локальный движок', (
+          <>
+            <small>Откройте папку, куда распакован AI Translate, и запустите <code>engine\scripts\start-engine.bat</code>. Нужен Python 3.11+.</small>
+            <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <a className="ait-btn small" href={SETUP_LINKS.python} target="_blank" rel="noreferrer">Скачать Python</a>
+              <button className="ait-btn small" onClick={() => update({ pipeline: 'standalone' })}>Переводить без движка</button>
+            </span>
+          </>
+        ))
+      ) : need === 'lmstudio' || need === 'server' ? (
+        step(1, false, need === 'lmstudio' ? 'Запустите LM Studio и её сервер' : 'Запустите сервер модели', (
+          <>
+            <small>{need === 'lmstudio' ? 'В LM Studio: вкладка Developer → Start Server, включите CORS. Загрузите модель, которая читает картинки.' : `Сервер должен отвечать по адресу ${(state as { baseUrl: string }).baseUrl}.`}</small>
+            {need === 'lmstudio' ? <a className="ait-btn small" style={{ justifySelf: 'start' }} href={SETUP_LINKS.lmstudio} target="_blank" rel="noreferrer">Скачать LM Studio</a> : null}
+          </>
+        ))
+      ) : (
+        <>
+          {step(1, !!programOk, 'Ollama — программа, которая запускает модель', need === 'ollama' ? (
+            <>
+              <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <a className="ait-bubble-btn" style={{ fontSize: 14, minHeight: 32, padding: '3px 14px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }} href={win ? SETUP_LINKS.ollamaWindows : SETUP_LINKS.ollamaPage} target="_blank" rel="noreferrer">
+                  Скачать Ollama{win ? ' для Windows' : ''}
+                </a>
+                {win ? <a className="ait-btn small" href={SETUP_LINKS.ollamaPage} target="_blank" rel="noreferrer">macOS / Linux</a> : null}
+              </span>
+              <small className="ait-muted">Откройте скачанный файл и установите. Если Ollama уже установлена — запустите её из меню «Пуск» (значок ламы появится рядом с часами).</small>
+              <small className="ait-muted">{checking ? 'Проверяю…' : 'Жду запуска Ollama — проверяю каждые 3 секунды, нажимать ничего не нужно.'}</small>
+            </>
+          ) : null)}
+          {step(2, !!state?.ok, 'Модель, которая читает картинки', need === 'ollama-model' ? (
+            pull ? (
+              <>
+                <div className="ait-progress"><i style={{ width: `${pct ?? 3}%` }} /></div>
+                <small className="ait-muted">{pull.status}{pull.total ? ` — ${gb(pull.completed)} из ${gb(pull.total)} (${pct}%)` : ''}</small>
+              </>
+            ) : (
+              <>
+                <button className="ait-bubble-btn" style={{ justifySelf: 'start', fontSize: 14, minHeight: 32, padding: '3px 14px' }} onClick={() => void download(suggested, (state as { baseUrl: string }).baseUrl)}>
+                  Скачать {suggested}
+                </button>
+                <small className="ait-muted">
+                  {MODEL_TIERS.find((t) => t.model === suggested) ? `${MODEL_TIERS.find((t) => t.model === suggested)!.sizeGb} ГБ, подобрана ${gpu.name ? `под ${gpu.name}` : 'под видеокарту'}. ` : ''}Другую можно выбрать в «Локальных моделях» ниже.
+                </small>
+              </>
+            )
+          ) : need === 'ollama' ? <small className="ait-muted">После запуска Ollama предложим скачать модель под вашу видеокарту.</small> : null)}
+          {step(3, check?.level === 'ok', 'Проверка', state?.ok ? (
+            running ? <small className="ait-muted">Проверяю модель… первый запуск может занять минуту.</small> : check ? <small>{check.message}</small> : null
+          ) : null)}
+        </>
+      )}
+      {state?.ok && onReady ? <small>Готово — продолжаю перевод на странице.</small> : null}
+      {error ? <small style={{ color: 'var(--err)' }}>{error}</small> : null}
+    </div>
   );
 }

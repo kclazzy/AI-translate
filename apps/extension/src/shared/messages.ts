@@ -31,7 +31,8 @@ export type ContentToBackground =
   | { type: 'get-page-state'; host: string }
   | { type: 'open-editor'; key: string }
   | { type: 'get-result'; key: string }
-  | { type: 'status'; ids: string[] };
+  | { type: 'status'; ids: string[] }
+  | { type: 'open-setup' };
 
 // background → content
 export type BackgroundToContent =
@@ -41,7 +42,16 @@ export type BackgroundToContent =
   | { type: 'command'; command: 'translate-page' | 'select-area' | 'toggle-original' | 'set-auto'; value?: boolean }
   | { type: 'translate-src'; src: string }
   | { type: 'result-changed'; key: string }
-  | { type: 'state'; autoTranslate: boolean; minImageSize: number; enabled: boolean };
+  | { type: 'get-langs' }
+  | { type: 'state'; autoTranslate: boolean; minImageSize: number; enabled: boolean; targetLang: string };
+
+/** Popup → content: languages for the "original ⇄ translation" button. */
+export interface PageLangs {
+  source?: string;
+  target: string;
+  showingOriginal: boolean;
+  translated: number;
+}
 
 /** Where a job is. "unknown" means the worker has never heard of it (lost after a restart) or it just finished. */
 export type JobStatus =

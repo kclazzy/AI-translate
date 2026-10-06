@@ -20,6 +20,7 @@ export type ErrorCode =
   | 'ENGINE_UNAUTHORIZED'
   | 'NOT_CONFIGURED'
   | 'NO_TEXT_FOUND'
+  | 'SETUP_NEEDED'
   | 'UNKNOWN';
 
 export class AppError extends Error {
@@ -86,6 +87,7 @@ const MESSAGES: Record<ErrorCode, Record<Lang, string>> = {
   ENGINE_UNAUTHORIZED: { ru: 'Движок отклонил токен. Введите код сопряжения в настройках.', en: 'The engine rejected the token. Enter the pairing code in Settings.' },
   NOT_CONFIGURED: { ru: 'Не выбран провайдер перевода. Откройте настройки.', en: 'No translation provider is set up. Open Settings.' },
   NO_TEXT_FOUND: { ru: 'Текст на изображении не найден.', en: 'No text was found in the image.' },
+  SETUP_NEEDED: { ru: 'Для перевода на этом компьютере не хватает программы.', en: 'A program needed for local translation is missing.' },
   UNKNOWN: { ru: 'Что-то пошло не так. Попробовать ещё раз?', en: 'Something went wrong. Try again?' },
 };
 

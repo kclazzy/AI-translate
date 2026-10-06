@@ -1,5 +1,6 @@
 import { errorMessage } from '@ait/core/errors';
-import type { BackgroundToContent, ContentToBackground, ImageRef, JobStatus, RenderedTiles } from '../shared/messages';
+import { dominantLanguage, nativeName } from '@ait/core/languages';
+import type { BackgroundToContent, ContentToBackground, ImageRef, JobStatus, PageLangs, RenderedTiles } from '../shared/messages';
 import { Overlay } from './overlay';
 import { asCandidate, candidateAt, imgSrc, inlineData, markUi, scanPage, viewportRect, type Candidate } from './scanner';
 
@@ -40,6 +41,8 @@ function main() {
   let minSize = 200;
   let autoTranslate = false;
   let enabled = true;
+  let targetLang = 'ru';
+  const langsOf = (r: RenderedTiles) => ({ source: nativeName(dominantLanguage(r.page.blocks.map((b) => b.language)) ?? 'auto') || 'Оригинал', target: nativeName(targetLang) });
   let originalsShown = false;
   let seq = 0;
 
@@ -153,8 +156,19 @@ function main() {
   }
 
   // ---- messages from the background --------------------------------------------------------
-  chrome.runtime.onMessage.addListener((msg: BackgroundToContent) => {
+  chrome.runtime.onMessage.addListener((msg: BackgroundToContent, _sender, sendResponse) => {
     switch (msg.type) {
+      case 'get-langs': {
+        const done = [...items.values()].filter((it) => it.status === 'done' && it.result);
+        const langs: PageLangs = {
+          source: dominantLanguage(done.flatMap((it) => it.result!.page.blocks.map((b) => b.language))),
+          target: targetLang,
+          showingOriginal: originalsShown,
+          translated: done.length,
+        };
+        sendResponse(langs);
+        return false;
+      }
       case 'job-stage': {
         const it = items.get(msg.id);
         if (it && it.status !== 'done') {
@@ -168,7 +182,7 @@ function main() {
         if (!it) break;
         it.status = 'done';
         it.result = msg.result;
-        it.overlay.setTiles(msg.result.tiles);
+        it.overlay.setTiles(msg.result.tiles, langsOf(msg.result));
         it.overlay.setOriginal(originalsShown);
         it.overlay.position();
         break;
@@ -182,6 +196,10 @@ function main() {
           break;
         }
         it.status = 'error';
+        if (msg.error.code === 'SETUP_NEEDED') {
+          it.overlay.error(errorMessage(msg.error), msg.error.detail, ['Установить и запустить', () => void send({ type: 'open-setup' })]);
+          break;
+        }
         it.overlay.error(errorMessage(msg.error), msg.error.detail);
         break;
       }
@@ -211,7 +229,7 @@ function main() {
           void send<RenderedTiles | null>({ type: 'get-result', key: msg.key }).then((r) => {
             if (r) {
               it.result = r;
-              it.overlay.setTiles(r.tiles);
+              it.overlay.setTiles(r.tiles, langsOf(r));
             }
           });
         }
@@ -219,6 +237,7 @@ function main() {
       case 'state':
         minSize = msg.minImageSize;
         enabled = msg.enabled;
+        targetLang = msg.targetLang;
         if (!enabled) hoverBtn.style.display = 'none';
         setAuto(msg.autoTranslate);
         break;
@@ -435,10 +454,11 @@ function main() {
     setTimeout(() => host.remove(), 3000);
   }
 
-  void send<{ autoTranslate: boolean; minImageSize: number; enabled: boolean }>({ type: 'get-page-state', host: location.hostname }).then((s) => {
+  void send<{ autoTranslate: boolean; minImageSize: number; enabled: boolean; targetLang: string }>({ type: 'get-page-state', host: location.hostname }).then((s) => {
     if (!s) return;
     minSize = s.minImageSize;
     enabled = s.enabled;
+    targetLang = s.targetLang;
     setAuto(s.autoTranslate);
   });
 }

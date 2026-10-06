@@ -30,6 +30,21 @@ export const LANGUAGES: LanguageInfo[] = [
   { code: 'be', name: 'Belarusian', native: 'Беларуская' },
 ];
 
+/** Name of a language in that language (日本語, Русский, English); the code itself if unknown. */
+export function nativeName(code: string | undefined): string {
+  if (!code) return '';
+  return LANGUAGES.find((l) => l.code === code)?.native ?? LANGUAGES.find((l) => l.code === code.split('-')[0])?.native ?? code.toUpperCase();
+}
+
+/** The language most of the blocks are in (the language detected on the page). */
+export function dominantLanguage(langs: (string | undefined)[]): string | undefined {
+  const n = new Map<string, number>();
+  for (const l of langs) if (l && l !== 'und' && l !== 'auto') n.set(l, (n.get(l) ?? 0) + 1);
+  let best: string | undefined;
+  for (const [l, c] of n) if (!best || c > n.get(best)!) best = l;
+  return best;
+}
+
 export function languageName(code: string): string {
   if (code === 'auto') return 'auto-detect';
   return LANGUAGES.find((l) => l.code === code)?.name ?? code;

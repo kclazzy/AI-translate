@@ -283,7 +283,7 @@ export interface CleanResult {
   bubble: BubbleInfo | null;
   /** Tight box around the text pixels that were found. */
   textBox: Box | null;
-  method: 'fill' | 'diffuse' | 'none';
+  method: 'fill' | 'diffuse' | 'plate' | 'none';
 }
 
 export interface CleanOptions {
@@ -291,95 +291,310 @@ export interface CleanOptions {
   analyzeOnly?: boolean;
 }
 
+/** Most common colour in a rectangle (coarse histogram) and the share of pixels close to it. */
+export function dominantColor(img: PixelData, rect: Box, tol = 40): { color: RGB; share: number } {
+  const [x0, y0, w, h] = clampBox(rect, img.width, img.height);
+  const bins = new Map<number, { n: number; r: number; g: number; b: number }>();
+  const step = Math.max(1, Math.floor(Math.sqrt((w * h) / 40000)));
+  for (let y = y0; y < y0 + h; y += step) {
+    for (let x = x0; x < x0 + w; x += step) {
+      const i = (y * img.width + x) * 4;
+      const k = ((img.data[i] >> 5) << 6) | ((img.data[i + 1] >> 5) << 3) | (img.data[i + 2] >> 5);
+      const e = bins.get(k) ?? { n: 0, r: 0, g: 0, b: 0 };
+      e.n++;
+      e.r += img.data[i];
+      e.g += img.data[i + 1];
+      e.b += img.data[i + 2];
+      bins.set(k, e);
+    }
+  }
+  let best: { n: number; r: number; g: number; b: number } | null = null;
+  for (const e of bins.values()) if (!best || e.n > best.n) best = e;
+  if (!best) return { color: [255, 255, 255], share: 0 };
+  const color: RGB = [best.r / best.n, best.g / best.n, best.b / best.n];
+  let near = 0;
+  let total = 0;
+  for (let y = y0; y < y0 + h; y += step) {
+    for (let x = x0; x < x0 + w; x += step) {
+      total++;
+      if (colorDist(img.data, (y * img.width + x) * 4, color) <= tol) near++;
+    }
+  }
+  return { color, share: near / Math.max(1, total) };
+}
+
+interface Component {
+  box: Box;
+  pixels: number[];
+}
+
+/** 8-connected components of a mask inside `rect`. */
+export function components(mask: Uint8Array, width: number, rect: Box): Component[] {
+  const [x0, y0, w, h] = rect;
+  const seen = new Uint8Array(mask.length);
+  const out: Component[] = [];
+  for (let y = y0; y < y0 + h; y++) {
+    for (let x = x0; x < x0 + w; x++) {
+      const p0 = y * width + x;
+      if (!mask[p0] || seen[p0]) continue;
+      const pixels: number[] = [];
+      const stack = [p0];
+      seen[p0] = 1;
+      let minX = x, maxX = x, minY = y, maxY = y;
+      while (stack.length) {
+        const p = stack.pop()!;
+        pixels.push(p);
+        const px = p % width;
+        const py = (p - px) / width;
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        if (py < minY) minY = py;
+        if (py > maxY) maxY = py;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const qx = px + dx;
+            const qy = py + dy;
+            if (qx < x0 || qy < y0 || qx >= x0 + w || qy >= y0 + h) continue;
+            const q = qy * width + qx;
+            if (mask[q] && !seen[q]) {
+              seen[q] = 1;
+              stack.push(q);
+            }
+          }
+        }
+      }
+      out.push({ box: [minX, minY, maxX - minX + 1, maxY - minY + 1], pixels });
+    }
+  }
+  return out;
+}
+
+function boxGap(a: Box, b: Box): number {
+  const dx = Math.max(0, Math.max(a[0], b[0]) - Math.min(a[0] + a[2], b[0] + b[2]));
+  const dy = Math.max(0, Math.max(a[1], b[1]) - Math.min(a[1] + a[3], b[1] + b[3]));
+  return Math.max(dx, dy);
+}
+
+function unionBox(a: Box | null, b: Box): Box {
+  if (!a) return b;
+  const x = Math.min(a[0], b[0]);
+  const y = Math.min(a[1], b[1]);
+  return [x, y, Math.max(a[0] + a[2], b[0] + b[2]) - x, Math.max(a[1] + a[3], b[1] + b[3]) - y];
+}
+
+/**
+ * The model's box is approximate. Starting from the letters that touch it, collect the
+ * neighbouring letter-sized components (the rest of a word, a missed line) so the whole
+ * lettering is erased, and nothing that looks like artwork.
+ */
+export function snapToLettering(candidates: Uint8Array, width: number, search: Box, seed: Box): { mask: Uint8Array; box: Box | null } {
+  const comps = components(candidates, width, search).filter((c) => c.pixels.length >= 3);
+  const seedBox = expandBox(seed, 2);
+  const kept = new Set<Component>();
+  let union: Box | null = null;
+  for (const c of comps) {
+    if (boxGap(c.box, seedBox) === 0 && c.box[2] <= seed[2] * 2.5 + 40 && c.box[3] <= seed[3] * 2.5 + 40) {
+      kept.add(c);
+      union = unionBox(union, c.box);
+    }
+  }
+  if (!union) return { mask: new Uint8Array(candidates.length), box: null };
+  const heights = [...kept].map((c) => c.box[3]).sort((a, b) => a - b);
+  const letter = Math.max(6, heights[Math.floor(heights.length / 2)]);
+  const gap = Math.max(5, Math.round(letter * 0.75));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const c of comps) {
+      if (kept.has(c)) continue;
+      // Letter-sized and next to the lettering found so far.
+      if (c.box[3] > letter * 2.6 || c.box[2] > Math.max(letter * 6, seed[2] * 1.5)) continue;
+      if (boxGap(c.box, union!) > gap) continue;
+      kept.add(c);
+      union = unionBox(union, c.box);
+      grew = true;
+    }
+  }
+  const mask = new Uint8Array(candidates.length);
+  for (const c of kept) for (const p of c.pixels) mask[p] = 1;
+  return { mask, box: union };
+}
+
+/** Pixels still standing out from `bg` inside `rect` (what the reader could still see). */
+function residual(img: PixelData, rect: Box, bg: RGB, threshold: number): number {
+  const m = textMask(img, rect, bg, threshold);
+  return countMask(m) / Math.max(1, rect[2] * rect[3]);
+}
+
+/** Solid rounded plate in the background colour: the last resort that always hides the lettering. */
+function paintPlate(img: PixelData, rect: Box, color: RGB, limit?: Uint8Array): void {
+  const [x0, y0, w, h] = clampBox(rect, img.width, img.height);
+  const r = Math.min(10, Math.floor(Math.min(w, h) / 3));
+  for (let y = y0; y < y0 + h; y++) {
+    for (let x = x0; x < x0 + w; x++) {
+      const cx = x < x0 + r ? x0 + r : x >= x0 + w - r ? x0 + w - r - 1 : x;
+      const cy = y < y0 + r ? y0 + r : y >= y0 + h - r ? y0 + h - r - 1 : y;
+      if ((x - cx) ** 2 + (y - cy) ** 2 > r * r) continue;
+      const p = y * img.width + x;
+      if (limit && !limit[p]) continue;
+      const i = p * 4;
+      img.data[i] = color[0];
+      img.data[i + 1] = color[1];
+      img.data[i + 2] = color[2];
+      img.data[i + 3] = 255;
+    }
+  }
+}
+
 /**
  * Remove the original text of one block from a tiled image and describe the
- * bubble the translation should go into.
+ * bubble the translation should go into. Works with imprecise boxes from small
+ * vision models: it finds the real lettering around the box, erases it, checks
+ * that nothing is left and, if something is, covers it with a solid plate.
  */
 export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}): CleanResult {
-  // Bubbles are often much larger than their text: grow the analysed region until the
-  // bubble outline closes (open page background never closes and ends as a plain box).
   const maxDim = Math.max(bbox[2], bbox[3]);
-  const pads = [Math.max(24, 0.9 * maxDim), Math.max(48, 1.8 * maxDim), Math.max(80, 3 * maxDim)].map(Math.round);
-  let attempt = 0;
-  let region: Box;
-  let img: PixelData;
-  let local: Box;
-  let localPadded: Box;
-  let ring: ReturnType<typeof ringStats>;
-  for (;;) {
+  const minDim = Math.max(8, Math.min(bbox[2], bbox[3]));
+  // Bubbles are often much larger than their text: grow the analysed region until the
+  // bubble closes (open page background never closes and ends as open lettering).
+  const pads = [Math.max(40, 0.9 * maxDim), Math.max(70, 1.8 * maxDim), Math.max(110, 3 * maxDim)].map(Math.round);
+  let region: Box = bbox;
+  let img!: PixelData;
+  let local: Box = bbox;
+  let bg: RGB = [255, 255, 255];
+  let flat = false;
+  let flood: FloodResult | null = null;
+  let leaked = true;
+  for (let attempt = 0; attempt < pads.length; attempt++) {
     region = clampBox(expandBox(bbox, pads[attempt]), image.width, image.height);
     img = image.getRegion(...region);
     local = [bbox[0] - region[0], bbox[1] - region[1], bbox[2], bbox[3]];
-    localPadded = clampBox(expandBox(local, 3), img.width, img.height);
-    ring = ringStats(img, localPadded, 2, 8);
-    if (ring.std >= 24 || attempt === pads.length - 1) break;
-    const probeMask = textMask(img, clampBox(expandBox(local, 4), img.width, img.height), ring.color, 48);
-    const probe = floodBubble(img, localPadded, ring.color, 42, probeMask);
-    if (!probe.touchesEdge) break;
-    attempt++;
-  }
-  const bg = ring.color;
-  const bgLum = luminance(...bg);
-
-  let result: CleanResult = { bubble: null, textBox: null, method: 'none' };
-
-  if (ring.std < 24) {
-    // Flat background, typically a speech bubble.
-    let mask = textMask(img, clampBox(expandBox(local, 4), img.width, img.height), bg, 48);
-    const flood = floodBubble(img, localPadded, bg, 42, mask);
-    const closed = !flood.touchesEdge && flood.area > boxArea(local) * 0.8;
-    if (closed) {
-      const holes = enclosedHoles(flood.mask, img.width, img.height, clampBox(expandBox(flood.box, 1), img.width, img.height));
-      for (let i = 0; i < holes.length; i++) if (holes[i]) mask[i] = 1;
+    if (attempt === 0) {
+      // Background = the dominant colour around and inside the box (letters are a minority).
+      const around = clampBox(expandBox(local, Math.round(minDim * 0.6) + 6), img.width, img.height);
+      const dom = dominantColor(img, around);
+      bg = dom.color;
+      flat = dom.share >= 0.45;
+      if (!flat) break;
     }
-    const tb = maskBounds(mask, img.width, img.height);
-    mask = dilate(mask, img.width, img.height, 2);
+    const letters = textMask(img, clampBox(expandBox(local, 4), img.width, img.height), bg, 60);
+    flood = floodBubble(img, clampBox(expandBox(local, 2), img.width, img.height), bg, 42, letters);
+    // Touching the analysed region's border means the flood ran out into open space;
+    // touching the picture's own border is fine (a bubble cut off by the edge of the strip).
+    leaked = floodLeaks(flood, region, image.width, image.height);
+    if (!leaked) break;
+  }
+
+  const search = clampBox(expandBox(local, Math.round(minDim * 1.2) + 12), img.width, img.height);
+  let result: CleanResult;
+
+  if (flat) {
+    const closed = !!flood && !leaked && flood.area > boxArea(local) * 0.5;
+    let mask: Uint8Array;
+    let tb: Box | null;
     if (closed) {
+      // Everything enclosed by the bubble interior is lettering.
+      const holes = enclosedHoles(flood!.mask, img.width, img.height, clampBox(expandBox(flood!.box, 1), img.width, img.height));
+      mask = holes.slice();
+      const extra = textMask(img, clampBox(expandBox(local, 3), img.width, img.height), bg, 60);
+      const interior = dilate(flood!.mask, img.width, img.height, 1);
+      for (let i = 0; i < mask.length; i++) if (extra[i] && interior[i]) mask[i] = 1;
+      tb = maskBounds(mask, img.width, img.height);
+      mask = dilate(mask, img.width, img.height, 2);
       // Never paint outside the bubble interior (keeps the outline intact).
-      const interior = dilate(flood.mask, img.width, img.height, 1);
-      const holes = enclosedHoles(flood.mask, img.width, img.height, clampBox(expandBox(flood.box, 1), img.width, img.height));
       for (let i = 0; i < mask.length; i++) if (mask[i] && !interior[i] && !holes[i]) mask[i] = 0;
+    } else {
+      // Open flat space (white gutter, narration box): erase the letters around the box.
+      const cand = textMask(img, search, bg, 60);
+      const snap = snapToLettering(cand, img.width, search, local);
+      tb = snap.box;
+      mask = dilate(snap.mask, img.width, img.height, 2);
     }
     if (!opts.analyzeOnly) fillMask(img, mask, bg);
-    const textBox: Box | null = tb ? [tb[0] + region[0], tb[1] + region[1], tb[2], tb[3]] : null;
-    let bubble: BubbleInfo | null = null;
-    if (closed) {
-      const bb: Box = [flood.box[0] + region[0], flood.box[1] + region[1], flood.box[2], flood.box[3]];
-      const fillRatio = flood.area / Math.max(1, boxArea(flood.box));
-      const shape = fillRatio < 0.86 ? 'ellipse' : 'rect';
-      const inset = shape === 'ellipse' ? 0.1 : 0.06;
-      const safe: Box = [bb[0] + bb[2] * inset, bb[1] + bb[3] * inset, bb[2] * (1 - 2 * inset), bb[3] * (1 - 2 * inset)];
-      bubble = { box: bb, fill: toHex(bg), safeArea: safe.map(Math.round) as Box, shape };
-    } else {
-      const base = textBox ?? bbox;
-      bubble = { box: base, fill: toHex(bg), safeArea: expandBox(base, Math.round(base[2] * 0.08), Math.round(base[3] * 0.08)).map(Math.round) as Box, shape: 'rect' };
+    let method: CleanResult['method'] = opts.analyzeOnly ? 'none' : 'fill';
+    // Verify: nothing that stands out from the bubble colour may remain where the text was.
+    const textArea = clampBox(expandBox(tb ? unionBox(tb, local) : local, 2), img.width, img.height);
+    if (!opts.analyzeOnly && residual(img, textArea, bg, 70) > 0.004) {
+      paintPlate(img, clampBox(expandBox(textArea, 3), img.width, img.height), bg, closed ? dilate(flood!.mask, img.width, img.height, 1) : undefined);
+      method = 'plate';
     }
-    result = { bubble, textBox, method: opts.analyzeOnly ? 'none' : 'fill' };
+    const textBox: Box | null = tb ? [tb[0] + region[0], tb[1] + region[1], tb[2], tb[3]] : null;
+    let bubble: BubbleInfo;
+    if (closed) {
+      const bb: Box = [flood!.box[0] + region[0], flood!.box[1] + region[1], flood!.box[2], flood!.box[3]];
+      const fillRatio = flood!.area / Math.max(1, boxArea(flood!.box));
+      // Cut off by the edge of the picture: only part of the bubble is visible, so fit the
+      // text into that part as a box instead of shrinking it into a whole ellipse.
+      const cut = bb[0] <= 0 || bb[1] <= 0 || bb[0] + bb[2] >= image.width || bb[1] + bb[3] >= image.height;
+      const shape = !cut && fillRatio < 0.86 ? 'ellipse' : 'rect';
+      const insetX = cut ? 0.1 : shape === 'ellipse' ? 0.1 : 0.06;
+      const insetY = cut ? 0.2 : insetX;
+      const safe: Box = [bb[0] + bb[2] * insetX, bb[1] + bb[3] * insetY, bb[2] * (1 - 2 * insetX), bb[3] * (1 - 2 * insetY)];
+      // A bubble cut by the picture edge: keep the text inside the visible part.
+      bubble = { box: bb, fill: toHex(bg), safeArea: clampBox(safe.map(Math.round) as Box, image.width, image.height), shape };
+    } else {
+      const base = textBox ? unionBox(textBox, bbox) : bbox;
+      bubble = { box: base, fill: toHex(bg), safeArea: clampBox(expandBox(base, Math.round(base[2] * 0.08), Math.round(base[3] * 0.08)).map(Math.round) as Box, image.width, image.height), shape: 'rect' };
+    }
+    result = { bubble, textBox, method };
   } else {
-    // Textured background: erase text strokes (dark or light) and diffuse surrounding colour in.
-    const inner = clampBox(expandBox(local, 2), img.width, img.height);
-    let mask = textMask(img, inner, bg, 70);
-    // Light outlines around dark SFX letters are common; include very bright/dark extremes too.
-    for (let y = inner[1]; y < inner[1] + inner[3]; y++) {
-      for (let x = inner[0]; x < inner[0] + inner[2]; x++) {
+    // Text over artwork: letters are the extreme pixels (white/black fill and outline).
+    const bgLum = luminance(...bg);
+    const cand = new Uint8Array(img.width * img.height);
+    for (let y = search[1]; y < search[1] + search[3]; y++) {
+      for (let x = search[0]; x < search[0] + search[2]; x++) {
         const p = y * img.width + x;
         const l = luminance(img.data[p * 4], img.data[p * 4 + 1], img.data[p * 4 + 2]);
-        if ((bgLum > 60 && l < 50) || (bgLum < 200 && l > 235)) mask[p] = 1;
+        if (l > 232 || l < 28 || colorDist(img.data, p * 4, bg) > 120) cand[p] = 1;
       }
     }
-    const tb = maskBounds(mask, img.width, img.height);
+    const snap = snapToLettering(cand, img.width, search, local);
+    let mask = snap.mask;
+    const tb = snap.box;
+    const inner = clampBox(expandBox(local, 2), img.width, img.height);
     if (countMask(mask) < inner[2] * inner[3] * 0.03) {
       mask = new Uint8Array(img.width * img.height);
       for (let y = inner[1]; y < inner[1] + inner[3]; y++) for (let x = inner[0]; x < inner[0] + inner[2]; x++) mask[y * img.width + x] = 1;
     }
+    // Outlined lettering has a halo: take a little more around the strokes.
     mask = dilate(mask, img.width, img.height, 3);
-    if (!opts.analyzeOnly) diffuseInpaint(img, mask, 80);
+    let method: CleanResult['method'] = opts.analyzeOnly ? 'none' : 'diffuse';
+    const textArea = clampBox(expandBox(tb ? unionBox(tb, local) : local, 2), img.width, img.height);
+    if (!opts.analyzeOnly) {
+      diffuseInpaint(img, mask, 80);
+      // Still readable (thick letters, busy art)? Cover the lettering with a plate.
+      let left = 0;
+      for (let y = textArea[1]; y < textArea[1] + textArea[3]; y++) {
+        for (let x = textArea[0]; x < textArea[0] + textArea[2]; x++) {
+          const p = y * img.width + x;
+          const l = luminance(img.data[p * 4], img.data[p * 4 + 1], img.data[p * 4 + 2]);
+          if ((l > 232 && bgLum < 200) || (l < 28 && bgLum > 60)) left++;
+        }
+      }
+      if (left / Math.max(1, textArea[2] * textArea[3]) > 0.01) {
+        paintPlate(img, clampBox(expandBox(textArea, 4), img.width, img.height), bg);
+        method = 'plate';
+      }
+    }
     const textBox: Box | null = tb ? [tb[0] + region[0], tb[1] + region[1], tb[2], tb[3]] : null;
-    result = { bubble: null, textBox, method: opts.analyzeOnly ? 'none' : 'diffuse' };
+    result = {
+      bubble: method === 'plate' ? { box: unionBox(textBox, bbox), fill: toHex(bg), safeArea: unionBox(textBox, bbox), shape: 'rect' } : null,
+      textBox,
+      method,
+    };
   }
 
   if (!opts.analyzeOnly) image.putRegion(img, region[0], region[1]);
   return result;
+}
+
+function floodLeaks(f: FloodResult, region: Box, imageW: number, imageH: number): boolean {
+  const [bx, by, bw, bh] = f.box;
+  const [rx, ry, rw, rh] = region;
+  const atLeft = bx === 0 && rx > 0;
+  const atTop = by === 0 && ry > 0;
+  const atRight = bx + bw >= rw && rx + rw < imageW;
+  const atBottom = by + bh >= rh && ry + rh < imageH;
+  return atLeft || atTop || atRight || atBottom;
 }
 
 /** Paint a user-drawn mask with a colour (editor brush) or diffuse it (editor inpaint). */

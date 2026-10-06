@@ -13,7 +13,7 @@ import {
   type PromptProfile,
   type ProviderConfig,
 } from '@ait/core';
-import { LocalModels, ModelCheckCard, ModelPicker, UpdateCheck } from '../ModelPicker';
+import { LocalModels, LocalSetup, ModelCheckCard, ModelPicker, UpdateCheck } from '../ModelPicker';
 import { usePlatform } from '../platform';
 import { ErrorBox, Field, FoldPanel, Segmented, Switch, toast, useAction } from '../ui';
 
@@ -196,6 +196,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
 
   return (
     <div>
+      {params.get('setup') === '1' ? <LocalSetup settings={s} update={update} getKey={getKey} onReady={platform.setupReady ? () => platform.setupReady!(params) : undefined} /> : null}
       {s.pipeline === 'standalone' ? <ModelCheckCard settings={s} update={update} getKey={getKey} /> : null}
       {s.pipeline === 'standalone' && platform.kind === 'extension' ? <LocalModels settings={s} update={update} getKey={getKey} autoStart={params.get('pull') === '1'} /> : null}
       <div className="ait-panel">

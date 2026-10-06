@@ -16,5 +16,16 @@ export function extensionPlatform(): StudioPlatform {
     notifyResultChanged: (key) => void chrome.runtime.sendMessage({ type: 'result-changed', key }).catch(() => undefined),
     version: chrome.runtime.getManifest().version,
     installUpdate: installExtensionUpdate,
+    setupReady: (params) => {
+      // Continue the translation the user started before the helper opened.
+      const tabId = Number(params.get('resume'));
+      const command = params.get('cmd');
+      if (!tabId || (command !== 'translate-page' && command !== 'select-area')) return;
+      void chrome.runtime.sendMessage({ type: 'popup-command', command, tabId });
+      setTimeout(() => {
+        void chrome.tabs.update(tabId, { active: true }).catch(() => undefined);
+        window.close();
+      }, 2500);
+    },
   };
 }
