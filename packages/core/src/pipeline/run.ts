@@ -6,9 +6,21 @@ import type { PageResult } from '../types';
 import type { PipelineConfig } from './config';
 import { runEnginePipeline } from './engine';
 import { runStandalonePipeline, type PipelineOutput, type PipelineRequest } from './standalone';
+import { createProvider } from '../llm/presets';
+import { qaPage } from '../translate/qa';
 
 export async function runPipeline(req: PipelineRequest, deps: { backend: ImageBackend; fetchImpl?: FetchLike }): Promise<PipelineOutput> {
-  return req.config.mode === 'engine' ? runEnginePipeline(req, deps) : runStandalonePipeline(req, deps);
+  const out = req.config.mode === 'engine' ? await runEnginePipeline(req, deps) : await runStandalonePipeline(req, deps);
+  const mode = req.config.qa ?? 'off';
+  if (mode !== 'off' && !req.generic && out.page.blocks.length) {
+    // Check the translation (linguistic + semantic) with the model that translated the text.
+    req.onStage?.({ stage: 'checking' });
+    const cfg = req.config.translator ?? req.config.vision;
+    const provider = cfg ? createProvider(cfg, deps.fetchImpl) : null;
+    const usage = await qaPage(out.page.blocks, { provider, mode, targetLang: req.config.targetLang, glossary: req.config.glossary, context: out.context ?? req.context, signal: req.signal });
+    out.page.usage = [...out.page.usage, ...usage];
+  }
+  return out;
 }
 
 export function styleDefaultsFor(config: Pick<PipelineConfig, 'targetLang' | 'sfxStyle'>, fonts?: { dialogue?: string; narration?: string; sfx?: string }): StyleDefaults {

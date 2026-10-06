@@ -161,8 +161,11 @@ try {
     await new Promise((r) => setTimeout(r, 500));
   }
   check('page translated (history entry)', entry?.status === 'done', entry ? `${entry.status} ${entry.error ?? ''} in ${Date.now() - t0} ms` : 'timeout');
-  if (MODE === 'engine') check('engine path: OCR on crops + text translation', calls.length === 2 && calls[0].messages.at(-1).content.some((p) => p.type === 'text' && p.text.includes('cropped')), `calls=${calls.length}`);
-  else check('vision model called once with the image', calls.length === 1 && Array.isArray(calls[0].messages.at(-1).content), `calls=${calls.length}`);
+  const work = calls.filter((c) => !String(c.messages?.[0]?.content ?? '').includes('editor-in-chief'));
+  const reviews = calls.length - work.length;
+  if (MODE === 'engine') check('engine path: OCR on crops + text translation', work.length === 2 && work[0].messages.at(-1).content.some((p) => p.type === 'text' && p.text.includes('cropped')), `calls=${work.length}`);
+  else check('vision model called once with the image', work.length === 1 && Array.isArray(work[0].messages.at(-1).content), `calls=${work.length}`);
+  check('the translation was checked (one review request)', reviews === 1, `reviews=${reviews}`);
   await new Promise((r) => setTimeout(r, 1500));
   await page.screenshot({ path: join(OUT, `e2e-${MODE}-after.png`) });
 

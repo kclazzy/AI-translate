@@ -60,6 +60,8 @@ export interface AppSettings {
   gpuKeepAliveMin?: number;
   /** Days to keep the translation history (the list in «История»); default 30. */
   historyDays?: number;
+  /** Translation check: off, report problems, or fix real errors automatically (default). */
+  qaMode?: import('./translate/qa').QaMode;
 }
 
 export function defaultSettings(): AppSettings {

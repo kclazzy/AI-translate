@@ -5,6 +5,7 @@ import { activeProfile, providerById } from '../settings';
 import type { GlossaryEntry } from '../translate/glossary';
 import type { PromptProfile, SfxStyle } from '../translate/profiles';
 import { sha256Hex } from '../util/bytes';
+import type { QaMode } from '../translate/qa';
 
 /** Everything that changes the output of a page; also the cache key ingredient. */
 export interface PipelineConfig {
@@ -20,6 +21,8 @@ export interface PipelineConfig {
   vision: ProviderConfig | null;
   translator: ProviderConfig | null;
   engine?: { url: string; token: string; options: EngineOptions };
+  /** Translation check after translating (see translate/qa.ts). */
+  qa?: QaMode;
 }
 
 function withKeepAlive(p: ProviderConfig | undefined, s: AppSettings): ProviderConfig | null {
@@ -43,6 +46,7 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     vision: withKeepAlive(providerById(s, s.visionProviderId), s),
     translator: withKeepAlive(providerById(s, s.translationProviderId), s),
     engine: s.engine,
+    qa: s.qaMode ?? 'fix',
   };
 }
 
@@ -61,6 +65,7 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     vision: strip(c.vision),
     translator: strip(c.translator),
     engine: c.mode === 'engine' ? c.engine?.options : undefined,
+    qa: c.qa ?? 'off',
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);
 }

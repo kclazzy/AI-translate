@@ -2,7 +2,7 @@ import { errorMessage } from '@ait/core/errors';
 import { dominantLanguage, nativeName } from '@ait/core/languages';
 import type { BackgroundToContent, ContentToBackground, ImageRef, JobStatus, PageLangs, RenderedTiles } from '../shared/messages';
 import { Overlay } from './overlay';
-import { asCandidate, candidateAt, imgSrc, inlineData, markUi, scanPage, viewportRect, type Candidate } from './scanner';
+import { asCandidate, candidateAt, imgSrc, inlineData, lazySrc, markUi, scanPage, viewportRect, type Candidate } from './scanner';
 
 /**
  * Content script: finds images, shows the hover button, runs auto-translate on
@@ -184,6 +184,10 @@ function main() {
         it.result = msg.result;
         it.overlay.setTiles(msg.result.tiles, langsOf(msg.result));
         it.overlay.setOriginal(originalsShown);
+        {
+          const qa = msg.result.page.blocks.flatMap((b) => (b.qa?.issues ?? []).map((q) => `• ${q.note}${b.qa?.before !== undefined ? ' (исправлено)' : ''}`));
+          it.overlay.setQa(qa.length, qa.slice(0, 8).join('\n'));
+        }
         it.overlay.position();
         break;
       }
@@ -245,9 +249,14 @@ function main() {
     return false;
   });
 
+  /** «Перевести страницу» also covers pictures that load later while scrolling (until reload). */
+  let pageMode = false;
+
   function translatePage() {
+    pageMode = true;
     const cands = scanPage(minSize);
     if (!cands.length) toastOnce('На странице не найдено подходящих изображений');
+    // Pictures on screen first, then the rest of the chapter in reading order.
     for (const c of cands) void translate(c);
   }
 
@@ -278,15 +287,23 @@ function main() {
           continue;
         }
         if (it.cand.kind === 'img') {
-          const now = imgSrc(it.cand.el as HTMLImageElement);
-          if (it.src && now && now !== it.src) {
+          const el = it.cand.el as HTMLImageElement;
+          const now = imgSrc(el);
+          // A lazy picture still showing its placeholder is the same picture.
+          if (it.src && now && now !== it.src && !lazySrc(el)) {
             it.overlay.destroy();
             items.delete(id);
           }
         }
       }
-      if (!autoTranslate) return;
+      if (!autoTranslate && !pageMode) return;
+      if (!enabled) return;
       for (const c of scanPage(minSize)) {
+        if (pageMode) {
+          const known = byElement.get(c.el);
+          if (!known || !items.has(known)) void translate(c);
+          continue;
+        }
         if (!observed.has(c.el)) {
           observed.add(c.el);
           io.observe(c.el);

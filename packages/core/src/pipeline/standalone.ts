@@ -1,6 +1,6 @@
 import { AppError } from '../errors';
 import type { ImageBackend } from '../image/backend';
-import { cleanBlock } from '../image/clean';
+import { cleanBlock, luminance, parseHex, type Lettering } from '../image/clean';
 import { boxToPolygon, clampBox, overlapRatio, TiledImage } from '../image/tiled';
 import { detectScript } from '../languages';
 import { assertPrivacy, isLocalProvider } from '../llm/privacy';
@@ -11,7 +11,7 @@ import { applyForbiddenFixes, findGlossaryHits, findViolations } from '../transl
 import { parseVisionAnswer, type VisionAnswer } from '../translate/parse';
 import { buildSystemPrompt, visionFullInstruction, visionOcrInstruction, type PromptInput } from '../translate/prompt';
 import { translateBlocks, usageFrom } from '../translate/translator';
-import type { Box, PageResult, StageEvent, TextBlock, Usage } from '../types';
+import type { Box, PageResult, StageEvent, TextBlock, TextStyle, Usage } from '../types';
 import { bytesToBase64, sha256Hex } from '../util/bytes';
 import { mapLimit } from '../util/queue';
 import { withRetry } from '../util/retry';
@@ -100,6 +100,106 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
     // A local model that timed out will time out again: report it instead of waiting 3× longer.
     { retries: 2, signal, shouldRetry: (e) => e.retryable && !(e.code === 'TIMEOUT' && isLocalProvider(config.vision!)) },
   );
+}
+
+/** Letters with case (Latin, Cyrillic, Greek) and all of them capitals: comic lettering. */
+export function isAllCaps(text: string): boolean {
+  const letters = [...text].filter((c) => c.toLowerCase() !== c.toUpperCase());
+  return letters.length >= 3 && letters.every((c) => c === c.toUpperCase());
+}
+
+/** Make the translation look like the original: capitals, weight and colour of the letters. */
+export function matchLettering(b: TextBlock, l: Lettering | undefined): Partial<TextStyle> {
+  const style: Partial<TextStyle> = {};
+  if (isAllCaps(b.originalText)) style.uppercase = true;
+  if (l && l.letterHeight > 0) {
+    // Bold comic lettering has strokes around a sixth of the letter height or more.
+    if (l.stroke / l.letterHeight >= 0.15) style.bold = true;
+    if (b.textType !== 'SFX' && b.bubble) {
+      const fill = parseHex(b.bubble.fill);
+      const text = parseHex(l.color);
+      const contrast = Math.abs(luminance(...fill) - luminance(...text));
+      // Keep coloured or white lettering (narration boxes, shouting) when it stands out.
+      if (contrast > 90) {
+        style.color = l.color;
+        style.strokeColor = null;
+        style.strokeWidth = 0;
+      }
+    }
+  }
+  return style;
+}
+
+/**
+ * A model often splits one bubble into several blocks. Each would get the whole bubble and the
+ * translations would be drawn on top of each other: join them into one block in reading order.
+ */
+export function mergeSharedBubbles(blocks: TextBlock[], closed: Map<string, boolean>): TextBlock[] {
+  const out: TextBlock[] = [];
+  const groups: TextBlock[][] = [];
+  for (const b of blocks) {
+    const g = b.bubble && closed.get(b.id) ? groups.find((gr) => gr[0].bubble && overlapRatio(gr[0].bubble.box, b.bubble!.box) > 0.6) : undefined;
+    if (g) g.push(b);
+    else groups.push([b]);
+  }
+  for (const g of groups) {
+    if (g.length === 1) {
+      out.push(g[0]);
+      continue;
+    }
+    g.sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0]);
+    const first = g[0];
+    let bbox = first.bbox;
+    for (const o of g.slice(1)) {
+      const x = Math.min(bbox[0], o.bbox[0]);
+      const y = Math.min(bbox[1], o.bbox[1]);
+      bbox = [x, y, Math.max(bbox[0] + bbox[2], o.bbox[0] + o.bbox[2]) - x, Math.max(bbox[1] + bbox[3], o.bbox[1] + o.bbox[3]) - y];
+    }
+    out.push({
+      ...first,
+      bbox,
+      polygon: boxToPolygon(bbox),
+      originalText: g.map((x) => x.originalText).join('\n'),
+      translatedText: g.map((x) => x.translatedText.trim()).filter(Boolean).join(' '),
+      fontSizeEstimate: Math.min(...g.map((x) => x.fontSizeEstimate || Infinity)) || first.fontSizeEstimate,
+    });
+  }
+  return out;
+}
+
+function intersects(a: Box, b: Box): boolean {
+  return a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+}
+
+/** Text areas of different blocks must not overlap: split the overlap between them. */
+export function separateAreas(blocks: TextBlock[]): void {
+  const areas = blocks.map((b) => b.bubble?.safeArea);
+  for (let i = 0; i < blocks.length; i++) {
+    for (let j = i + 1; j < blocks.length; j++) {
+      const a = areas[i];
+      const c = areas[j];
+      if (!a || !c || !intersects(a, c)) continue;
+      // Cut along the axis where the blocks are further apart (one above the other → horizontal cut).
+      const dy = c[1] + c[3] / 2 - (a[1] + a[3] / 2);
+      const dx = c[0] + c[2] / 2 - (a[0] + a[2] / 2);
+      const [first, second] = (Math.abs(dy) >= Math.abs(dx) ? dy : dx) >= 0 ? [a, c] : [c, a];
+      if (Math.abs(dy) >= Math.abs(dx)) {
+        const cut = Math.round((Math.max(first[1], second[1]) + Math.min(first[1] + first[3], second[1] + second[3])) / 2);
+        const fBottom = first[1] + first[3];
+        first[3] = Math.max(8, cut - first[1] - 1);
+        const sBottom = second[1] + second[3];
+        second[1] = Math.min(cut + 1, sBottom - 8);
+        second[3] = sBottom - second[1];
+        void fBottom;
+      } else {
+        const cut = Math.round((Math.max(first[0], second[0]) + Math.min(first[0] + first[2], second[0] + second[2])) / 2);
+        first[2] = Math.max(8, cut - first[0] - 1);
+        const sRight = second[0] + second[2];
+        second[0] = Math.min(cut + 1, sRight - 8);
+        second[2] = sRight - second[0];
+      }
+    }
+  }
 }
 
 /** Rough font size from box area and character count. */
@@ -208,6 +308,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
 
   stage('cleaning');
   cleaned = original.clone();
+  const closedBubble = new Map<string, boolean>();
   for (const b of blocks) {
     const erase = b.translate && !(b.textType === 'SFX' && config.sfxStyle === 'original');
     if (req.generic) {
@@ -216,13 +317,17 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       b.bubble = r.bubble ? { ...r.bubble, shape: 'rect', safeArea: b.bbox } : null;
       continue;
     }
-    const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase });
+    const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, sfx: b.textType === 'SFX' });
     b.bubble = r.bubble;
+    closedBubble.set(b.id, r.closed);
     if (r.textBox && b.textType !== 'SFX') {
       // Use the measured text pixels to correct an imprecise model box (keep the larger safe area).
       b.fontSizeEstimate = estimateFontSize(r.textBox, b.originalText);
     }
+    b.style = { ...matchLettering(b, r.lettering), ...(b.style ?? {}) };
   }
+  blocks = mergeSharedBubbles(blocks, closedBubble);
+  separateAreas(blocks);
   tCleaned = performance.now();
   return finish();
 

@@ -27,6 +27,13 @@ export function startMockLlm(port = 18080) {
       const json = JSON.parse(body || '{}');
       calls.push(json);
       const last = json.messages?.at(-1);
+      const system = json.messages?.[0]?.content ?? '';
+      if (typeof system === 'string' && system.includes('editor-in-chief')) {
+        // Translation check: everything is fine except nothing; answer per block.
+        const blocks = JSON.parse(/<blocks>\n(.*)\n<\/blocks>/s.exec(last.content)?.[1] ?? '[]');
+        const content = JSON.stringify({ reviews: blocks.map((b) => ({ id: b.id, ok: true })) });
+        return res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(native ? { model: json.model, message: { role: 'assistant', content } } : { choices: [{ message: { content } }], usage: { prompt_tokens: 200, completion_tokens: 20 }, model: json.model }));
+      }
       const user = native && last?.images?.length ? [{ type: 'text', text: last.content }, ...last.images.map(() => ({ type: 'image_url' }))] : last?.content;
       const reply = (content, usage) => res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(native ? { model: json.model, message: { role: 'assistant', content }, prompt_eval_count: usage[0], eval_count: usage[1] } : { choices: [{ message: { content } }], usage: { prompt_tokens: usage[0], completion_tokens: usage[1] }, model: json.model }));
       let answer;

@@ -48,6 +48,8 @@ export interface LayoutResult {
   vertical: boolean;
   alignment: Alignment;
   overflow: boolean;
+  /** Set when the text was laid out in a different box than the block's target box. */
+  box?: Box;
 }
 
 export function cssFont(size: number, family: string, bold = false, italic = false): string {

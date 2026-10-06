@@ -136,6 +136,9 @@ importers:
       '@ait/core':
         specifier: workspace:*
         version: link:../core
+      '@fontsource/balsamiq-sans':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@fontsource/pangolin':
         specifier: ^5.2.0
         version: 5.3.0
@@ -483,6 +486,9 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@fontsource/balsamiq-sans@5.3.0':
+    resolution: {integrity: sha512-ofkLqr8IH+TVP3q385lkonHo5yrbn59jbax9sEknRcwpxP/yX+gDd+hufeGw3fcIaRVWDN2TdhTMFCjdvw8utA==}
 
   '@fontsource/pangolin@5.3.0':
     resolution: {integrity: sha512-3avtyqWX2QiQXKxVChWeVtF3FpB/wcojYXP13oO30WG44Ox9bCUHuHEtMd6NVgqpXSUqNLFaLm8K+29xVzkDZQ==}
@@ -2438,6 +2444,8 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.2':
     optional: true
+
+  '@fontsource/balsamiq-sans@5.3.0': {}
 
   '@fontsource/pangolin@5.3.0': {}
 

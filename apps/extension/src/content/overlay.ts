@@ -8,6 +8,7 @@ const STAGE: Partial<Record<StageEvent['stage'], string>> = {
   detecting: 'Ищу текст',
   ocr: 'Распознаю',
   translating: 'Перевожу',
+  checking: 'Проверяю перевод',
   cleaning: 'Очищаю',
   rendering: 'Вписываю',
 };
@@ -158,6 +159,20 @@ export class Overlay {
     this.buttons(defs);
     this.toggleBtn = this.bar.querySelector('button');
     this.setOriginal(false);
+  }
+
+  /** Translation check result: a small button that opens the editor with the report. */
+  setQa(count: number, details: string): void {
+    if (!count) return;
+    const b = document.createElement('button');
+    b.textContent = `🔍 ${count}`;
+    b.title = `Проверка перевода — замечаний: ${count}\n${details}\nНажмите, чтобы открыть в редакторе.`;
+    b.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.actions.onEdit();
+    });
+    this.bar.append(b);
   }
 
   setOriginal(show: boolean): void {

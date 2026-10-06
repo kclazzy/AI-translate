@@ -30,6 +30,8 @@ export interface TextStyle {
   italic: boolean;
   shadow: boolean;
   lineHeight: number;
+  /** Write the translation in capitals (the original lettering is all caps). */
+  uppercase?: boolean;
 }
 
 export interface BubbleInfo {
@@ -62,6 +64,8 @@ export interface TextBlock {
   textBox?: Box;
   style?: Partial<TextStyle>;
   lowConfidence?: boolean;
+  /** Result of the translation check (linguistic + semantic QA). */
+  qa?: import('./translate/qa').BlockQa;
   overflow?: boolean;
   /** Set when the user edited this block by hand. */
   edited?: boolean;
@@ -100,7 +104,7 @@ export interface PageResult {
   createdAt: string;
 }
 
-export type JobStage = 'queued' | 'fetching' | 'decoding' | 'detecting' | 'ocr' | 'translating' | 'cleaning' | 'rendering' | 'done' | 'error';
+export type JobStage = 'queued' | 'fetching' | 'decoding' | 'detecting' | 'ocr' | 'translating' | 'checking' | 'cleaning' | 'rendering' | 'done' | 'error';
 
 export interface StageEvent {
   stage: JobStage;

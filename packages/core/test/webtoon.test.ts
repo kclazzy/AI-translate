@@ -28,7 +28,7 @@ interface Case {
 }
 
 const W = 800;
-const H = 1700;
+const H = 2300;
 
 function background(ctx: any) {
   const g = ctx.createLinearGradient(0, 0, 0, H);
@@ -103,7 +103,27 @@ const CASES: Case[] = [
     text: { lines: ['I WON’T', 'LET YOU', 'TOUCH HER.', 'NOT AGAIN.'], x: 585, y: 1375, size: 32, color: '#111111' },
     modelBox: [480, 1375, 210, 110],
   },
+  {
+    name: 'one bubble, the model split it into two blocks',
+    draw: (ctx) => {
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(250, 1780, 220, 140, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    },
+    text: { lines: ['I DIDN\u2019T EXPECT', 'HIM TO ADD A NEW', 'CREST BEFORE ME.'], x: 250, y: 1720, size: 28, color: '#111111' },
+    modelBox: [130, 1718, 240, 34],
+  },
 ];
+
+/** Extra model blocks in the same pictures (the split bubble's second half). */
+const EXTRA_BOXES: Box[] = [[130, 1752, 240, 70]];
+
+/** A sound effect drawn into the art with a big, loose model box. */
+const SFX = { x: 560, y: 2080, text: 'FLAP!', box: [420, 1980, 360, 260] as Box };
 
 function drawText(ctx: any, t: Case['text']) {
   ctx.font = `bold ${t.size}px TestSans`;
@@ -128,6 +148,15 @@ async function render(withText: boolean): Promise<{ bytes: Uint8Array; canvas: a
   for (const k of CASES) {
     k.draw(ctx);
     if (withText) drawText(ctx, k.text);
+  }
+  if (withText) {
+    ctx.font = 'bold 64px TestSans';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = '#ffffff';
+    ctx.strokeText(SFX.text, SFX.x, SFX.y);
+    ctx.fillStyle = '#111111';
+    ctx.fillText(SFX.text, SFX.x, SFX.y);
   }
   return { bytes: new Uint8Array(await c.encode('png')), canvas: c };
 }
@@ -154,7 +183,10 @@ describe('webtoon pages: the original lettering is fully removed', () => {
     const mask = textPixels(a, b);
 
     const image = await TiledImage.fromBytes(napiBackend, withText.bytes, 'image/png');
-    for (const k of CASES) cleanBlock(image, k.modelBox);
+    const letterings = CASES.map((k) => cleanBlock(image, k.modelBox).lettering);
+    for (const b of EXTRA_BOXES) cleanBlock(image, b);
+    cleanBlock(image, SFX.box, { sfx: true });
+    console.log(letterings.map((l, i) => `${CASES[i].name}: stroke ${l?.stroke.toFixed(1)} / height ${l?.letterHeight} = ${l ? (l.stroke / l.letterHeight).toFixed(3) : '-'} ${l?.color}`).join('\n'));
     const out = image.getRegion(0, 0, W, H).data;
     const shot = createCanvas(W, H);
     const sctx = shot.getContext('2d') as any;
@@ -184,15 +216,43 @@ describe('webtoon pages: the original lettering is fully removed', () => {
       }
       report.push(`${k.name}: ${left}/${total} (${((100 * left) / Math.max(1, total)).toFixed(1)}%)`);
     }
+    // The SFX box must not turn into a blurred rectangle: art away from the letters stays as it was.
+    {
+      let changed = 0, total = 0;
+      const [bx, by, bw, bh] = SFX.box;
+      for (let y = by; y < by + bh; y++) {
+        for (let x = bx; x < bx + bw; x++) {
+          const p = y * W + x;
+          if (mask[p]) continue;
+          // only pixels well away from the lettering
+          let near = false;
+          for (let d = -12; d <= 12 && !near; d += 4) for (let e = -12; e <= 12 && !near; e += 4) if (mask[(y + d) * W + x + e]) near = true;
+          if (near) continue;
+          total++;
+          const i = p * 4;
+          if (Math.abs(out[i] - b[i]) + Math.abs(out[i + 1] - b[i + 1]) + Math.abs(out[i + 2] - b[i + 2]) > 30) changed++;
+        }
+      }
+      report.push(`sfx box: art changed away from the letters ${changed}/${total}`);
+      expect(changed / total, 'sfx box smeared').toBeLessThan(0.02);
+    }
     console.log(report.join('\n'));
     for (const line of report) expect(Number(/\(([\d.]+)%\)/.exec(line)![1]), line).toBeLessThan(1);
   }, 60_000);
 
   it('typesets the translation over the place of the original, end to end', async () => {
     const { bytes } = await render(true);
-    const ru = ['Думаешь, такой меч меня остановит?!', 'Звёздное искусство меча...', 'Тем временем в северной крепости', 'Ха... ха...', 'Я не дам тебе её тронуть. Больше никогда.'];
+    const ru = ['Думаешь, такой меч меня остановит?!', 'Звёздное искусство меча...', 'Тем временем в северной крепости', 'Ха... ха...', 'Я не дам тебе её тронуть. Больше никогда.', 'Я не ожидал,'];
     const mock = mockOpenAi(() =>
-      JSON.stringify({ blocks: CASES.map((k, i) => ({ box: toNorm(k.modelBox, W, H), text: k.text.lines.join(' '), translation: ru[i], type: i === 2 ? 'NARRATION' : 'DIALOGUE', vertical: false })), entities: [], summary: '' }),
+      JSON.stringify({
+        blocks: [
+          ...CASES.map((k, i) => ({ box: toNorm(k.modelBox, W, H), text: i === 5 ? 'I DIDN\u2019T EXPECT' : k.text.lines.join(' '), translation: ru[i], type: i === 2 ? 'NARRATION' : 'DIALOGUE', vertical: false })),
+          { box: toNorm(EXTRA_BOXES[0], W, H), text: 'HIM TO ADD A NEW CREST BEFORE ME.', translation: 'что он раньше меня добавит новый герб.', type: 'DIALOGUE', vertical: false },
+          { box: toNorm(SFX.box, W, H), text: SFX.text, translation: 'ФЛАП!', type: 'SFX', vertical: false },
+        ],
+        entities: [],
+        summary: '',
+      }),
     );
     const out = await runStandalonePipeline(
       {
@@ -206,9 +266,13 @@ describe('webtoon pages: the original lettering is fully removed', () => {
     );
     const rendered = await renderOutput(napiBackend, out, { ...DEFAULT_STYLE_DEFAULTS, dialogueFont: 'TestSans', narrationFont: 'TestSans', sfxFont: 'TestSans' });
     writeFileSync(`${OUT}webtoon-rendered.png`, rendered.tiles[0].bytes);
-    expect(rendered.page.blocks).toHaveLength(5);
+    // The split bubble became one block (7 model blocks → 7 - 1).
+    expect(rendered.page.blocks).toHaveLength(7);
+    const merged = rendered.page.blocks.find((b) => b.translatedText.startsWith('Я не ожидал'))!;
+    expect(merged.translatedText).toBe('Я не ожидал, что он раньше меня добавит новый герб.');
+    expect(rendered.page.blocks.every((b) => b.style?.uppercase || b.textType === 'SFX')).toBe(true);
     // Every translation fits its place (no overflow) and sits where the original lettering was.
-    for (const [i, b] of rendered.page.blocks.entries()) {
+    for (const [i, b] of rendered.page.blocks.slice(0, CASES.length).entries()) {
       expect(b.overflow, `${CASES[i].name}: overflow`).toBeFalsy();
       const t = CASES[i].text;
       const cy = t.y + (t.lines.length * t.size * 1.15) / 2;

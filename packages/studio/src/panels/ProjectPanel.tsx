@@ -330,6 +330,7 @@ function ReplaceAndStyle({ store, project, settings, selection, onChange }: { st
           <Field label="Шрифт">
             <select className="ait-select" value={style.fontFamily ?? ''} onChange={(e) => setStyle({ ...style, fontFamily: e.target.value || undefined })}>
               <option value="">Не менять</option>
+              <option value='"AIT Lettering", sans-serif'>AIT Lettering</option>
               <option value='"AIT Comic", sans-serif'>AIT Comic</option>
               <option value='"AIT Narration", sans-serif'>AIT Narration</option>
               <option value='"AIT SFX", sans-serif'>AIT SFX</option>

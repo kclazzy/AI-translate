@@ -18,6 +18,7 @@ import {
   type TextBlock,
   type TextStyle,
   type TiledImage,
+  QA_LABELS,
 } from '@ait/core';
 import { registerUserFont } from '../fonts';
 import { usePlatform } from '../platform';
@@ -39,7 +40,7 @@ export interface EditorProps {
   title?: string;
 }
 
-const BASE_FONTS = ['"AIT Comic"', '"AIT Narration"', '"AIT SFX"', 'Arial', '"Comic Sans MS"', '"Times New Roman"', 'Georgia', 'Impact'];
+const BASE_FONTS = ['"AIT Lettering"', '"AIT Comic"', '"AIT Narration"', '"AIT SFX"', 'Arial', '"Comic Sans MS"', '"Times New Roman"', 'Georgia', 'Impact'];
 const MAX_HISTORY = 60;
 
 function clonePixels(p: PixelData): PixelData {
@@ -486,6 +487,24 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
         <div className="ait-props">
           {sel && st ? (
             <div className="ait-panel">
+              {sel.qa && (sel.qa.issues.length || sel.qa.before !== undefined) ? (
+                <div className="ait-notice" data-testid="qa-report" style={{ display: 'grid', gap: 4, marginBottom: 8 }}>
+                  <b>Проверка перевода</b>
+                  {sel.qa.issues.map((q, i) => (
+                    <small key={i}>
+                      {q.severity === 'major' ? '⚠' : '•'} {QA_LABELS[q.kind]}: {q.note}
+                    </small>
+                  ))}
+                  {sel.qa.before !== undefined ? (
+                    <small>
+                      Исправлено автоматически. Было: «{sel.qa.before}»{' '}
+                      <button className="pp-link" onClick={() => setBlocks(blocks.map((b) => (b.id === sel.id ? { ...b, translatedText: sel.qa!.before!, qa: { ...sel.qa!, before: undefined }, edited: true } : b)))}>
+                        Вернуть
+                      </button>
+                    </small>
+                  ) : null}
+                </div>
+              ) : null}
               <Field label="Перевод">
                 <textarea className="ait-textarea" value={sel.translatedText} onFocus={() => (editStart.current = blocks)} onChange={(e) => setBlocks(blocks.map((b) => (b.id === sel.id ? { ...b, translatedText: e.target.value, edited: true } : b)))} onBlur={endTextEdit} />
               </Field>
@@ -565,6 +584,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
               {blocks.map((b, i) => (
                 <button key={b.id} aria-pressed={b.id === selected} onClick={() => { setSelected(b.id); setTool('select'); }}>
                   {i + 1}. {b.translatedText.slice(0, 40) || <em className="ait-muted">пусто</em>} {overflow.has(b.id) ? '⚠' : ''}
+                  {b.qa?.issues.length ? <span title={b.qa.issues.map((q) => `${QA_LABELS[q.kind]}: ${q.note}`).join('\n')}> 🔍{b.qa.issues.length}</span> : null}
                 </button>
               ))}
             </div>

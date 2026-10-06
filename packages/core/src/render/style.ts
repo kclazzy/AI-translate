@@ -2,7 +2,7 @@ import type { SfxStyle } from '../translate/profiles';
 import type { Box, TextBlock, TextStyle } from '../types';
 
 export const FONT_STACKS = {
-  dialogue: '"AIT Comic", "Comic Neue", "Comic Sans MS", "Segoe Print", sans-serif',
+  dialogue: '"AIT Lettering", "AIT Comic", "Comic Neue", "Comic Sans MS", sans-serif',
   narration: '"AIT Narration", "PT Sans Narrow", "Arial Narrow", sans-serif',
   sfx: '"AIT SFX", "Impact", "Arial Black", sans-serif',
   cjk: '"Noto Sans CJK JP", "Noto Sans JP", "Hiragino Sans", "Yu Gothic", "Microsoft YaHei", sans-serif',

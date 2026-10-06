@@ -36,9 +36,41 @@ export function backgroundUrl(el: Element): string | null {
   return m ? m[1] : null;
 }
 
+const LAZY_ATTRS = ['data-url', 'data-src', 'data-original', 'data-lazy-src', 'data-lazy', 'data-srcset'];
+
+/**
+ * Readers that load pictures as you scroll (Webtoons: <img src="placeholder" data-url="…">)
+ * keep the real address in a data attribute until then. Returns it while the placeholder shows.
+ */
+export function lazySrc(img: HTMLImageElement): string | null {
+  for (const a of LAZY_ATTRS) {
+    const v = img.getAttribute(a)?.trim().split(/\s+/)[0];
+    if (!v || v.startsWith('data:')) continue;
+    let url: string;
+    try {
+      url = new URL(v, location.href).href;
+    } catch {
+      continue;
+    }
+    const cur = imgSrc(img);
+    const placeholder = !cur || !img.complete || img.naturalWidth < 50 || /transparen|blank|placeholder|spacer|loading/i.test(cur);
+    if (url !== cur && placeholder) return url;
+  }
+  return null;
+}
+
 export function asCandidate(el: Element, min: number): Candidate | null {
   if (isOurUi(el)) return null;
   if (el instanceof HTMLImageElement) {
+    const lazy = lazySrc(el);
+    if (lazy) {
+      // Not loaded yet: judge by the size the page reserves for it (or its width/height attributes).
+      const r = el.getBoundingClientRect();
+      const w = Math.max(r.width, Number(el.getAttribute('width')) || 0);
+      const h = Math.max(r.height, Number(el.getAttribute('height')) || 0);
+      if (w < Math.min(140, min * 0.6) || h < 80) return null;
+      return { el, kind: 'img', src: lazy };
+    }
     const src = imgSrc(el);
     if (!src || !el.complete || src.startsWith('data:image/gif') || src.startsWith('data:image/svg')) return null;
     const r = el.getBoundingClientRect();

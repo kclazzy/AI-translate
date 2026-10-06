@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { AnyCanvas, ImageBackend, ImageMime } from '../image/backend';
 import type { TiledImage } from '../image/tiled';
-import type { TextBlock } from '../types';
+import type { Box, TextBlock } from '../types';
 import { layoutText, type LayoutResult, type Measurer } from '../typeset/layout';
 import { resolveStyle, targetBox, type StyleDefaults, DEFAULT_STYLE_DEFAULTS } from './style';
 
@@ -26,14 +26,31 @@ export function shouldDraw(block: TextBlock, d: StyleDefaults): boolean {
   return true;
 }
 
-export function layoutBlock(measurer: Measurer, block: TextBlock, d: StyleDefaults = DEFAULT_STYLE_DEFAULTS): LayoutResult {
+/** The text as it is drawn (capitals when the original lettering is all caps). */
+export function displayText(block: TextBlock, d: StyleDefaults = DEFAULT_STYLE_DEFAULTS): string {
   const style = resolveStyle(block, d);
-  const box = targetBox(block, d);
+  return style.uppercase ? block.translatedText.toLocaleUpperCase(d.targetLang) : block.translatedText;
+}
+
+export function layoutBlock(measurer: Measurer, block: TextBlock, d: StyleDefaults = DEFAULT_STYLE_DEFAULTS): LayoutResult {
+  const first = layoutBlockIn(measurer, block, d, targetBox(block, d), block.textBox ? 'rect' : block.bubble?.shape ?? 'rect');
+  if (!first.overflow || block.textBox || !block.bubble || block.style?.fontSize) return first;
+  // Does not fit the safe area: use the whole bubble (as a box, a little inside its edge) and
+  // smaller letters, rather than letting the text run out of the bubble.
+  const bb = block.bubble.box;
+  const inner: Box = [bb[0] + bb[2] * 0.12, bb[1] + bb[3] * 0.1, bb[2] * 0.76, bb[3] * 0.8];
+  const second = layoutBlockIn(measurer, block, d, inner, 'rect', 6);
+  return second.overflow ? first : { ...second, box: inner };
+}
+
+function layoutBlockIn(measurer: Measurer, block: TextBlock, d: StyleDefaults, box: Box, shape: 'rect' | 'ellipse', minSize?: number): LayoutResult {
+  const style = resolveStyle(block, d);
   const cap = block.fontSizeEstimate > 0 ? Math.max(14, block.fontSizeEstimate * 1.3) : undefined;
   return layoutText(measurer, {
-    text: block.translatedText,
+    text: displayText(block, d),
+    minSize,
     box,
-    shape: block.textBox ? 'rect' : block.bubble?.shape ?? 'rect',
+    shape,
     fontFamily: style.fontFamily,
     bold: style.bold,
     italic: style.italic,
@@ -49,7 +66,7 @@ export function layoutBlock(measurer: Measurer, block: TextBlock, d: StyleDefaul
 /** Draw the translated text of one block. `offsetY` shifts page coordinates into a tile. */
 export function drawBlock(ctx: any, block: TextBlock, layout: LayoutResult, d: StyleDefaults, offsetY = 0): void {
   const style = resolveStyle(block, d);
-  const box = targetBox(block, d);
+  const box = layout.box ?? targetBox(block, d);
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(1, style.opacity));
   const cx = box[0] + box[2] / 2;

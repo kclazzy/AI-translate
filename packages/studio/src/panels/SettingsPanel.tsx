@@ -237,6 +237,13 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
             </select>
           </Field>
+          <Field label="Проверка перевода" hint="Ещё один короткий запрос на страницу: смысл, контекст, эмоции, персонажи, грамматика, термины">
+            <select className="ait-select" value={s.qaMode ?? 'fix'} onChange={(e) => update({ qaMode: e.target.value as AppSettings['qaMode'] })}>
+              <option value="fix">Исправлять ошибки автоматически</option>
+              <option value="report">Только показывать замечания</option>
+              <option value="off">Выключена (быстрее)</option>
+            </select>
+          </Field>
           <Field label="Качество" hint="Чем выше, тем крупнее картинка уходит модели и дольше ответ">
             <Segmented label="Качество" value={s.quality} onChange={(quality) => update({ quality })} options={[{ value: 'fast', label: 'Быстро' }, { value: 'balanced', label: 'Баланс' }, { value: 'best', label: 'Максимум' }]} />
           </Field>
