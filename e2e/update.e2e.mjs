@@ -51,6 +51,14 @@ try {
   await page.setRequestInterception(true);
   page.on('request', (req) => {
     const u = req.url();
+    // The GitHub API is rate-limited (as behind a VPN): the extension must still find the release.
+    if (u.startsWith('https://api.github.com/') && process.env.API_OK !== '1') {
+      return req.respond({ status: 403, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '{"message":"API rate limit exceeded"}' });
+    }
+    if (u === 'https://github.com/kclazzy/AI-translate/releases/latest') {
+      return req.respond({ status: 302, headers: { location: 'https://github.com/kclazzy/AI-translate/releases/tag/v9.9.9', 'access-control-allow-origin': '*' }, body: '' });
+    }
+    if (u === 'https://github.com/kclazzy/AI-translate/releases/tag/v9.9.9') return req.respond({ status: 200, contentType: 'text/html', headers: { 'access-control-allow-origin': '*' }, body: '<html></html>' });
     if (u.startsWith('https://api.github.com/repos/kclazzy/AI-translate/releases/latest')) {
       return req.respond({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ tag_name: 'v9.9.9', html_url: 'https://github.com/kclazzy/AI-translate/releases/tag/v9.9.9', body: 'notes', assets: [{ name: 'ai-translate-desktop-v9.9.9.zip', browser_download_url: ASSET, size: zipBytes.length }, { name: 'ai-translate-android-v9.9.9.apk', browser_download_url: 'https://x/a.apk' }] }) });
     }

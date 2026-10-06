@@ -188,6 +188,29 @@ export class TranslateService {
     return (await this.db.get<UsageTotals>('usage', 'totals')) ?? { pages: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
   }
 
+  /**
+   * History entries older than `days`, and anything beyond the newest `max`, are removed.
+   * (Entries are small: the pictures themselves live in the cache, pruned by pruneCache.)
+   */
+  async pruneHistory(days: number, max = 1000): Promise<number> {
+    const cutoff = Date.now() - days * 86_400_000;
+    const all = (await this.db.entries<HistoryEntry>('history')).sort((a, b) => b[1].date.localeCompare(a[1].date));
+    let n = 0;
+    for (const [i, [key, v]] of all.entries()) {
+      if (i >= max || Date.parse(v.date) < cutoff) {
+        await this.db.delete('history', key);
+        n++;
+      }
+    }
+    return n;
+  }
+
+  /** Housekeeping: old cache and old history (run on start and every few hours). */
+  async prune(): Promise<{ cache: number; history: number }> {
+    const s = await this.getSettings();
+    return { cache: await this.pruneCache(s.cacheDays), history: await this.pruneHistory(s.historyDays ?? 30) };
+  }
+
   /** Drop cached results not used for `days` days. */
   async pruneCache(days: number): Promise<number> {
     const cutoff = Date.now() - days * 86_400_000;

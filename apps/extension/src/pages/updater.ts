@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { downloadWithProgress, pickAsset, type UpdateInfo } from '@ait/core';
+import { downloadWithProgress, pickAsset, releaseAssets, type UpdateInfo } from '@ait/core';
 import { db } from '../shared/store';
 
 /**
@@ -80,8 +80,8 @@ export async function installExtensionUpdate(info: UpdateInfo, progress: (text: 
   if (typeof (globalThis as { browser?: unknown }).browser !== 'undefined' && !chrome.offscreen) {
     throw new Error('В Firefox временное дополнение обновляется вручную: скачайте новую версию со страницы релизов.');
   }
-  const asset = pickAsset(info, 'desktop');
-  if (!asset) throw new Error('Для этой версии ещё нет готового файла. Попробуйте позже или скачайте со страницы релизов.');
+  const asset = pickAsset(info, 'desktop') ?? pickAsset({ assets: releaseAssets(info.latest) }, 'desktop');
+  if (!asset) throw new Error('Не удалось найти файл новой версии. Скачайте его со страницы релизов.');
 
   // 1. The extension folder (asked once, then remembered).
   let dir = (await db.get<FileSystemDirectoryHandle>('kv', HANDLE_KEY)) ?? null;

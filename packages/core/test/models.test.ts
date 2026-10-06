@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkVisionModel, configFromPreset, defaultSettings, guessVramGb, MODEL_TIERS, ollamaDelete, ollamaLoaded, ollamaUnloadAll, OpenAICompatibleProvider, pickAsset, pipelineConfigFromSettings, tierForVram } from '../src';
+import { checkForUpdate, checkVisionModel, configFromPreset, defaultSettings, TranslateService, guessVramGb, MODEL_TIERS, ollamaDelete, ollamaLoaded, ollamaUnloadAll, OpenAICompatibleProvider, pickAsset, pipelineConfigFromSettings, tierForVram } from '../src';
 import { TaskQueue } from '../src/util/queue';
 import { jsonResponse, napiBackend } from './helpers';
 
@@ -123,5 +123,39 @@ describe('video memory', () => {
     const s = defaultSettings();
     expect(pipelineConfigFromSettings(s).vision?.keepAliveMin).toBe(5);
     expect(pipelineConfigFromSettings({ ...s, gpuKeepAliveMin: 0 }).vision?.keepAliveMin).toBe(0);
+  });
+});
+
+describe('update check without the GitHub API', () => {
+  it('uses the releases/latest redirect when the API is rate-limited and builds the file links', async () => {
+    const f = async (u: string) => {
+      if (u.includes('api.github.com')) return new Response('{"message":"API rate limit exceeded"}', { status: 403 });
+      if (u.endsWith('/releases/latest')) {
+        const r = new Response('', { status: 200 });
+        Object.defineProperty(r, 'url', { value: 'https://github.com/kclazzy/AI-translate/releases/tag/v0.4.0' });
+        return r;
+      }
+      throw new Error(`unexpected ${u}`);
+    };
+    const info = await checkForUpdate('0.3.2', f);
+    expect(info).toMatchObject({ latest: '0.4.0', available: true });
+    expect(pickAsset(info, 'desktop')?.url).toBe('https://github.com/kclazzy/AI-translate/releases/download/v0.4.0/ai-translate-desktop-v0.4.0.zip');
+    expect(pickAsset(info, 'android')?.url).toBe('https://github.com/kclazzy/AI-translate/releases/download/v0.4.0/ai-translate-android-v0.4.0.apk');
+  });
+});
+
+describe('history housekeeping', () => {
+  it('drops entries older than the limit and beyond the maximum', async () => {
+    const store = new Map<string, unknown>();
+    const db = {
+      entries: async () => [...store.entries()],
+      delete: async (_s: string, k: string) => void store.delete(k),
+    } as unknown as ConstructorParameters<typeof TranslateService>[0];
+    const day = 86_400_000;
+    for (let i = 0; i < 5; i++) store.set(`k${i}`, { key: `k${i}`, date: new Date(Date.now() - i * 10 * day).toISOString(), pages: 1, targetLang: 'ru', model: 'm', status: 'done' });
+    const svc = new TranslateService(db, {} as never, napiBackend, async () => defaultSettings());
+    expect(await svc.pruneHistory(25)).toBe(2); // 30 and 40 days old
+    expect(await svc.pruneHistory(365, 2)).toBe(1); // keep the newest 2
+    expect([...store.keys()].sort()).toEqual(['k0', 'k1']);
   });
 });

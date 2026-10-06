@@ -1,6 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { createRoot } from 'react-dom/client';
-import { browserBackend, bytesToBase64, IdbStore, migrateSettings, pickAsset, SecretStore, TranslateService, type AppSettings, type UpdateInfo } from '@ait/core';
+import { browserBackend, bytesToBase64, IdbStore, migrateSettings, pickAsset, releaseAssets, SecretStore, TranslateService, type AppSettings, type UpdateInfo } from '@ait/core';
 import { downloadFile, StudioApp, type StudioPlatform } from '@ait/studio';
 import '@ait/studio/styles.css';
 import './mobile.css';
@@ -60,7 +60,7 @@ async function installUpdate(info: UpdateInfo, progress: (text: string, pct?: nu
     window.location.href = url;
   };
   if (Capacitor.getPlatform() === 'android') {
-    const apk = pickAsset(info, 'android');
+    const apk = pickAsset(info, 'android') ?? pickAsset({ assets: releaseAssets(info.latest) }, 'android');
     progress(apk ? 'Скачивание APK началось в браузере. Когда закончится, откройте файл и нажмите «Обновить».' : 'Открываю страницу релиза…');
     open(apk?.url ?? info.url);
     return;
@@ -85,13 +85,16 @@ const platform: StudioPlatform = {
   loadSettings,
   saveSettings,
   saveFile,
-  version: '0.3.2',
+  version: '0.3.3',
   installUpdate,
 };
 
 if ('serviceWorker' in navigator && !Capacitor.isNativePlatform() && location.protocol === 'https:') {
   void navigator.serviceWorker.register('./sw.js');
 }
+
+// Housekeeping: old cached pages and old history entries.
+void platform.service.prune().catch(() => undefined);
 
 void takeSharedFiles().then((shared) => {
   createRoot(document.getElementById('root')!).render(<StudioApp platform={platform} sharedFiles={shared} initialView={shared && shared.length > 1 ? 'projects' : 'quick'} />);

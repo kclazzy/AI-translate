@@ -38,6 +38,7 @@ export function pickAsset(info: Pick<UpdateInfo, 'assets'>, kind: 'desktop' | 'a
 /** Download a file with progress (bytes so far, total if the server says). */
 export async function downloadWithProgress(url: string, onProgress: (done: number, total?: number) => void, fetchImpl: FetchLike = (u, i) => fetch(u, i), signal?: AbortSignal): Promise<Uint8Array> {
   const res = await fetchImpl(url, { signal, cache: 'no-store' });
+  if (res.status === 404) throw new Error('Файл новой версии ещё собирается на GitHub (обычно 10–15 минут после выхода). Попробуйте чуть позже.');
   if (!res.ok) throw new Error(`Не удалось скачать обновление: HTTP ${res.status}`);
   const total = Number(res.headers.get('content-length')) || undefined;
   if (!res.body) {
@@ -65,8 +66,19 @@ export async function downloadWithProgress(url: string, onProgress: (done: numbe
 }
 
 /**
- * Latest version: the newest GitHub release if there is one, otherwise the version
- * in package.json on the main branch (the project publishes builds through Actions).
+ * Release files have fixed names, so their links can be built from the version alone.
+ * Used when the GitHub API is unavailable (it allows 60 anonymous requests an hour per
+ * address, which a VPN or a shared connection easily uses up).
+ */
+export function releaseAssets(version: string): ReleaseAsset[] {
+  const v = version.replace(/^v/, '');
+  const base = `https://github.com/${REPO}/releases/download/v${v}`;
+  return [`ai-translate-desktop-v${v}.zip`, `ai-translate-android-v${v}.apk`, `ai-translate-ios-unsigned-v${v}.ipa`].map((name) => ({ name, url: `${base}/${name}` }));
+}
+
+/**
+ * Latest version: the newest GitHub release (API, then the github.com "latest" redirect,
+ * which has no rate limit), otherwise the version in package.json on the main branch.
  */
 export async function checkForUpdate(current: string, fetchImpl: FetchLike = (u, i) => fetch(u, i)): Promise<UpdateInfo> {
   let latest = '';
@@ -88,10 +100,25 @@ export async function checkForUpdate(current: string, fetchImpl: FetchLike = (u,
     /* fall back below */
   }
   if (!latest) {
+    // github.com/…/releases/latest redirects to …/releases/tag/vX.Y.Z — no API, no rate limit.
+    try {
+      const r = await fetchImpl(`https://github.com/${REPO}/releases/latest`, { method: 'HEAD', redirect: 'follow', cache: 'no-store' });
+      const m = /\/releases\/tag\/v?([\d.]+)/.exec(r.url ?? '');
+      if (m) {
+        latest = m[1];
+        url = r.url;
+        assets = releaseAssets(latest);
+      }
+    } catch {
+      /* fall back below */
+    }
+  }
+  if (!latest) {
     const r = await fetchImpl(`https://raw.githubusercontent.com/${REPO}/main/package.json`, { cache: 'no-store' });
     if (!r.ok) throw new Error(`GitHub HTTP ${r.status}`);
     latest = ((await r.json()) as { version: string }).version;
-    url = `https://github.com/${REPO}`;
+    url = `https://github.com/${REPO}/releases`;
+    assets = releaseAssets(latest);
   }
   return { current, latest, available: compareVersions(latest, current) > 0, url, notes, assets };
 }

@@ -58,6 +58,8 @@ export interface AppSettings {
   enabled?: boolean;
   /** Minutes Ollama keeps the model in video memory after the last page (0 = unload right away). */
   gpuKeepAliveMin?: number;
+  /** Days to keep the translation history (the list in «История»); default 30. */
+  historyDays?: number;
 }
 
 export function defaultSettings(): AppSettings {

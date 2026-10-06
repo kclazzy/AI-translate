@@ -54,7 +54,9 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
   await fontsReady;
   if (!pruned) {
     pruned = true;
-    void loadSettings().then((s) => service.pruneCache(s.cacheDays));
+    void service.prune();
+    // The offscreen document can live for days: tidy up again every 6 hours.
+    setInterval(() => void service.prune(), 6 * 3_600_000);
   }
   switch (msg.type) {
     case 'run':

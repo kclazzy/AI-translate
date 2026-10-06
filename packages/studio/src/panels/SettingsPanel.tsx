@@ -149,6 +149,30 @@ function ProfileEditor({ p, onChange }: { p: PromptProfile; onChange: (p: Prompt
   );
 }
 
+/** How much space the app takes on this device, with buttons to free it. */
+function StorageLine() {
+  const platform = usePlatform();
+  const [used, setUsed] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const measure = () => void navigator.storage?.estimate?.().then((e) => setUsed(e.usage ?? null)).catch(() => undefined);
+  useEffect(measure, []);
+  const clear = async (store: 'results' | 'history', what: string) => {
+    if (!confirm(`Удалить ${what}? Это нельзя отменить.`)) return;
+    setBusy(true);
+    await platform.db.clear(store);
+    setBusy(false);
+    toast(`${what[0].toUpperCase()}${what.slice(1)} удалены`);
+    measure();
+  };
+  return (
+    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 12 }} data-testid="storage-line">
+      <span className="ait-muted">Занято на устройстве: {used === null ? '…' : `${(used / 1048576).toFixed(used > 104857600 ? 0 : 1)} МБ`}</span>
+      <button className="ait-btn small" disabled={busy} onClick={() => void clear('results', 'переведённые страницы из кэша')}>Очистить кэш</button>
+      <button className="ait-btn small" disabled={busy} onClick={() => void clear('history', 'записи истории')}>Очистить историю</button>
+    </div>
+  );
+}
+
 export function SettingsPanel({ settings: s, update }: SettingsProps) {
   const platform = usePlatform();
   const params = new URLSearchParams(location.search);
@@ -394,6 +418,9 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
           <Field label="Хранить кэш, дней">
             <input className="ait-input" type="number" min={1} max={365} value={s.cacheDays} onChange={(e) => update({ cacheDays: Math.max(1, Number(e.target.value) || 14) })} />
           </Field>
+          <Field label="Хранить историю, дней" hint="Старые записи удаляются сами">
+            <input className="ait-input" type="number" min={1} max={3650} value={s.historyDays ?? 30} onChange={(e) => update({ historyDays: Math.max(1, Number(e.target.value) || 30) })} />
+          </Field>
           <Field label="Минимальный размер картинки, px">
             <input className="ait-input" type="number" min={50} max={2000} value={s.minImageSize} onChange={(e) => update({ minImageSize: Math.max(50, Number(e.target.value) || 200) })} />
           </Field>
@@ -402,6 +429,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
           <Switch checked={s.saveHistory} onChange={(saveHistory) => update({ saveHistory })} label="Сохранять историю переводов" />
           <Switch checked={s.debug} onChange={(debug) => update({ debug })} label="Показывать отладку (время этапов, токены, стоимость)" />
         </div>
+        <StorageLine />
         <div style={{ marginTop: 14 }}>
           <span id="ait-update"><UpdateCheck current={platform.version} install={platform.installUpdate} autoCheck={params.get('update') === '1'} /></span>
         </div>
