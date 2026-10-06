@@ -91,8 +91,8 @@ describe('matching the original lettering', () => {
     expect(isAllCaps('YOU THINK A SWORD LIKE THAT CAN STOP ME?!')).toBe(true);
     expect(isAllCaps('You think so?')).toBe(false);
     const narration = block('n', 'MEANWHILE', 'Тем временем', { textType: 'NARRATION', bubble: { box: [0, 0, 1, 1], fill: '#1f3c88', safeArea: [0, 0, 1, 1], shape: 'rect' } });
-    expect(matchLettering(narration, { color: '#ffffff', stroke: 5, letterHeight: 24 })).toMatchObject({ uppercase: true, bold: true, color: '#ffffff', strokeColor: null });
+    expect(matchLettering(narration, { color: '#ffffff', stroke: 5, letterHeight: 24, colorShare: 0.9 })).toMatchObject({ uppercase: true, bold: true, color: '#ffffff', strokeColor: null });
     const thin = block('t', 'well...', 'ну...', { bubble: { box: [0, 0, 1, 1], fill: '#ffffff', safeArea: [0, 0, 1, 1], shape: 'ellipse' } });
-    expect(matchLettering(thin, { color: '#111111', stroke: 2, letterHeight: 24 })).toEqual({ color: '#111111', strokeColor: null, strokeWidth: 0 });
+    expect(matchLettering(thin, { color: '#111111', stroke: 2, letterHeight: 24, colorShare: 0.9 })).toEqual({ color: '#111111', strokeColor: null, strokeWidth: 0 });
   });
 });

@@ -30,9 +30,12 @@ writeFileSync(join(ext, 'manifest.json'), JSON.stringify(manifest));
 const png = readFileSync(new URL('./fixtures/page.png', import.meta.url));
 const variant = (n) => Buffer.concat([png, Buffer.from(`\n${n}`)]);
 const html = `<!doctype html><meta charset="utf-8"><title>Q</title><style>img{display:block;width:400px;margin:10px}</style>
-<img src="/p1.png" width="400" height="550"><img src="/p2.png" width="400" height="550"><img src="/p3.png" width="400" height="550">`;
+<img src="/p1.png" width="400" height="550"><img src="/p2.png" width="400" height="550"><img id="lazy" src="/blank.png" data-url="/p3.png" width="400" height="550">`;
+// 1×1 transparent PNG: the placeholder a lazy reader shows until you scroll (like Webtoons).
+const BLANK = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 const site = createServer((req, res) => {
   if (req.url === '/') return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(html);
+  if (req.url === '/blank.png') return res.writeHead(200, { 'content-type': 'image/png' }).end(BLANK);
   const m = req.url.match(/^\/p(\d)\.png$/);
   if (m) return res.writeHead(200, { 'content-type': 'image/png' }).end(variant(m[1]));
   res.writeHead(404).end();
@@ -127,6 +130,7 @@ try {
   await new Promise((r) => setTimeout(r, 4500));
   const t1 = await overlayTexts(page);
   await page.screenshot({ path: join(OUT, 'queue-waiting.png') });
+  check('the lazy picture (not loaded yet) is translated too', t1.length === 3, `overlays=${t1.length}`);
   check('waiting pictures show how many are ahead', t1.some((t) => /перед ней \d|следующая/.test(t)), JSON.stringify(t1));
   check('the running picture shows a timer', t1.some((t) => /\d:\d\d/.test(t)), JSON.stringify(t1));
   check('a local model runs one picture at a time', t1.filter((t) => /\d:\d\d/.test(t)).length === 1, JSON.stringify(t1));

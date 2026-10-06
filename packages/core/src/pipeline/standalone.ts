@@ -113,14 +113,15 @@ export function matchLettering(b: TextBlock, l: Lettering | undefined): Partial<
   const style: Partial<TextStyle> = {};
   if (isAllCaps(b.originalText)) style.uppercase = true;
   if (l && l.letterHeight > 0) {
-    // Bold comic lettering has strokes around a sixth of the letter height or more.
-    if (l.stroke / l.letterHeight >= 0.15) style.bold = true;
+    // Bold lettering: thick strokes for its height. The measured stroke includes about one pixel
+    // of anti-aliased edge, which matters for small letters (calibrated: regular ≈ 0.11, bold ≈ 0.145).
+    if ((l.stroke - 1) / l.letterHeight >= 0.128) style.bold = true;
     if (b.textType !== 'SFX' && b.bubble) {
       const fill = parseHex(b.bubble.fill);
       const text = parseHex(l.color);
       const contrast = Math.abs(luminance(...fill) - luminance(...text));
       // Keep coloured or white lettering (narration boxes, shouting) when it stands out.
-      if (contrast > 90) {
+      if (contrast > 90 && l.colorShare >= 0.6) {
         style.color = l.color;
         style.strokeColor = null;
         style.strokeWidth = 0;
@@ -138,7 +139,7 @@ export function mergeSharedBubbles(blocks: TextBlock[], closed: Map<string, bool
   const out: TextBlock[] = [];
   const groups: TextBlock[][] = [];
   for (const b of blocks) {
-    const g = b.bubble && closed.get(b.id) ? groups.find((gr) => gr[0].bubble && overlapRatio(gr[0].bubble.box, b.bubble!.box) > 0.6) : undefined;
+    const g = b.bubble && closed.get(b.id) && b.textType !== 'SFX' ? groups.find((gr) => gr[0].bubble && overlapRatio(gr[0].bubble.box, b.bubble!.box) > 0.6) : undefined;
     if (g) g.push(b);
     else groups.push([b]);
   }
@@ -178,7 +179,7 @@ export function separateAreas(blocks: TextBlock[]): void {
     for (let j = i + 1; j < blocks.length; j++) {
       const a = areas[i];
       const c = areas[j];
-      if (!a || !c || !intersects(a, c)) continue;
+      if (!a || !c || !intersects(a, c) || a === c) continue;
       // Cut along the axis where the blocks are further apart (one above the other → horizontal cut).
       const dy = c[1] + c[3] / 2 - (a[1] + a[3] / 2);
       const dx = c[0] + c[2] / 2 - (a[0] + a[2] / 2);
@@ -320,6 +321,11 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, sfx: b.textType === 'SFX' });
     b.bubble = r.bubble;
     closedBubble.set(b.id, r.closed);
+    if (r.textBox && b.textType === 'SFX' && !b.textBox) {
+      // Sound effects go where the original letters were, not in the middle of a loose model box.
+      const [x, y, w, h] = r.textBox;
+      b.textBox = clampBox([x - w * 0.08, y - h * 0.15, w * 1.16, h * 1.3].map(Math.round) as Box, original.width, original.height);
+    }
     if (r.textBox && b.textType !== 'SFX') {
       // Use the measured text pixels to correct an imprecise model box (keep the larger safe area).
       b.fontSizeEstimate = estimateFontSize(r.textBox, b.originalText);

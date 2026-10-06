@@ -265,6 +265,8 @@ const OFF_ERROR = () => new AppError('NOT_CONFIGURED', { retryable: false, detai
 async function handleUi(msg: UiToBackground): Promise<unknown> {
   switch (msg.type) {
     case 'popup-command':
+      // A user command (or the setup helper continuing one) re-checks the programs right away.
+      readyCache = null;
       sendToTab(msg.tabId, { type: 'command', command: msg.command });
       return null;
     case 'set-auto': {

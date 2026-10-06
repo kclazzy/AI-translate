@@ -343,6 +343,8 @@ export interface Lettering {
   stroke: number;
   /** Median letter height, px. */
   letterHeight: number;
+  /** Share of letter pixels close to `color` (low for outlined lettering: fill + outline). */
+  colorShare: number;
 }
 
 export interface CleanOptions {
@@ -377,7 +379,23 @@ export function measureLettering(img: PixelData, mask: Uint8Array, rect: Box): L
   const letterHeight = heights.length ? heights[Math.floor(heights.length / 2)] : 0;
   // A stroke of width s has about 2 edge pixels per s pixels of area.
   const stroke = (2 * area) / edges;
-  return { color: toHex([median(rs), median(gs), median(bs)]), stroke, letterHeight };
+  // Main ink colour: the most common colour among letter pixels (outlined lettering has two).
+  const bins = new Map<number, { n: number; r: number; g: number; b: number }>();
+  for (let i = 0; i < rs.length; i++) {
+    const k = ((rs[i] >> 5) << 6) | ((gs[i] >> 5) << 3) | (bs[i] >> 5);
+    const e = bins.get(k) ?? { n: 0, r: 0, g: 0, b: 0 };
+    e.n++;
+    e.r += rs[i];
+    e.g += gs[i];
+    e.b += bs[i];
+    bins.set(k, e);
+  }
+  let best = { n: 0, r: 0, g: 0, b: 0 };
+  for (const e of bins.values()) if (e.n > best.n) best = e;
+  const ink: RGB = best.n ? [best.r / best.n, best.g / best.n, best.b / best.n] : [median(rs), median(gs), median(bs)];
+  let close = 0;
+  for (let i = 0; i < rs.length; i++) if (Math.hypot(rs[i] - ink[0], gs[i] - ink[1], bs[i] - ink[2]) < 60) close++;
+  return { color: toHex(ink), stroke, letterHeight, colorShare: close / Math.max(1, rs.length) };
 }
 
 /** Most common colour in a rectangle (coarse histogram) and the share of pixels close to it. */
@@ -476,16 +494,41 @@ function unionBox(a: Box | null, b: Box): Box {
  * neighbouring letter-sized components (the rest of a word, a missed line) so the whole
  * lettering is erased, and nothing that looks like artwork.
  */
-export function snapToLettering(candidates: Uint8Array, width: number, search: Box, seed: Box): { mask: Uint8Array; box: Box | null } {
+export function snapToLettering(candidates: Uint8Array, width: number, search: Box, seed: Box, img?: PixelData): { mask: Uint8Array; box: Box | null } {
   const comps = components(candidates, width, search).filter((c) => c.pixels.length >= 3);
   const seedBox = expandBox(seed, 2);
   const kept = new Set<Component>();
   let union: Box | null = null;
-  for (const c of comps) {
-    if (boxGap(c.box, seedBox) === 0 && c.box[2] <= seed[2] * 2.5 + 40 && c.box[3] <= seed[3] * 2.5 + 40) {
-      kept.add(c);
-      union = unionBox(union, c.box);
+  const touching = comps.filter((c) => boxGap(c.box, seedBox) === 0 && c.box[2] <= seed[2] * 2.5 + 40 && c.box[3] <= seed[3] * 2.5 + 40);
+  // Lettering is one colour (per stroke type); artwork inside a loose box (bokeh, stars,
+  // highlights) usually is not. Keep components close in colour to the biggest letters.
+  const meanColor = (c: Component): RGB => {
+    let r = 0, g = 0, b = 0;
+    const step = Math.max(1, Math.floor(c.pixels.length / 200));
+    let n = 0;
+    for (let i = 0; i < c.pixels.length; i += step) {
+      const q = c.pixels[i] * 4;
+      r += img!.data[q];
+      g += img!.data[q + 1];
+      b += img!.data[q + 2];
+      n++;
     }
+    return [r / n, g / n, b / n];
+  };
+  let ref: RGB | null = null;
+  if (img && touching.length > 1) {
+    const biggest = [...touching].sort((a, b) => b.pixels.length - a.pixels.length)[0];
+    ref = meanColor(biggest);
+  }
+  const sameInk = (c: Component) => {
+    if (!ref) return true;
+    const m = meanColor(c);
+    return Math.hypot(m[0] - ref[0], m[1] - ref[1], m[2] - ref[2]) < 90;
+  };
+  for (const c of touching) {
+    if (!sameInk(c)) continue;
+    kept.add(c);
+    union = unionBox(union, c.box);
   }
   if (!union) return { mask: new Uint8Array(candidates.length), box: null };
   const heights = [...kept].map((c) => c.box[3]).sort((a, b) => a - b);
@@ -498,6 +541,7 @@ export function snapToLettering(candidates: Uint8Array, width: number, search: B
       // Letter-sized and next to the lettering found so far.
       if (c.box[3] > letter * 2.6 || c.box[2] > Math.max(letter * 6, seed[2] * 1.5)) continue;
       if (boxGap(c.box, union!) > gap) continue;
+      if (!sameInk(c)) continue;
       kept.add(c);
       union = unionBox(union, c.box);
       grew = true;
@@ -577,7 +621,12 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
   let result: CleanResult;
 
   if (flat) {
-    const closed = !!flood && !leaked && flood.area > boxArea(local) * 0.5;
+    // A bubble is a closed shape not much bigger than its text. Flooding the whole scene (a dark
+    // night sky with the text on it) is open background, not a bubble — otherwise everything
+    // inside it (stars, bokeh, other lettering) would count as text to erase.
+    const floodArea = flood ? boxArea(flood.box) : 0;
+    const closed =
+      !!flood && !leaked && !opts.sfx && flood.area > boxArea(local) * 0.5 && floodArea <= Math.max(boxArea(local) * 30, 40_000) && floodArea < image.width * image.height * 0.35;
     let mask: Uint8Array;
     let tb: Box | null;
     let letterMask: Uint8Array;
@@ -585,18 +634,18 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       // Everything enclosed by the bubble interior is lettering.
       const holes = enclosedHoles(flood!.mask, img.width, img.height, clampBox(expandBox(flood!.box, 1), img.width, img.height));
       mask = holes.slice();
-      letterMask = holes;
       const extra = textMask(img, clampBox(expandBox(local, 3), img.width, img.height), bg, 60);
       const interior = dilate(flood!.mask, img.width, img.height, 1);
       for (let i = 0; i < mask.length; i++) if (extra[i] && interior[i]) mask[i] = 1;
       tb = maskBounds(mask, img.width, img.height);
+      letterMask = mask.slice();
       mask = dilate(mask, img.width, img.height, 2);
       // Never paint outside the bubble interior (keeps the outline intact).
       for (let i = 0; i < mask.length; i++) if (mask[i] && !interior[i] && !holes[i]) mask[i] = 0;
     } else {
       // Open flat space (white gutter, narration box): erase the letters around the box.
       const cand = textMask(img, search, bg, 60);
-      const snap = snapToLettering(cand, img.width, search, local);
+      const snap = snapToLettering(cand, img.width, search, local, img);
       tb = snap.box;
       letterMask = snap.mask;
       mask = dilate(snap.mask, img.width, img.height, 2);
@@ -637,10 +686,12 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       for (let x = search[0]; x < search[0] + search[2]; x++) {
         const p = y * img.width + x;
         const l = luminance(img.data[p * 4], img.data[p * 4 + 1], img.data[p * 4 + 2]);
-        if (l > 232 || l < 28 || colorDist(img.data, p * 4, bg) > 120) cand[p] = 1;
+        // Extreme pixels count as letters only against a background that is not itself extreme
+        // (a night scene is full of near-black pixels).
+        if ((l > 232 && bgLum < 200) || (l < 28 && bgLum > 60) || colorDist(img.data, p * 4, bg) > 120) cand[p] = 1;
       }
     }
-    const snap = snapToLettering(cand, img.width, search, local);
+    const snap = snapToLettering(cand, img.width, search, local, img);
     let mask = snap.mask;
     const tb = snap.box;
     const inner = clampBox(expandBox(local, 2), img.width, img.height);

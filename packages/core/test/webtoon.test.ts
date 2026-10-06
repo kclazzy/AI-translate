@@ -28,7 +28,7 @@ interface Case {
 }
 
 const W = 800;
-const H = 2300;
+const H = 2080; // under 2.6 × width: one view, as the mock answers for the whole page
 
 function background(ctx: any) {
   const g = ctx.createLinearGradient(0, 0, 0, H);
@@ -123,7 +123,7 @@ const CASES: Case[] = [
 const EXTRA_BOXES: Box[] = [[130, 1752, 240, 70]];
 
 /** A sound effect drawn into the art with a big, loose model box. */
-const SFX = { x: 560, y: 2080, text: 'FLAP!', box: [420, 1980, 360, 260] as Box };
+const SFX = { x: 630, y: 2010, text: 'FLAP!', box: [480, 1925, 310, 140] as Box };
 
 function drawText(ctx: any, t: Case['text']) {
   ctx.font = `bold ${t.size}px TestSans`;
@@ -234,10 +234,27 @@ describe('webtoon pages: the original lettering is fully removed', () => {
         }
       }
       report.push(`sfx box: art changed away from the letters ${changed}/${total}`);
+      // …and the sound effect's own letters are gone.
+      let left = 0, letters = 0;
+      for (let y = by; y < by + bh; y++) {
+        for (let x = bx; x < bx + bw; x++) {
+          const p = y * W + x;
+          if (!mask[p]) continue;
+          letters++;
+          const i = p * 4;
+          const dText = Math.abs(out[i] - a[i]) + Math.abs(out[i + 1] - a[i + 1]) + Math.abs(out[i + 2] - a[i + 2]);
+          const dBg = Math.abs(out[i] - b[i]) + Math.abs(out[i + 1] - b[i + 1]) + Math.abs(out[i + 2] - b[i + 2]);
+          if (dText < dBg) left++;
+        }
+      }
+      report.push(`sfx letters: ${left}/${letters} (${((100 * left) / Math.max(1, letters)).toFixed(1)}%)`);
       expect(changed / total, 'sfx box smeared').toBeLessThan(0.02);
     }
     console.log(report.join('\n'));
-    for (const line of report) expect(Number(/\(([\d.]+)%\)/.exec(line)![1]), line).toBeLessThan(1);
+    for (const line of report) {
+      const m = /\(([\d.]+)%\)/.exec(line);
+      if (m) expect(Number(m[1]), line).toBeLessThan(1);
+    }
   }, 60_000);
 
   it('typesets the translation over the place of the original, end to end', async () => {
@@ -266,6 +283,7 @@ describe('webtoon pages: the original lettering is fully removed', () => {
     );
     const rendered = await renderOutput(napiBackend, out, { ...DEFAULT_STYLE_DEFAULTS, dialogueFont: 'TestSans', narrationFont: 'TestSans', sfxFont: 'TestSans' });
     writeFileSync(`${OUT}webtoon-rendered.png`, rendered.tiles[0].bytes);
+    console.log(rendered.page.blocks.map((b) => `${b.id} ${b.textType} ${b.translatedText}`).join('\n'));
     // The split bubble became one block (7 model blocks → 7 - 1).
     expect(rendered.page.blocks).toHaveLength(7);
     const merged = rendered.page.blocks.find((b) => b.translatedText.startsWith('Я не ожидал'))!;

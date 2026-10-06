@@ -76,7 +76,9 @@ try {
     await page.screenshot({ path: join(OUT, 'mobile-fail.png') });
     throw new Error(`translation did not finish: ${(await page.$eval('body', (b) => b.innerText)).slice(0, 400)}`);
   }
-  check('picture translated on the phone without a PC engine', calls.length === 1, `model calls=${calls.length}`);
+  const reads = calls.filter((c) => !String(c.messages?.[0]?.content ?? '').includes('editor-in-chief'));
+  check('picture translated on the phone without a PC engine', reads.length === 1, `model calls=${reads.length}`);
+  check('translation checked on the phone too', calls.length - reads.length === 1, `reviews=${calls.length - reads.length}`);
   await page.screenshot({ path: join(OUT, 'mobile-result.png'), fullPage: true });
 
   await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Править')?.click());

@@ -137,7 +137,14 @@ try {
       });
     });
   }
-  check('model downloaded, checked, and the translation continued on the page', pulls[0] === MODEL && entry?.status === 'done', `${JSON.stringify(pulls)} ${entry?.status ?? 'no translation'} ${entry?.error ?? ''}`);
+  let diag = '';
+  if (entry?.status !== 'done') {
+    const helperText = await helper.evaluate(() => document.querySelector('[data-testid="local-setup"]')?.innerText ?? '(helper closed)').catch(() => '(helper closed)');
+    const log = await (await sw.worker()).evaluate(() => (globalThis.__aitLog ?? []).slice(-12).join(' | ')).catch(() => '');
+    const overlay = (await overlayTexts(page)).filter((t) => t.length > 3).slice(-6).join(' | ');
+    diag = ` helper: ${helperText.replace(/\s+/g, ' ').slice(0, 200)} | log: ${log.slice(0, 600)} | page: ${overlay.slice(0, 200)}`;
+  }
+  check('model downloaded, checked, and the translation continued on the page', pulls[0] === MODEL && entry?.status === 'done', `${JSON.stringify(pulls)} ${entry?.status ?? 'no translation'} ${entry?.error ?? ''}${diag}`);
 
   // The popup's ⇄ button names the page language and the translation language.
   const popup = await browser.newPage();
