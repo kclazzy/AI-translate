@@ -55,10 +55,13 @@ try {
   const radios = await page.$$('input[name="setup"]');
   await radios[1].click();
   const inputs = await page.$$('.ait-panel input.ait-input');
-  await inputs[0].click({ clickCount: 3 });
-  await inputs[0].type('http://127.0.0.1:18080/v1');
-  await inputs[1].click({ clickCount: 3 });
-  await inputs[1].type('mock-vl');
+  for (const [el, value] of [[inputs[0], 'http://127.0.0.1:18080/v1'], [inputs[1], 'mock-vl']]) {
+    await el.evaluate((node) => {
+      node.focus();
+      node.select();
+    });
+    await el.type(value);
+  }
   await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Готово')?.click());
   await page.waitForSelector('.ait-bubble-btn', { timeout: 10000 });
   const home = await page.$eval('body', (b) => b.innerText);

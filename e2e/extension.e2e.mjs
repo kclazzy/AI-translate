@@ -206,7 +206,10 @@ try {
     await ed.screenshot({ path: join(OUT, 'e2e-editor.png') });
     // Edit text and save: the page overlay should update through result-changed.
     await ed.click('.ait-blocklist button');
-    await ed.click('.ait-props textarea', { clickCount: 3 });
+    await ed.$eval('.ait-props textarea', (el) => {
+      el.focus();
+      el.select();
+    });
     await ed.keyboard.type('Танака, стой!');
     await ed.click('.ait-props input.ait-input'); // blur → history entry
     await ed.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Сохранить')?.click());
