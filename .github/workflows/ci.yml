@@ -83,13 +83,29 @@ jobs:
 
   release:
     name: GitHub release
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Tags pushed by hand, or a new version in package.json landing on main.
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs: [web, engine]
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          V=$(node -p "require('./package.json').version")
+          echo "tag=v$V" >> "$GITHUB_OUTPUT"
+          # Already published (the desktop file is there): nothing to do for this version.
+          if [ "${GITHUB_REF}" = "refs/heads/main" ] && gh release view "v$V" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -q "desktop-v$V.zip"; then echo "skip=1" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/download-artifact@v4
+        if: steps.v.outputs.skip != '1'
         with: { name: release-web, path: release }
       - uses: softprops/action-gh-release@v2
+        if: steps.v.outputs.skip != '1'
         with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: AI Translate ${{ steps.v.outputs.tag }}
           files: release/*.zip
           generate_release_notes: true
+          make_latest: true
