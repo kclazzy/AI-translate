@@ -10,3 +10,4 @@ body { width: 340px; background: var(--sheet); }
 .pp-foot { display: flex; gap: 12px; align-items: center; border-top: 1px solid var(--rule); padding-top: 10px; font-size: 13px; }
 .pp-foot .ait-muted { margin-left: auto; }
 .pp-link { border: 0; background: none; color: var(--magenta); cursor: pointer; padding: 0; font: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.pp-update { font-size: 13px; margin-top: -4px; }

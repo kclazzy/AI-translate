@@ -15,7 +15,9 @@ export function startMockLlm(port = 18080) {
   const server = createServer((req, res) => {
     const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS' };
     if (req.method === 'OPTIONS') return res.writeHead(204, cors).end();
-    if (req.url.endsWith('/models')) return res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ id: 'mock-vl' }] }));
+    if (req.url.endsWith('/models'))
+      return res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ id: 'mock-vl', type: 'vlm', state: 'loaded' }, { id: 'qwen3.8-27b-gsq-rco', type: 'vlm', state: 'not-loaded' }, { id: 'text-only-14b', type: 'llm', state: 'not-loaded' }] }));
+    if (req.method === 'GET') return res.writeHead(404, cors).end();
     let body = '';
     req.on('data', (c) => (body += c));
     req.on('end', () => {

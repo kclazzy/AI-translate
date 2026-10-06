@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { EngineClient, errorMessage, LANGUAGES, listOpenAiModels, providerById, type AppSettings, type UsageTotals } from '@ait/core';
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
+import { ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
 import './popup.css';
 import { db, hostOf, loadSettings, saveSettings, secrets } from '../shared/store';
 
@@ -129,12 +130,27 @@ function Popup() {
           </select>
         </label>
         <label className="ait-field" style={{ gridColumn: '1 / -1' }}>
-          <span>Модель</span>
+          <span>Сервер модели</span>
           <select className="ait-select" value={s.visionProviderId ?? ''} onChange={(e) => update({ visionProviderId: e.target.value || null })}>
-            <option value="">— не выбрана —</option>
-            {s.providers.filter((p) => p.vision).map((p) => <option key={p.id} value={p.id}>{p.label} · {p.model}</option>)}
+            <option value="">— не выбран —</option>
+            {s.providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
         </label>
+        {vision ? (
+          <div className="ait-field" style={{ gridColumn: '1 / -1' }}>
+            <span>Модель</span>
+            <ModelPicker
+              compact
+              cfg={vision}
+              getKey={() => secrets.get(`provider:${vision.id}`)}
+              onPick={(model, canSee) => {
+                setModel(null);
+                update({ providers: s.providers.map((p) => (p.id === vision.id ? { ...p, model, vision: canSee ?? p.vision } : p)) });
+              }}
+            />
+            {vision.vision === false ? <small className="ait-muted">Эта модель не читает картинки — выберите модель с 👁.</small> : null}
+          </div>
+        ) : null}
       </div>
       <p className="ait-hint pp-route">
         {s.pipeline === 'engine' ? `Движок: ${s.engine.url}` : `Читает: ${vision ? vision.model : '—'}`}
@@ -147,6 +163,9 @@ function Popup() {
         <button className="pp-link" onClick={() => chrome.runtime.openOptionsPage()}>Настройки</button>
         <span className="ait-muted">{usage ? `${usage.pages} стр. · $${usage.costUsd.toFixed(2)}` : ''}</span>
       </footer>
+      <div className="pp-update">
+        <UpdateCheck compact current={chrome.runtime.getManifest().version} />
+      </div>
     </div>
   );
 }

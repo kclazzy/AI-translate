@@ -273,3 +273,5 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 }
 @media (max-width: 760px) { .ait-toast { left: 16px; right: 16px; bottom: 84px; } }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@keyframes ait-spin { to { transform: rotate(360deg); } }

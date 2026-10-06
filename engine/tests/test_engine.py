@@ -247,3 +247,25 @@ async def test_tall_strip_pipeline_produces_4096_tiles(tmp_path):
     t1 = rgb_of(engine.assets.get(payload["cleanedTiles"][1]["assetId"]))
     stitched = np.concatenate([t0, t1])
     assert dark_inside(stitched, bubbles[1]) == 0
+
+
+def test_strip_thinking_and_no_think_for_local():
+    import json as _json
+
+    import httpx
+
+    from app.llm import LlmClient, strip_thinking
+
+    assert strip_thinking('<think>plan {"x":1}</think>\n{"a":1}') == '{"a":1}'
+    assert strip_thinking("answer") == "answer"
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(_json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "<think>hmm</think>{\"ok\":1}"}}]})
+
+    client = LlmClient(ProviderConfig(base_url="http://localhost:1234/v1", model="qwen3.8-27b"), httpx.MockTransport(handler))
+    out = asyncio.run(client.complete("s", [{"role": "user", "content": "hi"}]))
+    assert out.text == '{"ok":1}'
+    assert seen["chat_template_kwargs"] == {"enable_thinking": False}
+    assert seen["messages"][-1]["content"].endswith("/no_think")

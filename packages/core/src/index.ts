@@ -10,6 +10,8 @@ export * from './llm/types';
 export * from './llm/presets';
 export * from './llm/privacy';
 export * from './llm/openai';
+export * from './llm/discover';
+export * from './update';
 export * from './llm/anthropic';
 export * from './translate/glossary';
 export * from './translate/context';

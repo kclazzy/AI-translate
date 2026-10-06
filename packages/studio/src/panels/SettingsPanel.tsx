@@ -13,6 +13,7 @@ import {
   type PromptProfile,
   type ProviderConfig,
 } from '@ait/core';
+import { ModelPicker, UpdateCheck } from '../ModelPicker';
 import { usePlatform } from '../platform';
 import { ErrorBox, Field, Segmented, Switch, toast, useAction } from '../ui';
 
@@ -75,9 +76,9 @@ function ProviderEditor({ cfg, onChange, onRemove }: { cfg: ProviderConfig; onCh
         <Field label="Адрес API (base URL)">
           <input className="ait-input" value={cfg.baseUrl} onChange={(e) => onChange({ ...cfg, baseUrl: e.target.value.trim() })} />
         </Field>
-        <Field label="Модель">
-          <input className="ait-input" list={`models-${cfg.id}`} value={cfg.model} onChange={(e) => onChange({ ...cfg, model: e.target.value.trim() })} />
-          <datalist id={`models-${cfg.id}`}>{models.map((m) => <option key={m} value={m} />)}</datalist>
+        <Field label="Модель" hint="⟳ — получить список моделей с сервера">
+          <ModelPicker cfg={cfg} getKey={async () => key || stored} onPick={(model, vision) => onChange({ ...cfg, model, vision: vision ?? cfg.vision })} />
+          <input className="ait-input" value={cfg.model} onChange={(e) => onChange({ ...cfg, model: e.target.value.trim() })} aria-label="Имя модели вручную" placeholder="или введите имя вручную" />
         </Field>
         <Field label="Ключ API" hint={stored ? `Сохранён: ${maskKey(stored)}` : preset?.needsKey ? 'Нужен для этого сервиса' : 'Не нужен для локальных серверов'}>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -96,6 +97,16 @@ function ProviderEditor({ cfg, onChange, onRemove }: { cfg: ProviderConfig; onCh
       <div className="ait-grid2" style={{ marginTop: 10 }}>
         <Field label="Цена ввода, $ за 1M токенов" hint="Для оценки стоимости в отладке">
           <input className="ait-input" type="number" min={0} step="0.01" value={cfg.priceInput ?? ''} onChange={(e) => onChange({ ...cfg, priceInput: e.target.value === '' ? undefined : Number(e.target.value) })} />
+        </Field>
+        <Field label="Ждать ответ, секунд" hint="Большим локальным моделям нужно больше времени">
+          <input className="ait-input" type="number" min={10} max={3600} placeholder={isLocalProvider(cfg) ? '600' : '120'} value={cfg.timeoutMs ? Math.round(cfg.timeoutMs / 1000) : ''} onChange={(e) => onChange({ ...cfg, timeoutMs: e.target.value ? Number(e.target.value) * 1000 : undefined })} />
+        </Field>
+        <Field label="Режим размышлений">
+          <select className="ait-select" value={cfg.noThinking === undefined ? 'auto' : cfg.noThinking ? 'off' : 'on'} onChange={(e) => onChange({ ...cfg, noThinking: e.target.value === 'auto' ? undefined : e.target.value === 'off' })}>
+            <option value="auto">Авто (выключен для локальных)</option>
+            <option value="off">Выключить (быстрее)</option>
+            <option value="on">Оставить</option>
+          </select>
         </Field>
         <Field label="Цена вывода, $ за 1M токенов">
           <input className="ait-input" type="number" min={0} step="0.01" value={cfg.priceOutput ?? ''} onChange={(e) => onChange({ ...cfg, priceOutput: e.target.value === '' ? undefined : Number(e.target.value) })} />
@@ -139,6 +150,7 @@ function ProfileEditor({ p, onChange }: { p: PromptProfile; onChange: (p: Prompt
 }
 
 export function SettingsPanel({ settings: s, update }: SettingsProps) {
+  const platform = usePlatform();
   const [addPreset, setAddPreset] = useState('anthropic');
   const [profileId, setProfileId] = useState(s.activeProfileId);
   const [siteKey, setSiteKey] = useState('');
@@ -366,6 +378,9 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
         <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
           <Switch checked={s.saveHistory} onChange={(saveHistory) => update({ saveHistory })} label="Сохранять историю переводов" />
           <Switch checked={s.debug} onChange={(debug) => update({ debug })} label="Показывать отладку (время этапов, токены, стоимость)" />
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <UpdateCheck current={platform.version} />
         </div>
       </div>
     </div>

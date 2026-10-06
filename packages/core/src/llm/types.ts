@@ -20,6 +20,8 @@ export interface ProviderConfig {
   timeoutMs?: number;
   maxOutputTokens?: number;
   temperature?: number;
+  /** Ask reasoning models (Qwen3, R1…) to answer without a long thinking phase. Default: on for local servers. */
+  noThinking?: boolean;
 }
 
 export type ContentPart = { type: 'text'; text: string } | { type: 'image'; mime: string; base64: string };

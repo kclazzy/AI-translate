@@ -5,6 +5,7 @@ import asyncio
 import base64
 import ipaddress
 import random
+import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, TypeVar
 from urllib.parse import urlparse
@@ -52,6 +53,21 @@ class Completion:
     model: str
 
 
+_THINK = re.compile(r"<think>.*?</think>", re.S | re.I)
+
+
+def strip_thinking(text: str) -> str:
+    """Drop <think>…</think> reasoning that local reasoning models put into the answer."""
+    out = _THINK.sub("", text)
+    close = out.rfind("</think>")
+    if close >= 0:
+        out = out[close + 8 :]
+    open_ = out.find("<think>")
+    if open_ >= 0:
+        out = out[:open_]
+    return out.strip()
+
+
 def image_part(png_or_jpeg: bytes, mime: str) -> dict[str, Any]:
     return {"type": "image", "mime": mime, "base64": base64.b64encode(png_or_jpeg).decode("ascii")}
 
@@ -87,7 +103,8 @@ class LlmClient:
         self.transport = transport
 
     async def complete(self, system: str, messages: list[dict[str, Any]], *, json_mode: bool = True, max_tokens: int = 4096, temperature: float | None = None) -> Completion:
-        timeout = (self.cfg.timeout_ms or 120_000) / 1000
+        local = is_local_url(self.cfg.base_url)
+        timeout = (self.cfg.timeout_ms or (600_000 if local else 120_000)) / 1000
         async with httpx.AsyncClient(timeout=timeout, transport=self.transport) as client:
             try:
                 if self.cfg.kind == "anthropic":
@@ -99,6 +116,8 @@ class LlmClient:
                 raise AppError("PROVIDER_UNAVAILABLE", detail=f"{self.cfg.label}: {exc}") from exc
 
     async def _openai(self, client: httpx.AsyncClient, system: str, messages: list[dict[str, Any]], json_mode: bool, max_tokens: int, temperature: float | None) -> Completion:
+        local = is_local_url(self.cfg.base_url)
+        no_thinking = self.cfg.no_thinking if self.cfg.no_thinking is not None else local
         msgs: list[dict[str, Any]] = [{"role": "system", "content": system}]
         for m in messages:
             content = m["content"]
@@ -108,6 +127,14 @@ class LlmClient:
                     for p in content
                 ]
             msgs.append({"role": m["role"], "content": content})
+        if no_thinking:
+            for m in reversed(msgs):
+                if m["role"] == "user":
+                    if isinstance(m["content"], str):
+                        m["content"] = m["content"] + "\n/no_think"
+                    else:
+                        m["content"] = [*m["content"], {"type": "text", "text": "/no_think"}]
+                    break
         body: dict[str, Any] = {
             "model": self.cfg.model,
             "messages": msgs,
@@ -117,6 +144,8 @@ class LlmClient:
         }
         if json_mode and self.cfg.json_mode == "json_object":
             body["response_format"] = {"type": "json_object"}
+        if no_thinking and local:
+            body["chat_template_kwargs"] = {"enable_thinking": False}
         headers = {"content-type": "application/json"}
         if self.cfg.api_key:
             headers["authorization"] = f"Bearer {self.cfg.api_key}"
@@ -127,6 +156,7 @@ class LlmClient:
         content = (data.get("choices") or [{}])[0].get("message", {}).get("content")
         if isinstance(content, list):
             content = "".join(p.get("text", "") for p in content)
+        content = strip_thinking(content or "")
         if not content:
             raise AppError("TRANSLATION_INVALID_OUTPUT", detail="Empty completion")
         usage = data.get("usage") or {}

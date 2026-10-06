@@ -31,6 +31,7 @@ class ProviderConfig(Camel):
     timeout_ms: Optional[int] = None
     max_output_tokens: Optional[int] = None
     temperature: Optional[float] = None
+    no_thinking: Optional[bool] = None
 
 
 class PromptProfile(Camel):

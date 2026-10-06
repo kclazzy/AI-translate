@@ -1,6 +1,7 @@
 import { AppError } from '../errors';
 import { timeoutSignal } from '../util/retry';
 import { httpError, joinUrl, safeFetch } from './http';
+import { isLocalUrl } from './privacy';
 import type { CompletionRequest, CompletionResult, ContentPart, FetchLike, LlmProvider, ProviderConfig } from './types';
 
 /**
@@ -11,9 +12,19 @@ export class OpenAICompatibleProvider implements LlmProvider {
   constructor(readonly config: ProviderConfig, private fetchImpl: FetchLike = (u, i) => fetch(u, i)) {}
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
-    const messages: unknown[] = [{ role: 'system', content: req.system }];
+    const local = isLocalUrl(this.config.baseUrl);
+    const noThinking = this.config.noThinking ?? local;
+    const messages: { role: string; content: unknown }[] = [{ role: 'system', content: req.system }];
     for (const m of req.messages) {
       messages.push({ role: m.role, content: typeof m.content === 'string' ? m.content : m.content.map(toOpenAiPart) });
+    }
+    if (noThinking) {
+      // Qwen3-style soft switch; harmless for models that do not know it.
+      const last = [...messages].reverse().find((m) => m.role === 'user');
+      if (last) {
+        if (typeof last.content === 'string') last.content = `${last.content}\n/no_think`;
+        else if (Array.isArray(last.content)) (last.content as unknown[]).push({ type: 'text', text: '/no_think' });
+      }
     }
     const body: Record<string, unknown> = {
       model: this.config.model,
@@ -23,6 +34,8 @@ export class OpenAICompatibleProvider implements LlmProvider {
       stream: false,
     };
     if (req.json && this.config.jsonMode === 'json_object') body.response_format = { type: 'json_object' };
+    // llama.cpp server, vLLM and LM Studio read chat-template switches; cloud APIs may reject unknown fields.
+    if (noThinking && local) body.chat_template_kwargs = { enable_thinking: false };
 
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (this.config.apiKey) headers.authorization = `Bearer ${this.config.apiKey}`;
@@ -31,7 +44,8 @@ export class OpenAICompatibleProvider implements LlmProvider {
       headers['X-Title'] = 'AI Translate';
     }
 
-    const { signal, dispose } = timeoutSignal(this.config.timeoutMs ?? 120_000, req.signal);
+    // Large local models (e.g. 27B partly in system RAM) can need minutes for one page.
+    const { signal, dispose } = timeoutSignal(this.config.timeoutMs ?? (local ? 600_000 : 120_000), req.signal);
     try {
       const res = await safeFetch(this.fetchImpl, joinUrl(this.config.baseUrl, 'chat/completions'), { method: 'POST', headers, body: JSON.stringify(body), signal }, this.config.label);
       if (!res.ok) throw await httpError(res, this.config.label, this.config.baseUrl, this.config.model);
@@ -41,7 +55,7 @@ export class OpenAICompatibleProvider implements LlmProvider {
         model?: string;
       };
       const content = json.choices?.[0]?.message?.content;
-      const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map((p) => p.text ?? '').join('') : '';
+      const text = stripThinking(typeof content === 'string' ? content : Array.isArray(content) ? content.map((p) => p.text ?? '').join('') : '');
       if (!text) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'Empty completion' });
       return {
         text,
@@ -53,6 +67,17 @@ export class OpenAICompatibleProvider implements LlmProvider {
       dispose();
     }
   }
+}
+
+/** Remove <think>…</think> reasoning that some local models put in the answer. */
+export function stripThinking(text: string): string {
+  let out = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  // Unclosed thinking (answer cut off) or answer after a bare </think>.
+  const close = out.lastIndexOf('</think>');
+  if (close >= 0) out = out.slice(close + 8);
+  const open = out.indexOf('<think>');
+  if (open >= 0) out = out.slice(0, open);
+  return out.trim();
 }
 
 function toOpenAiPart(p: ContentPart): unknown {

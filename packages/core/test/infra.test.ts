@@ -187,3 +187,56 @@ describe('actionable provider errors', () => {
     await expect(call(async () => new Response('', { status: 403 }))).rejects.toMatchObject({ detail: expect.stringContaining('OLLAMA_ORIGINS') });
   });
 });
+
+describe('local reasoning models and model discovery', () => {
+  it('strips <think> blocks and turns thinking off for local servers', async () => {
+    let body: any;
+    const p = new OpenAICompatibleProvider({ ...configFromPreset('lmstudio', 'lm'), model: 'qwen3.8-27b' }, async (_u, init) => {
+      body = JSON.parse(String(init!.body));
+      return jsonResponse({ choices: [{ message: { content: '<think>Let me think {"a":1}</think>\n{"blocks":[]}' } }] });
+    });
+    const r = await p.complete({ system: 's', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] });
+    expect(r.text).toBe('{"blocks":[]}');
+    expect(body.chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect(body.messages.at(-1).content.at(-1)).toEqual({ type: 'text', text: '/no_think' });
+  });
+
+  it('never sends local-only switches to cloud APIs', async () => {
+    let body: any;
+    const p = new OpenAICompatibleProvider({ ...configFromPreset('openai', 'o'), apiKey: 'k' }, async (_u, init) => {
+      body = JSON.parse(String(init!.body));
+      return jsonResponse({ choices: [{ message: { content: 'ok' } }] });
+    });
+    await p.complete({ system: 's', messages: [{ role: 'user', content: 'hi' }] });
+    expect(body.chat_template_kwargs).toBeUndefined();
+    expect(body.messages.at(-1).content).toBe('hi');
+  });
+
+  it('lists LM Studio models with vision flags, loaded first', async () => {
+    const { discoverModels } = await import('../src/llm/discover');
+    const list = await discoverModels(configFromPreset('lmstudio', 'lm'), async (u) => {
+      if (u.endsWith('/api/v0/models')) return jsonResponse({ data: [{ id: 'text-model', type: 'llm', state: 'not-loaded' }, { id: 'qwen3.8-27b-gsq-rco', type: 'vlm', state: 'loaded' }, { id: 'nomic-embed', type: 'embeddings' }] });
+      return jsonResponse({}, 404);
+    });
+    expect(list).toEqual([{ id: 'qwen3.8-27b-gsq-rco', vision: true, loaded: true }, { id: 'text-model', vision: false, loaded: false }]);
+  });
+
+  it('lists Ollama models with capabilities', async () => {
+    const { discoverModels } = await import('../src/llm/discover');
+    const list = await discoverModels(configFromPreset('ollama', 'o'), async (u, init) => {
+      if (u.endsWith('/api/v0/models')) return jsonResponse({}, 404);
+      if (u.endsWith('/api/tags')) return jsonResponse({ models: [{ name: 'qwen3:14b' }, { name: 'qwen2.5vl:7b' }] });
+      if (u.endsWith('/api/show')) return jsonResponse({ capabilities: JSON.parse(String(init!.body)).model.includes('vl') ? ['completion', 'vision'] : ['completion'] });
+      return jsonResponse({}, 404);
+    });
+    expect(list.map((m) => [m.id, m.vision])).toEqual([['qwen2.5vl:7b', true], ['qwen3:14b', false]]);
+  });
+
+  it('compares versions', async () => {
+    const { compareVersions, checkForUpdate } = await import('../src/update');
+    expect(compareVersions('0.10.0', '0.9.1')).toBe(1);
+    expect(compareVersions('v0.2.0', '0.2.0')).toBe(0);
+    const info = await checkForUpdate('0.2.0', async (u) => (u.includes('releases/latest') ? jsonResponse({}, 404) : jsonResponse({ version: '0.3.0' })));
+    expect(info).toMatchObject({ available: true, latest: '0.3.0' });
+  });
+});
