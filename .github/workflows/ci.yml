@@ -40,9 +40,13 @@ jobs:
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: |
-          xvfb-run -a node e2e/extension.e2e.mjs
-          MODE=engine xvfb-run -a node e2e/extension.e2e.mjs
-          node e2e/mobile.e2e.mjs
+          # The pinned puppeteer drives old local test browsers; current Chrome needs a current puppeteer.
+          pnpm --filter @ait/e2e add -D puppeteer-core@latest
+          mkdir -p .test-output
+          set -o pipefail
+          xvfb-run -a node e2e/extension.e2e.mjs 2>&1 | tee .test-output/e2e-standalone.log
+          MODE=engine xvfb-run -a node e2e/extension.e2e.mjs 2>&1 | tee .test-output/e2e-engine.log
+          node e2e/mobile.e2e.mjs 2>&1 | tee .test-output/e2e-mobile.log
       - name: Package release files
         run: node scripts/package-release.mjs
       - uses: actions/upload-artifact@v4

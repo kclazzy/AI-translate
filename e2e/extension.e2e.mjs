@@ -58,12 +58,19 @@ if (MODE === 'engine') {
   console.log('engine started');
 }
 
-const browser = await puppeteer.launch({
+let browser;
+try {
+  browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: false,
-  args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, '--no-sandbox', '--no-first-run', '--window-size=1280,1300', '--disable-gpu'],
+  args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, '--no-sandbox', '--no-first-run', '--window-size=1280,1300', '--disable-gpu', '--disable-features=DisableLoadExtensionCommandLineSwitch'],
   defaultViewport: { width: 1200, height: 1200 },
-});
+  });
+} catch (e) {
+  check('browser launches with the extension', false, String(e?.stack ?? e));
+  writeFileSync(join(OUT, `e2e-extension-${MODE}.json`), JSON.stringify(results, null, 2));
+  process.exit(1);
+}
 
 try {
   const sw = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().endsWith('background.js'), { timeout: 15000 });
