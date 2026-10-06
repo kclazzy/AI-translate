@@ -1,0 +1,35 @@
+node_modules/
+dist/
+dist-*/
+release/
+*.log
+.DS_Store
+coverage/
+.vite/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+engine/data/
+engine/models/*
+!engine/models/README.md
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Mobile native build outputs
+apps/mobile/android/app/build/
+apps/mobile/android/.gradle/
+apps/mobile/android/build/
+apps/mobile/ios/App/Pods/
+apps/mobile/ios/App/build/
+apps/mobile/ios/DerivedData/
+
+# Test output
+.test-output/

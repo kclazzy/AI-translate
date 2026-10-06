@@ -1,0 +1,41 @@
+[project]
+name = "ait-engine"
+version = "0.1.0"
+description = "Local GPU engine for AI Translate: text detection, OCR, translation and inpainting for manga, manhwa and comics"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "httpx>=0.27",
+  "numpy>=1.26",
+  "opencv-python-headless>=4.9",
+  "pillow>=10.3",
+  "python-multipart>=0.0.9",
+  "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+# Japanese OCR trained on manga (downloads ~450 MB of weights from Hugging Face on first use).
+manga-ocr = ["manga-ocr>=0.1.14"]
+# Korean / Chinese / multilingual OCR.
+paddle = ["paddleocr>=2.8", "paddlepaddle>=2.6"]
+# ONNX models (LaMa inpainting). Use onnxruntime-gpu on NVIDIA cards.
+onnx = ["onnxruntime>=1.18"]
+onnx-gpu = ["onnxruntime-gpu>=1.18"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "onnx>=1.16", "onnxruntime>=1.18"]
+
+[project.scripts]
+ait-engine = "app.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = ["gpu: needs a GPU and downloaded model weights"]

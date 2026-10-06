@@ -1,0 +1,26 @@
+:root { --paper:#f4f5f7; --sheet:#fff; --ink:#1c2230; --ink-2:#4a5263; --rule:#dfe2e8; --magenta:#c8205f; }
+@media (prefers-color-scheme: dark) { :root { --paper:#12151c; --sheet:#1a1e27; --ink:#e8eaf0; --ink-2:#b4bac6; --rule:#2c323e; --magenta:#ff5c94; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.6 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+a { color: var(--magenta); }
+header { background: var(--sheet); border-bottom: 1px solid var(--rule); }
+.bar { max-width: 960px; margin: 0 auto; padding: 14px 20px; display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.bar img { width: 36px; height: 36px; }
+.bar .name { font-weight: 700; font-size: 19px; margin-right: auto; color: var(--ink); text-decoration: none; }
+.bar nav a { color: var(--ink-2); text-decoration: none; margin-left: 14px; }
+.bar nav a[aria-current] { color: var(--ink); font-weight: 600; border-bottom: 2px solid var(--magenta); }
+main { max-width: 960px; margin: 0 auto; padding: 32px 20px 64px; }
+h1 { font-size: 40px; line-height: 1.15; margin: 8px 0 12px; max-width: 18ch; }
+h2 { font-size: 24px; margin: 40px 0 10px; }
+p.lead { font-size: 20px; color: var(--ink-2); max-width: 60ch; }
+.platforms { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 28px; }
+.platform { display: block; background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px; padding: 20px; text-decoration: none; color: var(--ink); }
+.platform:hover { border-color: var(--magenta); }
+.platform strong { font-size: 20px; display: block; margin-bottom: 6px; }
+.platform span { color: var(--ink-2); }
+ol.steps { padding-left: 22px; } ol.steps li { margin: 10px 0; }
+code, pre { font: 14px/1.5 ui-monospace, Consolas, monospace; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
+code { padding: 1px 6px; } pre { padding: 12px 14px; overflow-x: auto; }
+.cta { display: inline-block; background: var(--magenta); color: #fff; text-decoration: none; padding: 10px 22px; border-radius: 999px; border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); font-weight: 600; margin: 8px 12px 8px 0; }
+.note { border-left: 3px solid var(--magenta); background: var(--sheet); padding: 10px 14px; border-radius: 4px; }
+footer { color: var(--ink-2); font-size: 14px; max-width: 960px; margin: 0 auto; padding: 0 20px 40px; }

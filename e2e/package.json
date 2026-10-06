@@ -1,0 +1,14 @@
+{
+  "name": "@ait/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:extension": "node extension.e2e.mjs",
+    "test:engine": "node engine.e2e.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "20.9.0",
+    "pngjs": "^7.0.0"
+  }
+}

@@ -1,0 +1,275 @@
+/*
+  AI Translate — studio styles.
+  Concept: a print proof sheet. Paper and ink, with process magenta (the colour of
+  printers' proof marks) as the only accent. The one bold element is the primary
+  "Перевести" button, shaped like a speech bubble with a tail.
+*/
+:root {
+  --paper: #f4f5f7;
+  --sheet: #ffffff;
+  --ink: #1c2230;
+  --ink-2: #4a5263;
+  --ink-3: #8a91a0;
+  --rule: #dfe2e8;
+  --magenta: #c8205f;
+  --magenta-soft: #fbe6ee;
+  --yellow: #f2c230;
+  --ok: #1f8a5b;
+  --err: #c0392b;
+  --focus: #1c6ed8;
+  --tone: radial-gradient(circle, rgba(28, 34, 48, 0.12) 1px, transparent 1.4px) 0 0 / 6px 6px;
+  --r-control: 6px;
+  --r-panel: 10px;
+  --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
+  --font-mark: 'AIT SFX', 'Russo One', system-ui, sans-serif;
+  --font-letter: 'AIT Comic', 'Pangolin', system-ui, sans-serif;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --paper: #12151c;
+    --sheet: #1a1e27;
+    --ink: #e8eaf0;
+    --ink-2: #b4bac6;
+    --ink-3: #7c8494;
+    --rule: #2c323e;
+    --magenta: #ff5c94;
+    --magenta-soft: #3a1f2b;
+    --tone: radial-gradient(circle, rgba(232, 234, 240, 0.09) 1px, transparent 1.4px) 0 0 / 6px 6px;
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --paper: #12151c;
+  --sheet: #1a1e27;
+  --ink: #e8eaf0;
+  --ink-2: #b4bac6;
+  --ink-3: #7c8494;
+  --rule: #2c323e;
+  --magenta: #ff5c94;
+  --magenta-soft: #3a1f2b;
+  --tone: radial-gradient(circle, rgba(232, 234, 240, 0.09) 1px, transparent 1.4px) 0 0 / 6px 6px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.5 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+a { color: var(--magenta); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+/* ---------- app shell ---------- */
+.ait-app { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+.ait-side {
+  border-right: 1px solid var(--rule);
+  background: var(--sheet);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+.ait-mark {
+  font-family: var(--font-mark);
+  font-size: 22px;
+  letter-spacing: 0.01em;
+  padding: 6px 10px 14px;
+  line-height: 1.1;
+}
+.ait-mark small { display: block; font: 12px var(--font-ui); color: var(--ink-3); letter-spacing: 0; margin-top: 4px; }
+.ait-nav-btn {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; text-align: left;
+  border: 0; background: transparent; border-radius: var(--r-control);
+  padding: 9px 10px; cursor: pointer; color: var(--ink-2);
+}
+.ait-nav-btn:hover { background: var(--paper); color: var(--ink); }
+.ait-nav-btn[aria-current='page'] { background: var(--magenta-soft); color: var(--ink); font-weight: 600; }
+.ait-nav-btn svg { width: 18px; height: 18px; flex: none; }
+.ait-nav-btn .label-short { display: none; }
+.ait-topbar .ait-badge { white-space: nowrap; }
+.ait-side-foot { margin-top: auto; display: grid; gap: 8px; padding: 8px 6px; }
+.ait-main { min-width: 0; }
+.ait-topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--sheet);
+  position: sticky; top: 0; z-index: 5;
+}
+.ait-topbar h1 { font-size: 18px; margin: 0; font-weight: 650; }
+.ait-topbar .spacer { flex: 1; }
+.ait-content { padding: 24px; max-width: 1180px; }
+
+@media (max-width: 760px) {
+  .ait-app { grid-template-columns: 1fr; }
+  .ait-side {
+    position: fixed; bottom: 0; top: auto; left: 0; right: 0; height: auto; z-index: 20;
+    flex-direction: row; justify-content: space-around; padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+    border-right: 0; border-top: 1px solid var(--rule);
+  }
+  .ait-mark, .ait-side-foot { display: none; }
+  .ait-nav-btn { flex-direction: column; gap: 2px; font-size: 11px; padding: 6px 4px; text-align: center; justify-content: center; }
+  .ait-nav-btn .label-long { display: none; }
+  .ait-nav-btn .label-short { display: block; }
+  .ait-topbar h1 { font-size: 17px; }
+  .ait-topbar .ait-badge + .ait-badge { display: none; }
+  .ait-content { padding: 16px 16px 96px; }
+  .ait-topbar { padding: 12px 16px; padding-top: calc(12px + env(safe-area-inset-top)); }
+}
+
+/* ---------- primitives ---------- */
+.ait-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid var(--rule); background: var(--sheet);
+  border-radius: var(--r-control); padding: 8px 14px; cursor: pointer;
+  min-height: 38px; white-space: nowrap;
+}
+.ait-btn:hover:not(:disabled) { border-color: var(--ink-3); }
+.ait-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ait-btn.small { min-height: 30px; padding: 4px 10px; font-size: 13px; }
+.ait-btn.ghost { border-color: transparent; background: transparent; }
+.ait-btn.danger { color: var(--err); }
+.ait-btn.active { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+
+/* The speech-bubble button: the studio's one loud element. */
+.ait-bubble-btn {
+  position: relative;
+  border: 2px solid var(--ink);
+  background: var(--magenta);
+  color: #fff;
+  font-family: var(--font-letter);
+  font-size: 19px;
+  padding: 8px 22px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  min-height: 44px;
+  box-shadow: 3px 3px 0 var(--ink);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+.ait-bubble-btn::after {
+  content: '';
+  position: absolute; left: 22px; bottom: -11px;
+  width: 14px; height: 12px;
+  background: var(--magenta);
+  border-left: 2px solid var(--ink); border-bottom: 2px solid var(--ink);
+  transform: skewY(-30deg);
+  border-bottom-left-radius: 3px;
+}
+.ait-bubble-btn:hover:not(:disabled) { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--ink); }
+.ait-bubble-btn:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+.ait-bubble-btn:disabled { opacity: 0.55; cursor: progress; }
+
+.ait-field { display: grid; gap: 4px; }
+.ait-field > span { font-size: 13px; color: var(--ink-2); }
+.ait-field small { color: var(--ink-3); font-size: 12px; }
+.ait-input, .ait-select, .ait-textarea {
+  width: 100%; border: 1px solid var(--rule); background: var(--sheet);
+  border-radius: var(--r-control); padding: 8px 10px; min-height: 38px;
+}
+.ait-textarea { min-height: 90px; resize: vertical; line-height: 1.45; }
+.ait-input:focus, .ait-select:focus, .ait-textarea:focus { border-color: var(--focus); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 20%, transparent); }
+.ait-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+.ait-row > * { flex: 1 1 180px; }
+.ait-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+
+.ait-switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+.ait-switch input { appearance: none; width: 38px; height: 22px; border-radius: 11px; background: var(--rule); position: relative; cursor: pointer; flex: none; margin: 0; }
+.ait-switch input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--sheet); transition: left 0.12s; }
+.ait-switch input:checked { background: var(--ink); }
+.ait-switch input:checked::after { left: 19px; }
+
+.ait-panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--r-panel); padding: 18px; }
+.ait-panel + .ait-panel { margin-top: 16px; }
+.ait-panel h2 { font-size: 16px; margin: 0 0 12px; }
+.ait-panel h3 { font-size: 14px; margin: 18px 0 8px; color: var(--ink-2); }
+.ait-muted { color: var(--ink-3); }
+.ait-hint { color: var(--ink-2); font-size: 13px; margin: 6px 0 0; }
+
+.ait-seg { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r-control); overflow: hidden; background: var(--sheet); }
+.ait-seg button { border: 0; background: transparent; padding: 6px 12px; cursor: pointer; color: var(--ink-2); }
+.ait-seg button[aria-pressed='true'] { background: var(--ink); color: var(--sheet); }
+
+.ait-progress { height: 8px; border-radius: 4px; background: var(--rule); overflow: hidden; }
+.ait-progress > i { display: block; height: 100%; background: var(--magenta); transition: width 0.2s; }
+
+.ait-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--paper); color: var(--ink-2); border: 1px solid var(--rule); }
+.ait-badge.ok { color: var(--ok); }
+.ait-badge.err { color: var(--err); }
+.ait-badge.local { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+
+.ait-error { border-left: 3px solid var(--err); background: color-mix(in srgb, var(--err) 8%, var(--sheet)); padding: 10px 12px; border-radius: 4px; }
+.ait-notice { border-left: 3px solid var(--yellow); background: color-mix(in srgb, var(--yellow) 12%, var(--sheet)); padding: 10px 12px; border-radius: 4px; }
+
+table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ait-table th { text-align: left; font-weight: 600; color: var(--ink-2); padding: 6px 8px; border-bottom: 1px solid var(--rule); }
+.ait-table td { padding: 4px 8px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+.ait-table input, .ait-table select { min-height: 32px; padding: 4px 8px; }
+
+/* ---------- project pages ---------- */
+.ait-drop {
+  border: 2px dashed var(--rule); border-radius: var(--r-panel); padding: 28px; text-align: center;
+  background: var(--tone), var(--sheet); color: var(--ink-2);
+}
+.ait-drop.over { border-color: var(--magenta); color: var(--ink); }
+.ait-pages { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; margin-top: 16px; }
+.ait-page {
+  border: 1px solid var(--rule); border-radius: 8px; background: var(--sheet); overflow: hidden; cursor: pointer; position: relative;
+  display: flex; flex-direction: column;
+}
+.ait-page img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; object-position: top; background: var(--paper); display: block; }
+.ait-page .meta { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 6px 8px; font-size: 12px; }
+.ait-page .meta span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ait-page.selected { outline: 2px solid var(--magenta); outline-offset: -2px; }
+.ait-page input[type='checkbox'] { position: absolute; top: 6px; left: 6px; width: 18px; height: 18px; }
+
+/* ---------- editor ---------- */
+.ait-editor { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+@media (max-width: 980px) { .ait-editor { grid-template-columns: 1fr; } }
+.ait-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+.ait-toolbar .sep { width: 1px; height: 24px; background: var(--rule); margin: 0 4px; }
+.ait-stage {
+  position: relative; overflow: auto; border: 1px solid var(--rule); border-radius: var(--r-panel);
+  background: var(--tone), var(--paper); height: calc(100vh - 210px); min-height: 380px; touch-action: none;
+}
+.ait-stage-inner { position: relative; transform-origin: 0 0; margin: 24px; }
+.ait-stage canvas { display: block; }
+.ait-box {
+  position: absolute; border: 1px dashed color-mix(in srgb, var(--magenta) 70%, transparent);
+  cursor: move; touch-action: none;
+}
+.ait-box:hover { background: color-mix(in srgb, var(--magenta) 8%, transparent); }
+.ait-box.selected { border: 2px solid var(--magenta); }
+.ait-box.overflow { border-color: var(--yellow); border-style: solid; }
+.ait-box .handle { position: absolute; width: 12px; height: 12px; background: var(--sheet); border: 2px solid var(--magenta); border-radius: 2px; right: -7px; bottom: -7px; cursor: nwse-resize; }
+.ait-box .rot { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--magenta); left: calc(50% - 6px); top: -22px; cursor: grab; }
+.ait-sel-rect { position: absolute; border: 2px solid var(--focus); background: color-mix(in srgb, var(--focus) 12%, transparent); pointer-events: none; }
+.ait-compare { position: absolute; inset: 0; pointer-events: none; }
+.ait-compare-handle { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--magenta); pointer-events: auto; cursor: ew-resize; }
+.ait-compare-handle::after { content: '⟷'; position: absolute; top: 50%; left: -12px; width: 26px; height: 26px; border-radius: 50%; background: var(--magenta); color: #fff; display: grid; place-items: center; font-size: 13px; }
+.ait-props { position: sticky; top: 78px; display: grid; gap: 12px; }
+.ait-props .ait-panel { padding: 14px; }
+.ait-blocklist { max-height: 260px; overflow: auto; display: grid; gap: 4px; }
+.ait-blocklist button { text-align: left; border: 1px solid var(--rule); background: var(--sheet); border-radius: 6px; padding: 6px 8px; cursor: pointer; font-size: 13px; }
+.ait-blocklist button[aria-pressed='true'] { border-color: var(--magenta); background: var(--magenta-soft); }
+.ait-debug { font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace; display: grid; grid-template-columns: auto 1fr; gap: 0 12px; }
+
+.ait-toast {
+  position: fixed; right: 20px; bottom: 20px; z-index: 50; background: var(--ink); color: var(--sheet);
+  padding: 10px 14px; border-radius: 8px; max-width: 360px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+@media (max-width: 760px) { .ait-toast { left: 16px; right: 16px; bottom: 84px; } }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

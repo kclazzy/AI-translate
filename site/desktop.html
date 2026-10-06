@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Компьютер — AI Translate</title>
+<link rel="icon" href="icon.png"><link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header><div class="bar"><img src="icon.png" alt=""><a class="name" href="./">AI Translate</a>
+<nav><a href="desktop.html" aria-current="page">Компьютер</a><a href="android.html" >Android</a><a href="iphone.html" >iPhone</a></nav></div></header>
+<main>
+<h1>AI Translate для компьютера</h1>
+<p class="lead">Расширение браузера переводит мангу прямо на сайте. Для лучшего качества на своей видеокарте добавьте локальный движок.</p>
+<a class="cta" href="https://github.com/kclazzy/AI-translate/releases/latest">Скачать последнюю версию</a>
+<h2>1. Установить расширение</h2>
+<ol class="steps">
+<li>Скачайте <code>ai-translate-desktop-*.zip</code> и распакуйте.</li>
+<li>Chrome / Edge / Brave / Opera: откройте <code>chrome://extensions</code>, включите «Режим разработчика», нажмите «Загрузить распакованное» и выберите папку <code>extension-chrome</code>.</li>
+<li>Firefox: <code>about:debugging</code> → «Этот Firefox» → «Загрузить временное дополнение» → файл <code>extension-firefox/manifest.json</code>.</li>
+</ol>
+<h2>2. Выбрать модель</h2>
+<p>В настройках расширения выберите модель, которая понимает изображения: локальную (Ollama, LM Studio) или облачную по ключу (Gemini, Claude, OpenAI, OpenRouter).</p>
+<pre>ollama pull qwen2.5vl:7b
+# чтобы расширение могло обращаться к Ollama:
+setx OLLAMA_ORIGINS "chrome-extension://*,moz-extension://*"</pre>
+<h2>3. Локальный движок (по желанию)</h2>
+<p>Движок на Python ищет баблы, распознаёт текст и аккуратно убирает его на вашей видеокарте. Нужен Python 3.11+.</p>
+<ol class="steps">
+<li>Запустите <code>engine\scripts\start-engine.bat</code>. В окне появится адрес и код сопряжения.</li>
+<li>В настройках расширения выберите «Локальный движок» и вставьте код.</li>
+<li>Для RTX 50xx и японского OCR: <code>engine\scripts\install-gpu-extras.bat</code> (PyTorch CUDA 12.8 и manga-ocr).</li>
+</ol>
+<p class="note">Режим «Только локально» запрещает отправлять что-либо за пределы компьютера и локальной сети.</p>
+</main>
+<footer>Открытый проект: <a href="https://github.com/kclazzy/AI-translate">github.com/kclazzy/AI-translate</a>. Лицензия MIT. Веса моделей распространяются отдельно по своим лицензиям.</footer>
+</body></html>

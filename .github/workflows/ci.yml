@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  web:
+    name: TypeScript, extension, mobile web, e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r run typecheck
+      - name: Unit and pipeline tests (core)
+        run: pnpm --filter @ait/core test
+      - run: pnpm --filter @ait/extension build
+      - run: pnpm --filter @ait/mobile build
+      - name: Engine (for the engine e2e)
+        working-directory: engine
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -e ".[dev]"
+      # Branded Chrome 137+ ignores --load-extension; Chrome for Testing keeps it.
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+        with: { chrome-version: stable, install-dependencies: true }
+      - name: End-to-end tests in Chrome for Testing
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          xvfb-run -a node e2e/extension.e2e.mjs
+          MODE=engine xvfb-run -a node e2e/extension.e2e.mjs
+          node e2e/mobile.e2e.mjs
+      - name: Package release files
+        run: node scripts/package-release.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-web
+          path: release/*.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-output
+          path: .test-output/
+
+  engine:
+    name: Python engine
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Install
+        working-directory: engine
+        run: python -m pip install -e ".[dev]"
+      - name: Tests
+        working-directory: engine
+        run: python -m pytest -q
+
+  release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [web, engine]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: release-web, path: release }
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.zip
+          generate_release_notes: true

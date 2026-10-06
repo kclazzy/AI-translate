@@ -1,0 +1,12 @@
+body { width: 340px; background: var(--sheet); }
+.pp { padding: 14px 16px 12px; display: grid; gap: 12px; }
+.pp-head { display: flex; align-items: center; justify-content: space-between; }
+.pp-mark { font-family: var(--font-mark); font-size: 19px; }
+.pp-main { width: 100%; margin-bottom: 8px; }
+.pp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pp-auto { padding: 4px 0; }
+.pp-route { margin: -4px 0 0; }
+.pp-foot { display: flex; gap: 12px; align-items: center; border-top: 1px solid var(--rule); padding-top: 10px; font-size: 13px; }
+.pp-foot .ait-muted { margin-left: auto; }
+.pp-link { border: 0; background: none; color: var(--magenta); cursor: pointer; padding: 0; font: inherit; text-decoration: underline; text-underline-offset: 2px; }

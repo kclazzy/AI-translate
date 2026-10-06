@@ -1,0 +1,85 @@
+# AI Translate
+
+Переводчик манги, манхвы, вебтунов и комиксов. Находит текст на странице, убирает оригинал (японский, корейский, китайский и другие) и вписывает перевод в те же баблы. Работает с облачными моделями по вашему ключу или полностью локально на вашей видеокарте.
+
+| Версия | Что это | Где взять |
+| --- | --- | --- |
+| Компьютер | Расширение для Chrome, Edge, Brave, Opera, Firefox + локальный движок на Python | `apps/extension`, `engine` — релиз `ai-translate-desktop-*.zip` |
+| Android | Веб-приложение (PWA с «Поделиться») и проект Android (Capacitor) | `apps/mobile` — веб: GitHub Pages `/app/`, APK: GitHub Actions |
+| iPhone / iPad | То же веб-приложение и проект Xcode | `apps/mobile/ios` — неподписанный `.ipa`: GitHub Actions |
+
+Страницы установки для каждой версии: `site/` (публикуются на GitHub Pages).
+
+## Как это работает
+
+```
+Страница с мангой ─► расширение (content script) ─► service worker ─► offscreen-документ
+                                                                        │
+              ┌─────────────── без движка ──────────────────────────────┤
+              │  vision-модель находит и читает текст (Ollama, LM Studio,│
+              │  Gemini, Claude, OpenAI…), очистка и вёрстка — на месте  │
+              └─────────────── с движком ───────────────────────────────┘
+                 движок на Python (GPU): поиск баблов → OCR (manga-ocr,
+                 PaddleOCR или vision-модель) → перевод → очистка
+                 (заливка / OpenCV / LaMa) → обратно в браузер
+```
+
+- **Общее ядро** `packages/core` (TypeScript): провайдеры моделей, промпты, проверка ответов, глоссарий, контекст серии, очистка изображения, вёрстка текста в бабл (перенос, подбор кегля, форма бабла, вертикальный текст), тайлинг длинных вебтунов, формат проекта, кэш.
+- **Студия** `packages/studio` (React): редактор страницы, главы и проекты, глоссарий, настройки, история, приватность. Используется и в расширении, и в мобильном приложении.
+- **Движок** `engine` (Python, FastAPI): классический детектор баблов без весов, OCR, перевод, OpenCV/LaMa, задачи с потоком событий (SSE), кэш на SQLite, защита: только localhost/LAN, токен сопряжения, CORS только для расширений и приложения.
+
+## Быстрый старт (разработка)
+
+Нужны Node.js 20+, pnpm 10+, Python 3.11+.
+
+```bash
+pnpm install
+pnpm --filter @ait/core test           # юнит-тесты и тесты конвейера
+pnpm --filter @ait/extension build     # → apps/extension/dist (Chrome) и dist-firefox
+pnpm --filter @ait/mobile dev          # веб-приложение для телефона на http://localhost:5173
+
+cd engine
+python -m venv .venv && .venv/bin/pip install -e ".[dev]"   # Windows: .venv\Scripts\pip
+.venv/bin/python -m pytest -q
+.venv/bin/python -m app                # запуск движка; --lan — для телефонов в сети
+```
+
+Загрузка расширения: `chrome://extensions` → «Режим разработчика» → «Загрузить распакованное» → `apps/extension/dist`.
+
+End-to-end тесты (нужен Chrome for Testing или Chromium и дисплей):
+
+```bash
+CHROME_PATH=/path/to/chrome xvfb-run -a node e2e/extension.e2e.mjs
+MODE=engine CHROME_PATH=/path/to/chrome xvfb-run -a node e2e/extension.e2e.mjs
+CHROME_PATH=/path/to/chrome node e2e/mobile.e2e.mjs
+```
+
+## Модели для RTX 5070 (12 ГБ)
+
+| Задача | Рекомендация | Память |
+| --- | --- | --- |
+| Читает картинку (без движка) | `qwen2.5vl:7b` в Ollama | ~6 ГБ |
+| Перевод текста (с движком) | Qwen3-14B Q4 в LM Studio | ~9 ГБ |
+| Японский OCR (движок) | manga-ocr | ~0,5 ГБ |
+| Очистка сложного фона (движок) | LaMa ONNX | ~0,5–1 ГБ |
+
+Для RTX 50xx нужен PyTorch, собранный под CUDA 12.8: `engine/scripts/install-gpu-extras.bat`.
+
+## Приватность
+
+Режим «Только локально» проверяется кодом: изображения и текст не уходят за пределы устройства или локальной сети, облачный провайдер просто не будет вызван. Гибридный режим отправляет наружу только распознанный текст. Ключи API хранятся на устройстве в зашифрованном виде (AES-GCM, неэкспортируемый ключ WebCrypto) и не попадают в настройки, экспорт или синхронизацию.
+
+## Структура
+
+```
+apps/extension   расширение MV3 (Chrome, Edge, Brave, Opera) + сборка для Firefox
+apps/mobile      веб-приложение для телефона + проекты Android и iOS (Capacitor)
+packages/core    ядро: модели, перевод, очистка, вёрстка, конвейер
+packages/studio  интерфейс студии и редактора
+engine           локальный движок на Python
+e2e              end-to-end тесты в настоящем браузере
+site             сайт с тремя страницами установки
+scripts          иконки и упаковка релизов
+```
+
+Лицензия кода — MIT. Веса моделей не входят в репозиторий и распространяются по своим лицензиям (`engine/models/README.md`).

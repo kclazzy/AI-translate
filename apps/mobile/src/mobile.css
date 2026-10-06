@@ -1,0 +1,12 @@
+/* Phone tweaks on top of the studio styles. */
+html, body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+@media (max-width: 760px) {
+  .ait-editor .ait-stage { height: 62vh; }
+  .ait-props { position: static; }
+  .ait-toolbar { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
+  .ait-toolbar > * { flex: none; }
+  .ait-bubble-btn { font-size: 18px; }
+  .ait-panel { padding: 14px; }
+  input, select, textarea { font-size: 16px; } /* stops iOS zoom on focus */
+}

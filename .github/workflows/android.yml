@@ -1,0 +1,38 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths: ['apps/mobile/**', 'packages/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - uses: android-actions/setup-android@v3
+      - run: pnpm install --frozen-lockfile
+      - name: Build web app and sync into the Android project
+        working-directory: apps/mobile
+        run: pnpm build && npx cap sync android
+      - name: Build debug APK (installable, not for the Play Store)
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleDebug --no-daemon
+      - run: cp apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk ai-translate-android-${{ github.ref_name }}.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: ai-translate-android-*.apk
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with: { files: ai-translate-android-*.apk }

@@ -1,0 +1,7 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+  - "e2e"
+onlyBuiltDependencies:
+  - "@napi-rs/canvas"
+  - esbuild

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iPhone — AI Translate</title>
+<link rel="icon" href="icon.png"><link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header><div class="bar"><img src="icon.png" alt=""><a class="name" href="./">AI Translate</a>
+<nav><a href="desktop.html" >Компьютер</a><a href="android.html" >Android</a><a href="iphone.html" aria-current="page">iPhone</a></nav></div></header>
+<main>
+<h1>AI Translate для iPhone и iPad</h1>
+<p class="lead">Те же возможности, что на Android. iOS не позволяет рисовать поверх других приложений, поэтому переводите страницы в приложении или скриншоты через меню «Поделиться».</p>
+<a class="cta" href="app/">Открыть веб-приложение</a>
+<h2>Веб-приложение (без App Store)</h2>
+<ol class="steps">
+<li>Откройте <a href="app/">веб-приложение</a> в Safari.</li>
+<li>Кнопка «Поделиться» → «На экран Домой».</li>
+<li>Запускайте с главного экрана: оно работает как обычное приложение и хранит настройки на устройстве.</li>
+</ol>
+<h2>Нативное приложение</h2>
+<p>Проект для Xcode лежит в <code>apps/mobile/ios</code>. Нужен Mac с Xcode и Apple ID:</p>
+<pre>pnpm install
+pnpm --filter @ait/mobile ios   # соберёт веб-часть и откроет Xcode</pre>
+<p>GitHub Actions также собирает неподписанный <code>.ipa</code> — его можно подписать своим Apple ID через Sideloadly или AltStore.</p>
+</main>
+<footer>Открытый проект: <a href="https://github.com/kclazzy/AI-translate">github.com/kclazzy/AI-translate</a>. Лицензия MIT. Веса моделей распространяются отдельно по своим лицензиям.</footer>
+</body></html>
