@@ -23,6 +23,8 @@ const results = [];
 function check(name, ok, detail = '') {
   results.push({ name, ok, detail });
   console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${detail}` : ''}`);
+  // Shows up as an annotation on GitHub Actions.
+  if (!ok && process.env.GITHUB_ACTIONS) console.log(`::error title=e2e: ${name.replace(/[:,\n]/g, ' ')}::${String(detail).replace(/\n/g, ' ').slice(0, 900)}`);
 }
 
 // Test copy of the extension (older test browsers do not know minimum_chrome_version 116).

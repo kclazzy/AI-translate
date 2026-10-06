@@ -58,6 +58,7 @@ jobs:
         with:
           name: test-output
           path: .test-output/
+          include-hidden-files: true
 
   engine:
     name: Python engine
