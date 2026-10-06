@@ -1,4 +1,4 @@
-import { AppError, bytesToBase64, dataUrlToBytes, toAppError } from '@ait/core';
+import { AppError, bytesToBase64, dataUrlToBytes, isOllama, ollamaUnloadAll, toAppError } from '@ait/core';
 import type { BackgroundToContent, ContentToBackground, FromOffscreen, JobStatus, ToOffscreen, UiToBackground } from '../shared/messages';
 import { hostOf, loadSettings, saveSettings } from '../shared/store';
 
@@ -126,6 +126,10 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
   switch (msg.type) {
     case 'translate': {
       const jobId = `${tabId}|${msg.image.id}`;
+      if ((await loadSettings()).enabled === false) {
+        sendToTab(tabId, { type: 'job-error', id: msg.image.id, error: OFF_ERROR().toJSON() });
+        return { queued: false };
+      }
       track(tabId, jobId, true);
       try {
         let bytes: Uint8Array | null = null;
@@ -156,6 +160,10 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
     }
     case 'capture-area': {
       const jobId = `${tabId}|${msg.image.id}`;
+      if ((await loadSettings()).enabled === false) {
+        sendToTab(tabId, { type: 'job-error', id: msg.image.id, error: OFF_ERROR().toJSON() });
+        return { queued: false };
+      }
       track(tabId, jobId, true);
       try {
         const shot = await capture(windowId);
@@ -175,7 +183,7 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       return toOffscreen({ target: 'offscreen', type: 'cancel', jobId: `${tabId}|${msg.id}` });
     case 'get-page-state': {
       const s = await loadSettings();
-      return { autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(msg.host), minImageSize: s.minImageSize };
+      return { autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(msg.host), minImageSize: s.minImageSize, enabled: s.enabled !== false };
     }
     case 'open-editor':
       await chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?key=${encodeURIComponent(msg.key)}`), index: (sender.tab?.index ?? 0) + 1 });
@@ -191,9 +199,34 @@ async function broadcastState() {
   for (const t of tabs) {
     if (t.id === undefined) continue;
     const host = hostOf(t.url);
-    sendToTab(t.id, { type: 'state', autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(host), minImageSize: s.minImageSize });
+    sendToTab(t.id, { type: 'state', autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(host), minImageSize: s.minImageSize, enabled: s.enabled !== false });
   }
+  showEnabled(s.enabled !== false);
 }
+
+/** "OFF" on the toolbar icon while the extension is switched off. */
+function showEnabled(on: boolean) {
+  void chrome.action.setBadgeBackgroundColor({ color: on ? '#c8205f' : '#6b7280' }).catch(() => undefined);
+  void chrome.action.setBadgeText({ text: on ? '' : 'OFF' }).catch(() => undefined);
+}
+
+/** Switch the extension on or off. Off: stop all work and free the video memory held by Ollama. */
+async function setEnabled(enabled: boolean): Promise<{ unloaded: string[] }> {
+  const s = await loadSettings();
+  await saveSettings({ ...s, enabled });
+  let unloaded: string[] = [];
+  if (!enabled) {
+    running.clear();
+    await toOffscreen({ target: 'offscreen', type: 'cancel-tab' }).catch(() => undefined);
+    const urls = new Set(s.providers.filter((p) => isOllama(p)).map((p) => p.baseUrl));
+    for (const url of urls) unloaded = unloaded.concat(await ollamaUnloadAll(url));
+    dlog('switched off, unloaded', unloaded);
+  }
+  await broadcastState();
+  return { unloaded };
+}
+
+const OFF_ERROR = () => new AppError('NOT_CONFIGURED', { retryable: false, detail: 'AI Translate выключен. Включите его в окне расширения (значок на панели).' });
 
 async function handleUi(msg: UiToBackground): Promise<unknown> {
   switch (msg.type) {
@@ -212,6 +245,8 @@ async function handleUi(msg: UiToBackground): Promise<unknown> {
     case 'settings-changed':
       await broadcastState();
       return null;
+    case 'set-enabled':
+      return setEnabled(msg.enabled);
     case 'cancel-all': {
       if (msg.tabId === undefined) running.clear();
       else running.delete(msg.tabId);
@@ -309,3 +344,6 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => running.delete(tabId));
+
+// Show the on/off state on the icon after the browser or the extension starts.
+void loadSettings().then((s) => showEnabled(s.enabled !== false));

@@ -3,6 +3,7 @@ import {
   browserBackend,
   checkForUpdate,
   checkVisionModel,
+  DEFAULT_KEEP_ALIVE_MIN,
   configFromPreset,
   discoverModels,
   errorMessage,
@@ -395,6 +396,18 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
           ))}
         </select>
         <small className="ait-muted">{gpu.name ? `Определено: ${gpu.name}${gpu.vramGb ? ` (${gpu.vramGb} ГБ)` : ''}` : 'Видеокарту определить не удалось — выберите объём памяти вручную.'}</small>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <label htmlFor="ait-keep">Держать модель в видеопамяти после перевода</label>
+        <select id="ait-keep" className="ait-select" style={{ width: 'auto' }} value={settings.gpuKeepAliveMin ?? DEFAULT_KEEP_ALIVE_MIN} onChange={(e) => update({ gpuKeepAliveMin: Number(e.target.value) })}>
+          <option value={0}>не держать — выгружать сразу</option>
+          <option value={1}>1 минуту</option>
+          <option value={5}>5 минут</option>
+          <option value={15}>15 минут</option>
+          <option value={60}>1 час</option>
+        </select>
+        <small className="ait-muted">Пока модель в памяти, следующая страница начинается сразу; после — память видеокарты освобождается для игр и других программ.</small>
       </div>
 
       <div style={{ display: 'grid', gap: 6 }}>

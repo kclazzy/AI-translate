@@ -54,6 +54,10 @@ export interface AppSettings {
   modelChecks?: Record<string, ModelCheck>;
   /** Folder the user wants Ollama to keep models in (applied via Ollama settings or OLLAMA_MODELS). */
   ollamaModelsDir?: string;
+  /** Master switch: when false the extension does nothing and frees the model's video memory. */
+  enabled?: boolean;
+  /** Minutes Ollama keeps the model in video memory after the last page (0 = unload right away). */
+  gpuKeepAliveMin?: number;
 }
 
 export function defaultSettings(): AppSettings {

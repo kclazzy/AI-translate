@@ -22,6 +22,8 @@ export interface ProviderConfig {
   temperature?: number;
   /** Ask reasoning models (Qwen3, R1…) to answer without a long thinking phase. Default: on for local servers. */
   noThinking?: boolean;
+  /** Ollama: minutes to keep the model in video memory after a request (set from settings). */
+  keepAliveMin?: number;
 }
 
 export type ContentPart = { type: 'text'; text: string } | { type: 'image'; mime: string; base64: string };

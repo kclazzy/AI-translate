@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkVisionModel, configFromPreset, guessVramGb, MODEL_TIERS, ollamaDelete, OpenAICompatibleProvider, pickAsset, tierForVram } from '../src';
+import { checkVisionModel, configFromPreset, defaultSettings, guessVramGb, MODEL_TIERS, ollamaDelete, ollamaLoaded, ollamaUnloadAll, OpenAICompatibleProvider, pickAsset, pipelineConfigFromSettings, tierForVram } from '../src';
 import { TaskQueue } from '../src/util/queue';
 import { jsonResponse, napiBackend } from './helpers';
 
@@ -93,5 +93,35 @@ describe('release assets', () => {
     expect(pickAsset(info, 'android')?.url).toBe('a');
     expect(pickAsset(info, 'ios')?.url).toBe('i');
     expect(pickAsset({ assets: [] }, 'desktop')).toBeUndefined();
+  });
+});
+
+describe('video memory', () => {
+  it('passes keep-alive minutes to Ollama and 0 unloads right away', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const f = async (_u: string, i?: RequestInit) => {
+      bodies.push(JSON.parse(String(i?.body)));
+      return jsonResponse({ message: { content: 'ok' } });
+    };
+    await new OpenAICompatibleProvider({ ...configFromPreset('ollama', 'o'), keepAliveMin: 15 }, f).complete({ system: 's', messages: [{ role: 'user', content: 'x' }] });
+    await new OpenAICompatibleProvider({ ...configFromPreset('ollama', 'o'), keepAliveMin: 0 }, f).complete({ system: 's', messages: [{ role: 'user', content: 'x' }] });
+    expect(bodies.map((b) => b.keep_alive)).toEqual(['15m', 0]);
+  });
+  it('lists loaded models and unloads them all', async () => {
+    const calls: string[] = [];
+    const f = async (u: string, i?: RequestInit) => {
+      calls.push(`${i?.method ?? 'GET'} ${u} ${i?.body ?? ''}`);
+      if (u.endsWith('/api/ps')) return jsonResponse({ models: [{ name: 'qwen3.5:9b-q4_K_M', size_vram: 7e9 }] });
+      return jsonResponse({});
+    };
+    expect(await ollamaLoaded('http://localhost:11434/v1', f)).toEqual([{ name: 'qwen3.5:9b-q4_K_M', sizeVram: 7e9 }]);
+    expect(await ollamaUnloadAll('http://localhost:11434/v1', f)).toEqual(['qwen3.5:9b-q4_K_M']);
+    expect(calls.at(-1)).toBe('POST http://localhost:11434/api/generate {"model":"qwen3.5:9b-q4_K_M","keep_alive":0}');
+    expect(await ollamaLoaded('http://localhost:11434/v1', async () => { throw new TypeError('offline'); })).toEqual([]);
+  });
+  it('settings decide how long the model stays loaded', () => {
+    const s = defaultSettings();
+    expect(pipelineConfigFromSettings(s).vision?.keepAliveMin).toBe(5);
+    expect(pipelineConfigFromSettings({ ...s, gpuKeepAliveMin: 0 }).vision?.keepAliveMin).toBe(0);
   });
 });

@@ -41,7 +41,7 @@ export type BackgroundToContent =
   | { type: 'command'; command: 'translate-page' | 'select-area' | 'toggle-original' | 'set-auto'; value?: boolean }
   | { type: 'translate-src'; src: string }
   | { type: 'result-changed'; key: string }
-  | { type: 'state'; autoTranslate: boolean; minImageSize: number };
+  | { type: 'state'; autoTranslate: boolean; minImageSize: number; enabled: boolean };
 
 /** Where a job is. "unknown" means the worker has never heard of it (lost after a restart) or it just finished. */
 export type JobStatus =
@@ -69,4 +69,5 @@ export type UiToBackground =
   | { type: 'set-auto'; host: string; enabled: boolean; tabId: number }
   | { type: 'settings-changed' }
   | { type: 'cancel-all'; tabId?: number }
+  | { type: 'set-enabled'; enabled: boolean }
   | { type: 'result-changed'; key: string };

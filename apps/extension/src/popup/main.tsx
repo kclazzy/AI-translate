@@ -1,11 +1,44 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { EngineClient, LANGUAGES, providerById, type AppSettings, type UsageTotals } from '@ait/core';
+import { EngineClient, isOllama, LANGUAGES, ollamaLoaded, ollamaUnloadAll, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
 import './popup.css';
 import { db, hostOf, loadSettings, saveSettings, secrets } from '../shared/store';
+
+/** What Ollama holds in video memory right now, with a button to free it. */
+function VramLine({ settings }: { settings: AppSettings }) {
+  const urls = [...new Set(settings.providers.filter((p) => isOllama(p)).map((p) => p.baseUrl))];
+  const [loaded, setLoaded] = useState<LoadedModel[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const refresh = async () => setLoaded((await Promise.all(urls.map((u) => ollamaLoaded(u)))).flat());
+  useEffect(() => {
+    void refresh();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!loaded || !urls.length) return null;
+  const gb = loaded.reduce((a, m) => a + m.sizeVram, 0) / 1e9;
+  return (
+    <p className="ait-hint" data-testid="vram-line" style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', margin: 0 }}>
+      <span>{loaded.length ? `Видеопамять: занято ${gb.toFixed(1)} ГБ (${loaded.map((m) => m.name).join(', ')})` : 'Видеопамять свободна'}</span>
+      {loaded.length ? (
+        <button
+          className="pp-link"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            for (const u of urls) await ollamaUnloadAll(u);
+            await new Promise((r) => setTimeout(r, 400));
+            await refresh();
+            setBusy(false);
+          }}
+        >
+          {busy ? 'Освобождаю…' : 'Освободить'}
+        </button>
+      ) : null}
+    </p>
+  );
+}
 
 function Popup() {
   const [s, setS] = useState<AppSettings | null>(null);
@@ -13,6 +46,7 @@ function Popup() {
   const [engine, setEngine] = useState<'ok' | 'down' | 'unpaired' | null>(null);
   const [usage, setUsage] = useState<UsageTotals | null>(null);
   const [busy, setBusy] = useState(0);
+  const [unloaded, setUnloaded] = useState<string[] | null>(null);
 
   useEffect(() => {
     void loadSettings().then((x) => {
@@ -50,12 +84,44 @@ function Popup() {
   };
   const open = (path: string) => void chrome.tabs.create({ url: chrome.runtime.getURL(path) });
   const missing = s.pipeline === 'standalone' && !vision?.vision;
+  const on = s.enabled !== false;
+  const toggle = async () => {
+    const next = !on;
+    setS({ ...s, enabled: next });
+    setBusy(0);
+    const r = (await chrome.runtime.sendMessage({ type: 'set-enabled', enabled: next })) as { unloaded?: string[] } | undefined;
+    setUnloaded(r?.unloaded ?? []);
+  };
+  const power = (
+    <label className="ait-switch" title={on ? 'Выключить AI Translate' : 'Включить AI Translate'} data-testid="power">
+      <input type="checkbox" role="switch" checked={on} onChange={() => void toggle()} aria-label="AI Translate включён" />
+      <span>{on ? 'Вкл' : 'Выкл'}</span>
+    </label>
+  );
+  if (!on) {
+    return (
+      <div className="pp">
+        <header className="pp-head">
+          <span className="pp-mark">AI Translate</span>
+          {power}
+        </header>
+        <div className="ait-notice" data-testid="off-notice">
+          Расширение выключено: не переводит, не показывает кнопки на картинках и не держит модель в видеопамяти.
+          {unloaded?.length ? ` Выгружено из памяти: ${unloaded.join(', ')}.` : ''}
+        </div>
+        <button className="ait-bubble-btn pp-main" onClick={() => void toggle()}>Включить</button>
+      </div>
+    );
+  }
 
   return (
     <div className="pp">
       <header className="pp-head">
         <span className="pp-mark">AI Translate</span>
-        <span className={`ait-badge ${s.privacy === 'local' ? 'local' : ''}`}>{s.privacy === 'local' ? '🔒 Локально' : s.privacy === 'hybrid' ? 'Гибрид' : 'Облако'}</span>
+        <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span className={`ait-badge ${s.privacy === 'local' ? 'local' : ''}`}>{s.privacy === 'local' ? '🔒 Локально' : s.privacy === 'hybrid' ? 'Гибрид' : 'Облако'}</span>
+          {power}
+        </span>
       </header>
 
       {missing ? (
@@ -64,6 +130,7 @@ function Popup() {
       {s.pipeline === 'standalone' ? (
         <ModelCheckCard compact settings={s} update={update} getKey={(id) => secrets.get(`provider:${id}`)} onOpenSettings={(download) => open(download ? 'studio.html?view=settings&pull=1' : 'studio.html?view=settings')} />
       ) : null}
+      {s.pipeline === 'standalone' ? <VramLine settings={s} /> : null}
       {engine === 'down' ? <div className="ait-error">Движок не отвечает по адресу {s.engine.url}. Запустите его или переключитесь в режим без движка.</div> : null}
       {engine === 'unpaired' ? <div className="ait-notice">Движок запущен, но код сопряжения не подходит. Введите его в настройках.</div> : null}
 

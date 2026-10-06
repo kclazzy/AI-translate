@@ -198,3 +198,32 @@ export async function ollamaPull(baseUrl: string, model: string, onProgress: (p:
   }
   if (last?.status !== 'success') throw new Error(`Загрузка прервана (${last?.status ?? 'нет ответа'})`);
 }
+
+export interface LoadedModel {
+  name: string;
+  /** Bytes of video memory the model holds. */
+  sizeVram: number;
+}
+
+/** Models Ollama currently holds in memory (GET /api/ps). Empty when Ollama is not running. */
+export async function ollamaLoaded(baseUrl: string, fetchImpl: FetchLike = (u, i) => fetch(u, i)): Promise<LoadedModel[]> {
+  try {
+    const res = await fetchImpl(`${origin(baseUrl)}/api/ps`, {});
+    if (!res.ok) return [];
+    const j = (await res.json()) as { models?: { name?: string; model?: string; size_vram?: number }[] };
+    return (j.models ?? []).map((m) => ({ name: m.name ?? m.model ?? '', sizeVram: m.size_vram ?? 0 }));
+  } catch {
+    return [];
+  }
+}
+
+/** Free the video memory: ask Ollama to unload every loaded model (keep_alive 0). Returns what was unloaded. */
+export async function ollamaUnloadAll(baseUrl: string, fetchImpl: FetchLike = (u, i) => fetch(u, i)): Promise<string[]> {
+  const loaded = await ollamaLoaded(baseUrl, fetchImpl);
+  await Promise.all(
+    loaded.map((m) =>
+      fetchImpl(`${origin(baseUrl)}/api/generate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: m.name, keep_alive: 0 }) }).catch(() => undefined),
+    ),
+  );
+  return loaded.map((m) => m.name);
+}

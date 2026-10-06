@@ -91,7 +91,8 @@ export class OpenAICompatibleProvider implements LlmProvider {
       messages,
       stream: false,
       think: !noThinking,
-      keep_alive: '15m',
+      // How long the model stays in video memory after this page (0 = unload now).
+      keep_alive: this.config.keepAliveMin === undefined ? '5m' : this.config.keepAliveMin <= 0 ? 0 : `${this.config.keepAliveMin}m`,
       options: { temperature: req.temperature ?? this.config.temperature ?? 0.2, num_predict: maxTokens, num_ctx: 16384 },
     };
     if (req.json) body.format = 'json';

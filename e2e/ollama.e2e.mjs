@@ -32,6 +32,8 @@ let textModel = true;
 const pulls = [];
 const chats = [];
 const deletes = [];
+const loadedModels = new Set();
+const unloads = [];
 const origins = [];
 // Same rule as real Ollama: no Origin, or a localhost/127.0.0.1/0.0.0.0 origin, unless OLLAMA_ORIGINS says otherwise.
 const allowedOrigin = (o) => !o || /^(https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?|app:\/\/|file:\/\/|tauri:\/\/|vscode-webview:\/\/)/.test(o);
@@ -47,8 +49,11 @@ const ollama = createServer((req, res) => {
   if (req.url === '/api/tags') return json(200, { models: [...(installed ? [{ name: MODEL, size: 6.6e9 }] : []), ...(textModel ? [{ name: 'llama3.2:3b', size: 2e9 }] : [])] });
   if (req.url === '/api/show') return read((b) => json(200, { capabilities: b.model === MODEL ? ['completion', 'vision'] : ['completion'] }));
   if (req.url === '/api/delete' && req.method === 'DELETE') return read((b) => { deletes.push(b.model); if (b.model === 'llama3.2:3b') textModel = false; json(200, {}); });
+  if (req.url === '/api/ps') return json(200, { models: [...loadedModels].map((name) => ({ name, size_vram: 6.6e9 })) });
+  if (req.url === '/api/generate' && req.method === 'POST') return read((b) => { if (b.keep_alive === 0) { unloads.push(b.model); loadedModels.delete(b.model); } json(200, { done: true }); });
   if (req.url === '/api/chat' && req.method === 'POST') {
     return read((b) => {
+      if (b.keep_alive !== 0) loadedModels.add(b.model);
       chats.push({ model: b.model, think: b.think, images: b.messages?.at(-1)?.images?.length ?? 0, num_ctx: b.options?.num_ctx });
       setTimeout(() => json(200, { model: b.model, message: { role: 'assistant', content: JSON.stringify({ text: 'こんにちは', translation: 'Привет' }) }, prompt_eval_count: 900, eval_count: 20 }), 400);
     });
@@ -148,7 +153,34 @@ try {
   const p2 = await popup2.$eval('body', (b) => b.innerText);
   check('popup shows the model works', p2.includes('Работает') && !p2.includes('не скачана'), p2.slice(0, 200));
   await popup2.setViewport({ width: 360, height: 820 });
+  await popup2.waitForFunction(() => document.body.innerText.includes('Видеопамять: занято'), { timeout: 5000 }).catch(() => {});
+  check('popup shows the model held in video memory', (await popup2.$eval('body', (b) => b.innerText)).includes(`Видеопамять: занято 6.6 ГБ (${MODEL})`));
   await popup2.screenshot({ path: join(OUT, 'ollama-popup-ok.png') });
+
+  // Switch the extension off: work stops and the video memory is freed.
+  await popup2.click('[data-testid="power"] input');
+  await popup2.waitForFunction(() => document.body.innerText.includes('Выгружено из памяти'), { timeout: 8000 }).catch(() => {});
+  const offText = await popup2.$eval('body', (b) => b.innerText);
+  await popup2.screenshot({ path: join(OUT, 'ollama-popup-off.png') });
+  check('switching off frees the video memory', unloads.includes(MODEL) && loadedModels.size === 0 && offText.includes('Выгружено из памяти'), `${JSON.stringify(unloads)} ${offText.slice(0, 200)}`);
+  if (process.env.DEBUG) console.log((await (await sw.worker()).evaluate(() => globalThis.__aitLog.slice(-15).join('\n'))));
+  const badge = await (await sw.worker()).evaluate(() => chrome.action.getBadgeText({}));
+  check('the toolbar icon says OFF', badge === 'OFF', badge);
+  const before = chats.length;
+  const r = await (await sw.worker()).evaluate(async () => {
+    const s = await new Promise((res) => {
+      const q = indexedDB.open('ai-translate', 1);
+      q.onsuccess = () => {
+        const g = q.result.transaction('kv').objectStore('kv').get('settings');
+        g.onsuccess = () => res(g.result);
+      };
+    });
+    return s.enabled;
+  });
+  check('off state is saved', r === false && chats.length === before, String(r));
+  await popup2.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Включить')?.click());
+  await popup2.waitForFunction(() => document.body.innerText.includes('Перевести страницу'), { timeout: 8000 }).catch(() => {});
+  check('switching back on restores the popup', (await popup2.$eval('body', (b) => b.innerText)).includes('Перевести страницу') && (await (await sw.worker()).evaluate(() => chrome.action.getBadgeText({}))) === '');
 } catch (e) {
   check('unexpected failure', false, String(e?.stack ?? e));
 } finally {

@@ -39,6 +39,7 @@ function main() {
   const byElement = new WeakMap<Element, string>();
   let minSize = 200;
   let autoTranslate = false;
+  let enabled = true;
   let originalsShown = false;
   let seq = 0;
 
@@ -185,6 +186,10 @@ function main() {
         break;
       }
       case 'command':
+        if (!enabled && msg.command !== 'toggle-original' && msg.command !== 'set-auto') {
+          toastOnce('AI Translate выключен — включите его в окне расширения');
+          break;
+        }
         if (msg.command === 'translate-page') translatePage();
         else if (msg.command === 'select-area') selectArea();
         else if (msg.command === 'toggle-original') {
@@ -213,6 +218,8 @@ function main() {
         break;
       case 'state':
         minSize = msg.minImageSize;
+        enabled = msg.enabled;
+        if (!enabled) hoverBtn.style.display = 'none';
         setAuto(msg.autoTranslate);
         break;
     }
@@ -281,8 +288,8 @@ function main() {
   document.addEventListener('load', (e) => e.target instanceof HTMLImageElement && rescan(), true);
 
   function setAuto(on: boolean) {
-    autoTranslate = on;
-    if (on) rescan();
+    autoTranslate = on && enabled;
+    if (autoTranslate) rescan();
   }
 
   // ---- keep overlays aligned ----------------------------------------------------------------
@@ -318,7 +325,7 @@ function main() {
       const now = performance.now();
       if (now - lastMove < 120) return;
       lastMove = now;
-      if (e.composedPath().includes(hoverHost)) return;
+      if (!enabled || e.composedPath().includes(hoverHost)) return;
       const c = candidateAt(e.clientX, e.clientY, minSize);
       const id = c ? byElement.get(c.el) : undefined;
       if (!c || (id && items.has(id))) {
@@ -428,9 +435,10 @@ function main() {
     setTimeout(() => host.remove(), 3000);
   }
 
-  void send<{ autoTranslate: boolean; minImageSize: number }>({ type: 'get-page-state', host: location.hostname }).then((s) => {
+  void send<{ autoTranslate: boolean; minImageSize: number; enabled: boolean }>({ type: 'get-page-state', host: location.hostname }).then((s) => {
     if (!s) return;
     minSize = s.minImageSize;
+    enabled = s.enabled;
     setAuto(s.autoTranslate);
   });
 }

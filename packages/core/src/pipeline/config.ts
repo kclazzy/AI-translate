@@ -22,6 +22,13 @@ export interface PipelineConfig {
   engine?: { url: string; token: string; options: EngineOptions };
 }
 
+function withKeepAlive(p: ProviderConfig | undefined, s: AppSettings): ProviderConfig | null {
+  return p ? { ...p, keepAliveMin: s.gpuKeepAliveMin ?? DEFAULT_KEEP_ALIVE_MIN } : null;
+}
+
+/** How long a local model stays in video memory after the last page, unless the user changes it. */
+export const DEFAULT_KEEP_ALIVE_MIN = 5;
+
 export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): PipelineConfig {
   return {
     mode: s.pipeline,
@@ -33,8 +40,8 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     glossary: s.glossary,
     translateSfx: s.translateSfx,
     sfxStyle: s.sfxStyle,
-    vision: providerById(s, s.visionProviderId) ?? null,
-    translator: providerById(s, s.translationProviderId) ?? null,
+    vision: withKeepAlive(providerById(s, s.visionProviderId), s),
+    translator: withKeepAlive(providerById(s, s.translationProviderId), s),
     engine: s.engine,
   };
 }
