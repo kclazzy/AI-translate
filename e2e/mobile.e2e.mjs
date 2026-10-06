@@ -63,12 +63,12 @@ try {
     await el.type(value);
   }
   await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Готово')?.click());
-  await page.waitForSelector('.ait-bubble-btn', { timeout: 10000 });
+  await page.waitForFunction(() => document.body.innerText.includes('Выбрать картинку'), { timeout: 15000 });
   const home = await page.$eval('body', (b) => b.innerText);
   check('setup finishes and opens the translate screen', home.includes('Перевести изображение') && home.includes('Локально'));
 
   // Translate a picture chosen from the "gallery".
-  const fileInput = await page.$('input[type="file"][accept="image/*"]');
+  const fileInput = await page.waitForSelector('input[type="file"][accept="image/*"]', { timeout: 10000 });
   await fileInput.uploadFile(join(ROOT, 'e2e/fixtures/page.png'));
   try {
     await page.waitForFunction(() => document.body.innerText.includes('Блоков: 2'), { timeout: 30000 });
