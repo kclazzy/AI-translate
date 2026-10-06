@@ -33,6 +33,7 @@ const pulls = [];
 const chats = [];
 const deletes = [];
 const loadedModels = new Set();
+let spill = false; // the loaded model does not fit the video memory (part of it in RAM)
 const unloads = [];
 const origins = [];
 // Same rule as real Ollama: no Origin, or a localhost/127.0.0.1/0.0.0.0 origin, unless OLLAMA_ORIGINS says otherwise.
@@ -49,7 +50,7 @@ const ollama = createServer((req, res) => {
   if (req.url === '/api/tags') return json(200, { models: [...(installed ? [{ name: MODEL, size: 6.6e9 }] : []), ...(textModel ? [{ name: 'llama3.2:3b', size: 2e9 }] : [])] });
   if (req.url === '/api/show') return read((b) => json(200, { capabilities: b.model === MODEL ? ['completion', 'vision'] : ['completion'] }));
   if (req.url === '/api/delete' && req.method === 'DELETE') return read((b) => { deletes.push(b.model); if (b.model === 'llama3.2:3b') textModel = false; json(200, {}); });
-  if (req.url === '/api/ps') return json(200, { models: [...loadedModels].map((name) => ({ name, size_vram: 6.6e9 })) });
+  if (req.url === '/api/ps') return json(200, { models: [...loadedModels].map((name) => ({ name, size_vram: 6.6e9, size: spill ? 9.4e9 : 6.6e9 })) });
   if (req.url === '/api/generate' && req.method === 'POST') return read((b) => { if (b.keep_alive === 0) { unloads.push(b.model); loadedModels.delete(b.model); } json(200, { done: true }); });
   if (req.url === '/api/chat' && req.method === 'POST') {
     return read((b) => {
@@ -156,6 +157,16 @@ try {
   await popup2.waitForFunction(() => document.body.innerText.includes('Видеопамять: занято'), { timeout: 5000 }).catch(() => {});
   check('popup shows the model held in video memory', (await popup2.$eval('body', (b) => b.innerText)).includes(`Видеопамять: занято 6.6 ГБ (${MODEL})`));
   await popup2.screenshot({ path: join(OUT, 'ollama-popup-ok.png') });
+  check('no video-memory warning while the model fits', !(await popup2.$('[data-testid="vram-spill"]')));
+
+  // The model no longer fits the video card (part of it in system RAM): the popup says so.
+  spill = true;
+  await popup2.reload();
+  await popup2.waitForSelector('[data-testid="vram-spill"]', { timeout: 8000 }).catch(() => {});
+  const spillText = await popup2.$eval('[data-testid="vram-spill"]', (e) => e.innerText).catch(() => '');
+  check('warns when the model spills out of video memory', spillText.includes('не помещается в видеопамять') && spillText.includes('70%'), spillText);
+  await popup2.screenshot({ path: join(OUT, 'ollama-popup-spill.png') });
+  spill = false;
 
   // Switch the extension off: work stops and the video memory is freed.
   await popup2.click('[data-testid="power"] input');

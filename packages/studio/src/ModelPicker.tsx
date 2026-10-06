@@ -414,6 +414,28 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
         <small className="ait-muted">Пока модель в памяти, следующая страница начинается сразу; после — память видеокарты освобождается для игр и других программ.</small>
       </div>
 
+      <label className="ait-switch" data-testid="fast-local">
+        <input type="checkbox" role="switch" checked={!!settings.fastLocal} onChange={(e) => update({ fastLocal: e.target.checked })} />
+        <span>
+          Быстрый режим: картинка для модели поменьше, проверка перевода без дополнительного запроса к модели
+          <small className="ait-muted" style={{ display: 'block' }}>Обычно на треть быстрее; мелкий текст может читаться хуже.</small>
+        </span>
+      </label>
+
+      <details data-testid="ollama-tuning">
+        <summary style={{ cursor: 'pointer' }}>
+          <b>Ускорить Ollama</b> <span className="ait-muted">— настройки самой Ollama</span>
+        </summary>
+        <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+          <small>Выполните в командной строке (Win+R → cmd), затем закройте Ollama (трей → Quit) и запустите снова:</small>
+          <code style={{ userSelect: 'all' }}>setx OLLAMA_FLASH_ATTENTION 1</code>
+          <small className="ait-muted">Flash attention: быстрее и меньше памяти на длинные запросы. В новых версиях Ollama включается сама, если видеокарта поддерживает.</small>
+          <code style={{ userSelect: 'all' }}>setx OLLAMA_KV_CACHE_TYPE q8_0</code>
+          <small className="ait-muted">Сжатый кэш: модель с картинкой занимает меньше видеопамяти и реже вылезает в обычную память. Работает только вместе с flash attention.</small>
+          <small>Главное для скорости — чтобы модель целиком помещалась в видеокарту: если в окне расширения появилось «не помещается в видеопамять», выберите модель на ступень меньше.</small>
+        </div>
+      </details>
+
       <div style={{ display: 'grid', gap: 6 }}>
         {MODEL_TIERS.map((t) => {
           const rec = t.model === tier.model;

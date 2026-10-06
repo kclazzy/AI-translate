@@ -29,7 +29,8 @@ export interface BlockQa {
   reviewed: boolean;
 }
 
-export type QaMode = 'off' | 'report' | 'fix';
+/** off; rules = checks without a model (fast); report = also the model's review, no changes; fix = review and correct. */
+export type QaMode = 'off' | 'rules' | 'report' | 'fix';
 
 export const QA_LABELS: Record<QaKind, string> = {
   grammar: 'Грамматика',
@@ -135,7 +136,7 @@ export async function qaPage(
   if (opts.mode === 'off') return [];
   const todo = blocks.filter((b) => b.translate && b.originalText.trim());
   for (const b of todo) b.qa = { issues: ruleChecks(b, opts.targetLang, opts.glossary, opts.context), reviewed: false };
-  if (!opts.provider || !todo.length) return [];
+  if (!opts.provider || !todo.length || opts.mode === 'rules') return [];
   const payload = todo.map((b) => ({ id: b.id, type: b.textType, original: b.originalText, translation: b.translatedText }));
   const rules = todo.filter((b) => b.qa!.issues.length).map((b) => `${b.id}: ${b.qa!.issues.map((i) => i.note).join(' ')}`);
   const user = `<blocks>\n${JSON.stringify(payload)}\n</blocks>${rules.length ? `\nAutomatic checks found:\n${rules.join('\n')}` : ''}`;

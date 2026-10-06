@@ -1,5 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from 'vitest';
-import { checkForUpdate, checkVisionModel, configFromPreset, defaultSettings, TranslateService, guessVramGb, MODEL_TIERS, ollamaDelete, ollamaLoaded, ollamaUnloadAll, OpenAICompatibleProvider, pickAsset, pipelineConfigFromSettings, tierForVram } from '../src';
+import { checkForUpdate, checkVisionModel, configFromPreset, defaultSettings, gpuShare, TranslateService, guessVramGb, MODEL_TIERS, ollamaDelete, ollamaLoaded, ollamaUnloadAll, OpenAICompatibleProvider, pickAsset, pipelineConfigFromSettings, tierForVram } from '../src';
 import { TaskQueue } from '../src/util/queue';
 import { jsonResponse, napiBackend } from './helpers';
 
@@ -114,7 +115,7 @@ describe('video memory', () => {
       if (u.endsWith('/api/ps')) return jsonResponse({ models: [{ name: 'qwen3.5:9b-q4_K_M', size_vram: 7e9 }] });
       return jsonResponse({});
     };
-    expect(await ollamaLoaded('http://localhost:11434/v1', f)).toEqual([{ name: 'qwen3.5:9b-q4_K_M', sizeVram: 7e9 }]);
+    expect(await ollamaLoaded('http://localhost:11434/v1', f)).toEqual([{ name: 'qwen3.5:9b-q4_K_M', sizeVram: 7e9, size: 7e9 }]);
     expect(await ollamaUnloadAll('http://localhost:11434/v1', f)).toEqual(['qwen3.5:9b-q4_K_M']);
     expect(calls.at(-1)).toBe('POST http://localhost:11434/api/generate {"model":"qwen3.5:9b-q4_K_M","keep_alive":0}');
     expect(await ollamaLoaded('http://localhost:11434/v1', async () => { throw new TypeError('offline'); })).toEqual([]);
@@ -157,5 +158,34 @@ describe('history housekeeping', () => {
     expect(await svc.pruneHistory(25)).toBe(2); // 30 and 40 days old
     expect(await svc.pruneHistory(365, 2)).toBe(1); // keep the newest 2
     expect([...store.keys()].sort()).toEqual(['k0', 'k1']);
+  });
+});
+
+describe('speed and the local model', () => {
+  it('fast mode: smaller picture and a check without a model call, only for local models', () => {
+    const s = { ...defaultSettings(), fastLocal: true, quality: 'best' as const };
+    const c = pipelineConfigFromSettings(s);
+    expect(c.quality).toBe('fast');
+    expect(c.qa).toBe('rules');
+    const cloud = { ...s, providers: [...s.providers, { ...configFromPreset('openai', 'oa') }], visionProviderId: 'oa' };
+    expect(pipelineConfigFromSettings(cloud)).toMatchObject({ quality: 'best', qa: 'fix' });
+  });
+  it('context window follows the video memory', () => {
+    expect(pipelineConfigFromSettings({ ...defaultSettings(), gpuVramGb: 8 }).vision?.numCtx).toBe(8192);
+    expect(pipelineConfigFromSettings({ ...defaultSettings(), gpuVramGb: 16 }).vision?.numCtx).toBe(16384);
+  });
+  it('reports tokens per second and sends num_ctx to Ollama', async () => {
+    let body: Record<string, any> = {};
+    const p = new OpenAICompatibleProvider({ ...configFromPreset('ollama', 'o'), numCtx: 8192 }, async (_u, i) => {
+      body = JSON.parse(String(i?.body));
+      return jsonResponse({ message: { content: 'ok' }, eval_count: 120, eval_duration: 2e9 });
+    });
+    const r = await p.complete({ system: 's', messages: [{ role: 'user', content: 'x' }] });
+    expect(body.options.num_ctx).toBe(8192);
+    expect(r.tokensPerSecond).toBe(60);
+  });
+  it('knows when a model spills out of video memory', () => {
+    expect(gpuShare({ name: 'm', sizeVram: 7e9, size: 7e9 })).toBe(1);
+    expect(gpuShare({ name: 'm', sizeVram: 5e9, size: 10e9 })).toBe(0.5);
   });
 });

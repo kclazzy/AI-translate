@@ -91,6 +91,23 @@ async function overlayTexts(page) {
   return out;
 }
 
+/** Pictures translated so far (history entries). */
+async function doneCount() {
+  const pages = await browser.pages();
+  const ext = pages.find((p) => p.url().startsWith('chrome-extension://'));
+  if (!ext) return -1;
+  return ext.evaluate(async () => {
+    const db = await new Promise((res) => {
+      const r = indexedDB.open('ai-translate', 1);
+      r.onsuccess = () => res(r.result);
+    });
+    return new Promise((res) => {
+      const g = db.transaction('history').objectStore('history').getAll();
+      g.onsuccess = () => res(g.result.filter((h) => h.status === 'done').length);
+    });
+  });
+}
+
 try {
   const sw = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().endsWith('background.js'), { timeout: 15000 });
   const extId = new URL(sw.url()).host;
@@ -129,23 +146,28 @@ try {
   await page.bringToFront();
   await new Promise((r) => setTimeout(r, 4500));
   const t1 = await overlayTexts(page);
+  if (process.env.DEBUG) {
+    console.log('SWLOG', await (await sw.worker()).evaluate(() => globalThis.__aitLog.slice(-12).join('\n')));
+  }
   await page.screenshot({ path: join(OUT, 'queue-waiting.png') });
   check('the lazy picture (not loaded yet) is translated too', t1.length === 3, `overlays=${t1.length}`);
   check('waiting pictures show how many are ahead', t1.some((t) => /перед ней \d|следующая/.test(t)), JSON.stringify(t1));
   check('the running picture shows a timer', t1.some((t) => /\d:\d\d/.test(t)), JSON.stringify(t1));
   check('a local model runs one picture at a time', t1.filter((t) => /\d:\d\d/.test(t)).length === 1, JSON.stringify(t1));
 
-  // Simulate the worker losing its jobs (offscreen document closed by the browser).
+  // Simulate the worker losing its jobs (the browser closes the offscreen document mid-chapter).
   await (await sw.worker()).evaluate(() => chrome.offscreen.closeDocument());
-  await page.waitForFunction(() => true);
+  // The page notices and sends the lost pictures again by itself: the chapter finishes without a click.
   let t2 = [];
-  for (let i = 0; i < 15; i++) {
+  const t0 = Date.now();
+  for (let i = 0; i < 150; i++) {
     await new Promise((r) => setTimeout(r, 1000));
     t2 = await overlayTexts(page);
-    if (t2.length && t2.every((t) => t.includes('Задача потерялась') || !/В очереди|Ищу|Распознаю|Открываю|Работаю/.test(t))) break;
+    if (t2.length === 0 && (await doneCount()) >= 3) break;
   }
   await page.screenshot({ path: join(OUT, 'queue-lost.png') });
-  check('lost jobs are reported instead of hanging in the queue', t2.some((t) => t.includes('Задача потерялась')) && !t2.some((t) => /В очереди/.test(t)), JSON.stringify(t2));
+  const done = await doneCount();
+  check('after the worker restarts, lost pictures are re-sent and the chapter finishes by itself', done >= 3 && !t2.some((t) => /потерялась|В очереди/.test(t)), `done=${done} in ${Math.round((Date.now() - t0) / 1000)} s ${JSON.stringify(t2)}`);
 } catch (e) {
   check('unexpected failure', false, String(e?.stack ?? e));
 } finally {

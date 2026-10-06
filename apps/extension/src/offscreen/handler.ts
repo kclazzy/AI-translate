@@ -2,7 +2,7 @@ import { AppError, base64ToBytes, isLocalProvider, browserBackend, bytesToDataUr
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
 import type { StageEvent } from '@ait/core';
-import type { FromOffscreen, JobStatus, RenderedTiles, ToOffscreen } from '../shared/messages';
+import type { FromOffscreen, JobStatus, RenderedTiles, SpeedStats, ToOffscreen } from '../shared/messages';
 import { db, loadSettings, secrets } from '../shared/store';
 
 /**
@@ -13,6 +13,21 @@ import { db, loadSettings, secrets } from '../shared/store';
 export const service = new TranslateService(db, secrets, browserBackend, loadSettings);
 const queue = new TaskQueue(2);
 let fontsReady: Promise<void> | null = null;
+/** A picture with no answer for this long is failed and the queue moves on. */
+const WATCHDOG_LOCAL_MIN = 12;
+const WATCHDOG_CLOUD_MIN = 5;
+/** Keep the local model loaded this long while a chapter is still in the queue. */
+const CHAPTER_KEEP_ALIVE_MIN = 15;
+
+/** Moving average of the time per page, shown in the popup ("~18 с на страницу"). */
+async function recordSpeed(ms: number, usage: { outputTokens: number }[]): Promise<void> {
+  const prev = (await db.get<SpeedStats>('kv', 'speed')) ?? { avgMs: ms, pages: 0, at: '' };
+  const n = Math.min(prev.pages, 9);
+  const avgMs = Math.round((prev.avgMs * n + ms) / (n + 1));
+  const tokens = usage.reduce((a, u) => a + u.outputTokens, 0);
+  await db.put('kv', 'speed', { avgMs, pages: prev.pages + 1, lastMs: ms, lastTokens: tokens, at: new Date().toISOString() } satisfies SpeedStats);
+}
+
 /** What each job is doing, so the page can show progress and notice lost jobs. */
 const jobs = new Map<string, { tabId: number; startedAt?: number; stage?: StageEvent }>();
 
@@ -79,19 +94,40 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
             const info = jobs.get(jobId);
             if (info) info.startedAt = Date.now();
             const bytes = msg.type === 'run' ? base64ToBytes(msg.bytesB64) : await cropScreenshot(msg.screenshot, msg.rect, msg.dpr);
-            const { result, cached } = await service.translate(bytes, msg.type === 'run' ? msg.mime : 'image/png', {
-              sourceUrl: msg.pageUrl,
-              title: msg.title,
-              generic: msg.type === 'crop-run' ? msg.generic ?? true : msg.generic,
-              force: msg.type === 'run' ? msg.force : false,
-              signal,
-              onStage: (event) => {
-                const i = jobs.get(jobId);
-                if (i) i.stage = event;
-                emit({ source: 'offscreen', type: 'stage', jobId, tabId, event });
-              },
-            });
-            emit({ source: 'offscreen', type: 'done', jobId, tabId, result: toRendered(result, cached) });
+            // Watchdog: a picture that gets no answer for too long fails with a clear reason and
+            // the queue moves on (one stuck request must not stop the whole chapter).
+            const watch = new AbortController();
+            const onAbort = () => watch.abort(signal.reason);
+            signal.addEventListener('abort', onAbort, { once: true });
+            const limitMin = local ? WATCHDOG_LOCAL_MIN : WATCHDOG_CLOUD_MIN;
+            const timer = setTimeout(() => watch.abort(new DOMException('watchdog', 'TimeoutError')), limitMin * 60_000);
+            const t0 = Date.now();
+            try {
+              const { result, cached } = await service.translate(bytes, msg.type === 'run' ? msg.mime : 'image/png', {
+                sourceUrl: msg.pageUrl,
+                title: msg.title,
+                generic: msg.type === 'crop-run' ? msg.generic ?? true : msg.generic,
+                force: msg.type === 'run' ? msg.force : false,
+                signal: watch.signal,
+                // While more pages wait, keep the local model in video memory between them.
+                keepAliveMin: local && queue.getStats().pending > 0 ? CHAPTER_KEEP_ALIVE_MIN : undefined,
+                onStage: (event) => {
+                  const i = jobs.get(jobId);
+                  if (i) i.stage = event;
+                  emit({ source: 'offscreen', type: 'stage', jobId, tabId, event });
+                },
+              });
+              if (!cached) void recordSpeed(Date.now() - t0, result.page.usage);
+              emit({ source: 'offscreen', type: 'done', jobId, tabId, result: toRendered(result, cached) });
+            } catch (e) {
+              if (watch.signal.aborted && watch.signal.reason instanceof DOMException && watch.signal.reason.message === 'watchdog') {
+                throw new AppError('TIMEOUT', { retryable: true, detail: `Модель не ответила за ${limitMin} мин. Картинка пропущена, перевод главы продолжается. Проверьте модель в настройках: возможно, она не помещается в видеопамять.` });
+              }
+              throw e;
+            } finally {
+              clearTimeout(timer);
+              signal.removeEventListener('abort', onAbort);
+            }
           },
         })
         .catch((e) => emit({ source: 'offscreen', type: 'error', jobId, tabId, error: toAppError(e).toJSON() }))

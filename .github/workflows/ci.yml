@@ -53,6 +53,7 @@ jobs:
           xvfb-run -a node e2e/update.e2e.mjs 2>&1 | tee .test-output/e2e-update.log
           xvfb-run -a node e2e/setup.e2e.mjs 2>&1 | tee .test-output/e2e-setup.log
           xvfb-run -a node e2e/chapter.e2e.mjs 2>&1 | tee .test-output/e2e-chapter.log
+          pnpm --filter @ait/studio test
       - name: Package release files
         run: node scripts/package-release.mjs
       - uses: actions/upload-artifact@v4

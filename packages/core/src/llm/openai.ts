@@ -93,17 +93,19 @@ export class OpenAICompatibleProvider implements LlmProvider {
       think: !noThinking,
       // How long the model stays in video memory after this page (0 = unload now).
       keep_alive: this.config.keepAliveMin === undefined ? '5m' : this.config.keepAliveMin <= 0 ? 0 : `${this.config.keepAliveMin}m`,
-      options: { temperature: req.temperature ?? this.config.temperature ?? 0.2, num_predict: maxTokens, num_ctx: 16384 },
+      // 8k tokens hold a page picture, the prompt and the answer; 16k only with plenty of video memory.
+      options: { temperature: req.temperature ?? this.config.temperature ?? 0.2, num_predict: maxTokens, num_ctx: this.config.numCtx ?? 8192 },
     };
     if (req.json) body.format = 'json';
     const { signal, dispose } = timeoutSignal(this.config.timeoutMs ?? 600_000, req.signal);
     try {
       const res = await safeFetch(this.fetchImpl, ollamaUrl(this.config.baseUrl, 'api/chat'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal }, this.config.label);
       if (!res.ok) throw await httpError(res, this.config.label, this.config.baseUrl, this.config.model);
-      const json = (await res.json()) as { message?: { content?: string }; prompt_eval_count?: number; eval_count?: number; model?: string };
+      const json = (await res.json()) as { message?: { content?: string }; prompt_eval_count?: number; eval_count?: number; eval_duration?: number; model?: string };
       const text = stripThinking(json.message?.content ?? '');
       if (!text) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'Модель вернула пустой ответ' });
-      return { text, inputTokens: json.prompt_eval_count ?? 0, outputTokens: json.eval_count ?? 0, model: json.model ?? this.config.model };
+      const tps = json.eval_count && json.eval_duration ? json.eval_count / (json.eval_duration / 1e9) : undefined;
+      return { text, inputTokens: json.prompt_eval_count ?? 0, outputTokens: json.eval_count ?? 0, model: json.model ?? this.config.model, tokensPerSecond: tps };
     } finally {
       dispose();
     }

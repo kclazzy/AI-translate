@@ -15,6 +15,8 @@ export interface ModelCheck {
   read?: string;
   translation?: string;
   ms: number;
+  /** Generation speed if the server reports it. */
+  tokensPerSecond?: number;
   message: string;
   at: string;
 }
@@ -95,7 +97,8 @@ export async function checkVisionModel(cfg: ProviderConfig, opts: { backend: Ima
     const read = got.text ?? '';
     if (norm(read).includes(SELFTEST_TEXT)) {
       const slow = ms > 60_000 ? ' Но отвечает медленно: страница может занимать несколько минут — попробуйте модель полегче.' : '';
-      return { ...base, level: 'ok', read, translation: got.translation, ms, message: `Модель работает: прочитала текст на картинке за ${(ms / 1000).toFixed(1)} с.${slow}` };
+      const tps = res.tokensPerSecond ? ` Скорость ответа ${Math.round(res.tokensPerSecond)} токенов/с.` : '';
+      return { ...base, level: 'ok', read, translation: got.translation, ms, tokensPerSecond: res.tokensPerSecond, message: `Модель работает: прочитала текст на картинке за ${(ms / 1000).toFixed(1)} с.${tps}${slow}` };
     }
     return {
       ...base,

@@ -62,6 +62,8 @@ export interface AppSettings {
   historyDays?: number;
   /** Translation check: off, report problems, or fix real errors automatically (default). */
   qaMode?: import('./translate/qa').QaMode;
+  /** Fast mode for local models: smaller picture for the model, translation check without a model call. */
+  fastLocal?: boolean;
 }
 
 export function defaultSettings(): AppSettings {

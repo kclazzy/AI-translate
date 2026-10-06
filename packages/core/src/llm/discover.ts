@@ -203,6 +203,13 @@ export interface LoadedModel {
   name: string;
   /** Bytes of video memory the model holds. */
   sizeVram: number;
+  /** Total bytes the loaded model takes (video memory + system RAM). */
+  size: number;
+}
+
+/** Share of a loaded model in video memory (1 = all on the GPU). Below ~0.95 it runs several times slower. */
+export function gpuShare(m: LoadedModel): number {
+  return m.size > 0 ? Math.min(1, m.sizeVram / m.size) : 1;
 }
 
 /** Models Ollama currently holds in memory (GET /api/ps). Empty when Ollama is not running. */
@@ -210,8 +217,8 @@ export async function ollamaLoaded(baseUrl: string, fetchImpl: FetchLike = (u, i
   try {
     const res = await fetchImpl(`${origin(baseUrl)}/api/ps`, {});
     if (!res.ok) return [];
-    const j = (await res.json()) as { models?: { name?: string; model?: string; size_vram?: number }[] };
-    return (j.models ?? []).map((m) => ({ name: m.name ?? m.model ?? '', sizeVram: m.size_vram ?? 0 }));
+    const j = (await res.json()) as { models?: { name?: string; model?: string; size_vram?: number; size?: number }[] };
+    return (j.models ?? []).map((m) => ({ name: m.name ?? m.model ?? '', sizeVram: m.size_vram ?? 0, size: m.size ?? m.size_vram ?? 0 }));
   } catch {
     return [];
   }

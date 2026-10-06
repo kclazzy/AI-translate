@@ -35,6 +35,15 @@ export type ContentToBackground =
   | { type: 'open-setup' }
   | { type: 'build-download'; keys: string[]; title: string; format: ChapterFormat };
 
+/** Time per translated page (kv 'speed'), written by the worker, shown in the popup. */
+export interface SpeedStats {
+  avgMs: number;
+  pages: number;
+  lastMs?: number;
+  lastTokens?: number;
+  at: string;
+}
+
 /** File formats for «Перевести и скачать». */
 export type ChapterFormat = 'pdf' | 'cbz' | 'zip' | 'epub';
 

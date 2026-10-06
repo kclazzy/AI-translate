@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { checkReadiness, EngineClient, isOllama, LANGUAGES, nativeName, ollamaLoaded, ollamaUnloadAll, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
+import { checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, MODEL_TIERS, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
 import './popup.css';
-import type { PageLangs } from '../shared/messages';
+import type { PageLangs, SpeedStats } from '../shared/messages';
 import { db, hostOf, loadSettings, saveSettings, secrets } from '../shared/store';
 
 /** What Ollama holds in video memory right now, with a button to free it. */
@@ -13,13 +13,32 @@ function VramLine({ settings }: { settings: AppSettings }) {
   const urls = [...new Set(settings.providers.filter((p) => isOllama(p)).map((p) => p.baseUrl))];
   const [loaded, setLoaded] = useState<LoadedModel[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [speed, setSpeed] = useState<SpeedStats | null>(null);
   const refresh = async () => setLoaded((await Promise.all(urls.map((u) => ollamaLoaded(u)))).flat());
   useEffect(() => {
     void refresh();
+    void db.get<SpeedStats>('kv', 'speed').then((x) => setSpeed(x ?? null));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (!loaded || !urls.length) return null;
   const gb = loaded.reduce((a, m) => a + m.sizeVram, 0) / 1e9;
+  // Part of the model in system RAM: the main reason for a sudden slowdown.
+  const spill = loaded.find((m) => gpuShare(m) < 0.95);
+  const vision = pById(settings, settings.visionProviderId);
+  const tier = MODEL_TIERS.find((t) => vision && t.model === vision.model);
+  const expected = tier ? Number(tier.secondsPerPage.split('–')[1]) : undefined;
+  const slow = speed && speed.pages >= 2 && expected && speed.avgMs / 1000 > expected * 2;
   return (
+    <>
+      {spill ? (
+        <div className="ait-error" data-testid="vram-spill">
+          ⚠ {spill.name} не помещается в видеопамять: на видеокарте только {Math.round(gpuShare(spill) * 100)}%, остальное в обычной памяти — перевод идёт в разы медленнее. Выберите модель поменьше в настройках.
+        </div>
+      ) : null}
+      {speed && speed.pages ? (
+        <p className="ait-hint" data-testid="speed-line" style={{ margin: 0 }}>
+          Скорость: ~{Math.round(speed.avgMs / 1000)} с на страницу{slow ? ` — медленнее обычного для ${vision?.model} (до ${expected} с). Попробуйте быстрый режим или модель полегче.` : ''}
+        </p>
+      ) : null}
     <p className="ait-hint" data-testid="vram-line" style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', margin: 0 }}>
       <span>{loaded.length ? `Видеопамять: занято ${gb.toFixed(1)} ГБ (${loaded.map((m) => m.name).join(', ')})` : 'Видеопамять свободна'}</span>
       {loaded.length ? (
@@ -38,6 +57,7 @@ function VramLine({ settings }: { settings: AppSettings }) {
         </button>
       ) : null}
     </p>
+    </>
   );
 }
 

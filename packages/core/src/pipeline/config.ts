@@ -2,6 +2,7 @@ import type { PrivacyMode } from '../llm/privacy';
 import type { ProviderConfig } from '../llm/types';
 import type { AppSettings, EngineOptions, PipelineMode, Quality } from '../settings';
 import { activeProfile, providerById } from '../settings';
+import { isLocalProvider } from '../llm/privacy';
 import type { GlossaryEntry } from '../translate/glossary';
 import type { PromptProfile, SfxStyle } from '../translate/profiles';
 import { sha256Hex } from '../util/bytes';
@@ -26,7 +27,14 @@ export interface PipelineConfig {
 }
 
 function withKeepAlive(p: ProviderConfig | undefined, s: AppSettings): ProviderConfig | null {
-  return p ? { ...p, keepAliveMin: s.gpuKeepAliveMin ?? DEFAULT_KEEP_ALIVE_MIN } : null;
+  // Bigger context only with plenty of video memory: on 8 GB it would push the model partly into RAM.
+  return p ? { ...p, keepAliveMin: s.gpuKeepAliveMin ?? DEFAULT_KEEP_ALIVE_MIN, numCtx: (s.gpuVramGb ?? 12) >= 16 ? 16384 : 8192 } : null;
+}
+
+/** Fast mode applies when the picture is read by a model on this computer / network. */
+export function fastLocalActive(s: AppSettings): boolean {
+  const v = providerById(s, s.visionProviderId);
+  return !!s.fastLocal && s.pipeline !== 'engine' && !!v && isLocalProvider(v);
 }
 
 /** How long a local model stays in video memory after the last page, unless the user changes it. */
@@ -38,7 +46,7 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     privacy: s.privacy,
     sourceLang: s.sourceLang,
     targetLang: s.targetLang,
-    quality: s.quality,
+    quality: fastLocalActive(s) ? 'fast' : s.quality,
     profile: activeProfile(s, seriesKey),
     glossary: s.glossary,
     translateSfx: s.translateSfx,
@@ -46,7 +54,7 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     vision: withKeepAlive(providerById(s, s.visionProviderId), s),
     translator: withKeepAlive(providerById(s, s.translationProviderId), s),
     engine: s.engine,
-    qa: s.qaMode ?? 'fix',
+    qa: fastLocalActive(s) && (s.qaMode ?? 'fix') !== 'off' ? 'rules' : s.qaMode ?? 'fix',
   };
 }
 

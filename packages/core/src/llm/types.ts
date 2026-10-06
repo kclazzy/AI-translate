@@ -24,6 +24,8 @@ export interface ProviderConfig {
   noThinking?: boolean;
   /** Ollama: minutes to keep the model in video memory after a request (set from settings). */
   keepAliveMin?: number;
+  /** Ollama: context window (tokens). Bigger needs more video memory. */
+  numCtx?: number;
 }
 
 export type ContentPart = { type: 'text'; text: string } | { type: 'image'; mime: string; base64: string };
@@ -47,6 +49,8 @@ export interface CompletionResult {
   inputTokens: number;
   outputTokens: number;
   model: string;
+  /** Generation speed reported by the server (Ollama), tokens per second. */
+  tokensPerSecond?: number;
 }
 
 export interface LlmProvider {

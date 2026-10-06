@@ -45,6 +45,8 @@ export interface TranslateOptions {
   force?: boolean;
   signal?: AbortSignal;
   onStage?: (e: StageEvent) => void;
+  /** Keep the local model loaded at least this long (minutes) — set while a chapter is in the queue. */
+  keepAliveMin?: number;
 }
 
 export const MAX_INPUT_BYTES = 60 * 1024 * 1024;
@@ -102,6 +104,12 @@ export class TranslateService {
     if (!realMime) throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: mime });
     const seriesKey = opts.seriesKey ?? seriesKeyFromUrl(opts.sourceUrl);
     const { settings, config } = await this.config(seriesKey);
+    if (opts.keepAliveMin !== undefined) {
+      for (const k of ['vision', 'translator'] as const) {
+        const p = config[k];
+        if (p) config[k] = { ...p, keepAliveMin: Math.max(p.keepAliveMin ?? 0, opts.keepAliveMin) };
+      }
+    }
     const key = await this.cacheKey(bytes, config);
     if (!opts.force) {
       const hit = await this.db.get<StoredResult>('results', key);

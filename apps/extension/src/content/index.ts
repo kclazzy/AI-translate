@@ -98,6 +98,8 @@ function main() {
 
   // ---- live status: queue position, elapsed time, lost jobs --------------------------------
   let watchTimer: ReturnType<typeof setInterval> | null = null;
+  /** How many times a lost picture was sent again automatically. */
+  const resent = new Map<string, number>();
   function startWatch() {
     watchTimer ??= setInterval(() => void pollStatus(), 3000);
   }
@@ -129,9 +131,13 @@ function main() {
         const slow = st.elapsedMs > 90_000;
         it.overlay.note(fmt(st.elapsedMs), slow ? 'Модель отвечает долго: проверьте её в настройках или выберите модель полегче' : undefined);
       } else if (Date.now() - (it.sentAt ?? 0) > 5000 && (it.lost = (it.lost ?? 0) + 1) >= 2) {
-        // The worker restarted (extension updated, browser killed the page) and forgot the job.
+        // The worker restarted (the browser closed it to save memory, the extension updated)
+        // and forgot the job: send the picture again by itself, twice at most.
+        const tries = (resent.get(it.id) ?? 0) + 1;
+        resent.set(it.id, tries);
         it.status = 'error';
-        it.overlay.error('Задача потерялась', 'Расширение перезапускалось. Нажмите «Повторить».');
+        if (tries <= 2) void translate(it.cand, { priority: 40 });
+        else it.overlay.error('Задача потерялась', 'Расширение несколько раз перезапускалось. Нажмите «Повторить».');
       }
     }
   }

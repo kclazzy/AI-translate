@@ -39,8 +39,17 @@ async function ensureOffscreen(): Promise<void> {
 async function toOffscreen<T = unknown>(msg: ToOffscreen): Promise<T> {
   dlog('to offscreen', msg.type);
   if (chrome.offscreen) {
-    await ensureOffscreen();
-    return chrome.runtime.sendMessage(msg) as Promise<T>;
+    // The document may exist but not listen yet (just created, or being recreated after the
+    // browser closed it): retry for a few seconds instead of failing the picture.
+    for (let attempt = 0; ; attempt++) {
+      await ensureOffscreen();
+      try {
+        return (await chrome.runtime.sendMessage(msg)) as T;
+      } catch (e) {
+        if (attempt >= 30 || !/Receiving end does not exist|Could not establish connection|message port closed/i.test(String(e))) throw e;
+        await new Promise((r) => setTimeout(r, 150));
+      }
+    }
   }
   const { handleOffscreen } = await import('../offscreen/handler');
   return (await handleOffscreen(msg, relayFromOffscreen)) as T;
