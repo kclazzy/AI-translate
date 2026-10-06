@@ -240,3 +240,28 @@ describe('local reasoning models and model discovery', () => {
     expect(info).toMatchObject({ available: true, latest: '0.3.0' });
   });
 });
+
+describe('Ollama model check and download', () => {
+  it('reports offline, forbidden, missing and ok', async () => {
+    const { ollamaStatus } = await import('../src/llm/discover');
+    expect((await ollamaStatus('http://localhost:11434/v1', 'qwen2.5vl:7b', async () => { throw new TypeError('Failed to fetch'); })).state).toBe('offline');
+    expect((await ollamaStatus('http://localhost:11434/v1', 'qwen2.5vl:7b', async () => new Response('', { status: 403 }))).state).toBe('forbidden');
+    expect((await ollamaStatus('http://localhost:11434/v1', 'qwen2.5vl:7b', async () => jsonResponse({ models: [{ name: 'llama3:latest' }] }))).state).toBe('missing');
+    expect((await ollamaStatus('http://localhost:11434/v1', 'qwen2.5vl:7b', async () => jsonResponse({ models: [{ name: 'qwen2.5vl:7b' }] }))).state).toBe('ok');
+  });
+
+  it('streams pull progress and fails clearly on errors', async () => {
+    const { ollamaPull } = await import('../src/llm/discover');
+    const stream = (lines: object[]) => new Response(lines.map((l) => JSON.stringify(l)).join('\n') + '\n', { status: 200 });
+    const seen: string[] = [];
+    let body: any;
+    await ollamaPull('http://localhost:11434/v1', 'qwen2.5vl:7b', (p) => seen.push(p.status), undefined, async (u, i) => {
+      expect(u).toBe('http://localhost:11434/api/pull');
+      body = JSON.parse(String(i!.body));
+      return stream([{ status: 'pulling manifest' }, { status: 'pulling abc', total: 100, completed: 50 }, { status: 'success' }]);
+    });
+    expect(body).toEqual({ model: 'qwen2.5vl:7b', stream: true });
+    expect(seen).toEqual(['pulling manifest', 'pulling abc', 'success']);
+    await expect(ollamaPull('http://localhost:11434/v1', 'nope', () => {}, undefined, async () => stream([{ status: 'pulling manifest' }, { error: 'pull model manifest: file does not exist' }]))).rejects.toThrow('file does not exist');
+  });
+});

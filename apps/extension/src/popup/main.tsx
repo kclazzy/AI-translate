@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { EngineClient, errorMessage, LANGUAGES, listOpenAiModels, providerById, type AppSettings, type UsageTotals } from '@ait/core';
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
-import { ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
+import { ModelPicker, RecommendedModelCard, UpdateCheck } from '@ait/studio/model-picker';
 import './popup.css';
 import { db, hostOf, loadSettings, saveSettings, secrets } from '../shared/store';
 
@@ -24,7 +24,7 @@ function Popup() {
           .then((h) => setEngine((h as { paired?: boolean }).paired === false ? 'unpaired' : 'ok'))
           .catch(() => setEngine('down'));
       const v = providerById(x, x.visionProviderId);
-      if (x.pipeline === 'standalone' && v && v.kind === 'openai-compatible') {
+      if (x.pipeline === 'standalone' && v && v.kind === 'openai-compatible' && v.preset !== 'ollama') {
         void (async () => {
           try {
             const key = await secrets.get(`provider:${v.id}`);
@@ -58,7 +58,7 @@ function Popup() {
     if (command !== 'toggle-original') window.close();
   };
   const open = (path: string) => void chrome.tabs.create({ url: chrome.runtime.getURL(path) });
-  const missing = s.pipeline === 'standalone' && !vision;
+  const missing = s.pipeline === 'standalone' && !vision?.vision;
 
   return (
     <div className="pp">
@@ -71,6 +71,9 @@ function Popup() {
         <div className="ait-notice">Выберите модель, которая читает изображения. <button className="pp-link" onClick={() => chrome.runtime.openOptionsPage()}>Открыть настройки</button></div>
       ) : null}
       {model && !model.ok ? <div className="ait-error">{model.text}</div> : null}
+      {s.pipeline === 'standalone' ? (
+        <RecommendedModelCard compact settings={s} update={update} onDownload={() => void chrome.tabs.create({ url: chrome.runtime.getURL('studio.html?view=settings&pull=1') })} />
+      ) : null}
       {engine === 'down' ? <div className="ait-error">Движок не отвечает по адресу {s.engine.url}. Запустите его или переключитесь в режим без движка.</div> : null}
       {engine === 'unpaired' ? <div className="ait-notice">Движок запущен, но код сопряжения не подходит. Введите его в настройках.</div> : null}
 

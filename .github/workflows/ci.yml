@@ -48,6 +48,7 @@ jobs:
           xvfb-run -a node e2e/extension.e2e.mjs 2>&1 | tee .test-output/e2e-standalone.log
           MODE=engine xvfb-run -a node e2e/extension.e2e.mjs 2>&1 | tee .test-output/e2e-engine.log
           node e2e/mobile.e2e.mjs 2>&1 | tee .test-output/e2e-mobile.log
+          xvfb-run -a node e2e/ollama.e2e.mjs 2>&1 | tee .test-output/e2e-ollama.log
       - name: Package release files
         run: node scripts/package-release.mjs
       - uses: actions/upload-artifact@v4

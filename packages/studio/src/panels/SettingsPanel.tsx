@@ -13,7 +13,7 @@ import {
   type PromptProfile,
   type ProviderConfig,
 } from '@ait/core';
-import { ModelPicker, UpdateCheck } from '../ModelPicker';
+import { ModelPicker, RecommendedModelCard, UpdateCheck } from '../ModelPicker';
 import { usePlatform } from '../platform';
 import { ErrorBox, Field, Segmented, Switch, toast, useAction } from '../ui';
 
@@ -171,6 +171,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
 
   return (
     <div>
+      {s.pipeline === 'standalone' ? <RecommendedModelCard settings={s} update={update} autoStart={new URLSearchParams(location.search).get('pull') === '1'} /> : null}
       <div className="ait-panel">
         <h2>Как переводить</h2>
         <div className="ait-grid2">
