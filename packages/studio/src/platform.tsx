@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { AppSettings, IdbStore, ImageBackend, SecretStore, TranslateService } from '@ait/core';
+import type { AppSettings, IdbStore, ImageBackend, SecretStore, TranslateService, UpdateInfo } from '@ait/core';
 
 /** What the studio needs from its host (extension page, mobile app, web app). */
 export interface StudioPlatform {
@@ -15,6 +15,8 @@ export interface StudioPlatform {
   /** Optional: tell the host that a cached page result changed (extension updates overlays). */
   notifyResultChanged?(key: string): void;
   version: string;
+  /** Optional: install an update from inside the app (reports progress as text + percent). */
+  installUpdate?(info: UpdateInfo, progress: (text: string, pct?: number) => void): Promise<void>;
 }
 
 export const PlatformContext = createContext<StudioPlatform | null>(null);

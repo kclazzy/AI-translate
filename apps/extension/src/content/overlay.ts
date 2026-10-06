@@ -90,12 +90,26 @@ export class Overlay {
     }
   }
 
+  private stageLabel = '';
+
   stage(ev: StageEvent): void {
     this.bar.className = 'bar busy';
     this.pill = document.createElement('span');
     this.pill.className = 'pill';
-    this.pill.textContent = `${STAGE[ev.stage] ?? 'Работаю'}…`;
+    this.stageLabel = STAGE[ev.stage] ?? 'Работаю';
+    this.pill.textContent = `${this.stageLabel}…`;
     this.buttons([['✕', 'Отменить', this.actions.onCancel]]);
+  }
+
+  /** Extra live info next to the stage: queue position, elapsed time, a hint for slow models. */
+  note(text: string, hint?: string): void {
+    if (!this.pill || !this.bar.classList.contains('busy')) return;
+    this.pill.textContent = `${this.stageLabel}… ${text}`;
+    if (hint) {
+      const d = document.createElement('small');
+      d.textContent = hint;
+      this.pill.append(d);
+    }
   }
 
   error(message: string, detail?: string): void {

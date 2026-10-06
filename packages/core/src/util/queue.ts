@@ -84,6 +84,22 @@ export class TaskQueue {
     return () => this.listeners.delete(fn);
   }
 
+  /**
+   * Where a task is: running, waiting (with how many tasks will start before it) or unknown.
+   * Unknown means the queue never saw it or already finished it.
+   */
+  position(key: string): { state: 'running' } | { state: 'pending'; ahead: number } | { state: 'unknown' } {
+    const e = this.entries.get(key);
+    if (!e) return { state: 'unknown' };
+    if (e.started) return { state: 'running' };
+    let ahead = 0;
+    for (const o of this.entries.values()) {
+      if (o === e) continue;
+      if (o.started || o.priority > e.priority || (o.priority === e.priority && o.seq < e.seq)) ahead++;
+    }
+    return { state: 'pending', ahead };
+  }
+
   getStats(): QueueStats {
     return { ...this.stats };
   }

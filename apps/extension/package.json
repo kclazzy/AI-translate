@@ -1,6 +1,6 @@
 {
   "name": "@ait/extension",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,6 +12,7 @@
   "dependencies": {
     "@ait/core": "workspace:*",
     "@ait/studio": "workspace:*",
+    "jszip": "^3.10.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

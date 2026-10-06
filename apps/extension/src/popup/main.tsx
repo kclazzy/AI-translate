@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { EngineClient, errorMessage, LANGUAGES, listOpenAiModels, providerById, type AppSettings, type UsageTotals } from '@ait/core';
+import { EngineClient, LANGUAGES, providerById, type AppSettings, type UsageTotals } from '@ait/core';
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
-import { ModelPicker, RecommendedModelCard, UpdateCheck } from '@ait/studio/model-picker';
+import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
 import './popup.css';
 import { db, hostOf, loadSettings, saveSettings, secrets } from '../shared/store';
 
@@ -12,7 +12,7 @@ function Popup() {
   const [tab, setTab] = useState<chrome.tabs.Tab | null>(null);
   const [engine, setEngine] = useState<'ok' | 'down' | 'unpaired' | null>(null);
   const [usage, setUsage] = useState<UsageTotals | null>(null);
-  const [model, setModel] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(0);
 
   useEffect(() => {
     void loadSettings().then((x) => {
@@ -23,21 +23,12 @@ function Popup() {
           .health()
           .then((h) => setEngine((h as { paired?: boolean }).paired === false ? 'unpaired' : 'ok'))
           .catch(() => setEngine('down'));
-      const v = providerById(x, x.visionProviderId);
-      if (x.pipeline === 'standalone' && v && v.kind === 'openai-compatible' && v.preset !== 'ollama') {
-        void (async () => {
-          try {
-            const key = await secrets.get(`provider:${v.id}`);
-            const ids = await listOpenAiModels(v.baseUrl, key);
-            const found = ids.some((id) => id === v.model || id.split(':')[0] === v.model.split(':')[0] && v.model.includes(':') === false);
-            setModel(found || !ids.length ? { ok: true, text: `${v.label}: модель ${v.model} доступна` } : { ok: false, text: `${v.label} работает, но модели «${v.model}» нет. ${v.preset === 'ollama' ? `Выполните: ollama pull ${v.model}` : `Доступны: ${ids.slice(0, 5).join(', ')}`}` });
-          } catch (e) {
-            setModel({ ok: false, text: `${errorMessage(e)} ${(e as { detail?: string }).detail ?? ''}` });
-          }
-        })();
-      }
     });
-    void chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => setTab(t ?? null));
+    void chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => {
+      setTab(t ?? null);
+      // The badge counts pictures in work on this tab.
+      if (t?.id !== undefined) void chrome.action.getBadgeText({ tabId: t.id }).then((n) => setBusy(Number(n) || 0));
+    });
     void db.get<UsageTotals>('usage', 'totals').then((u) => setUsage(u ?? null));
   }, []);
 
@@ -70,9 +61,8 @@ function Popup() {
       {missing ? (
         <div className="ait-notice">Выберите модель, которая читает изображения. <button className="pp-link" onClick={() => chrome.runtime.openOptionsPage()}>Открыть настройки</button></div>
       ) : null}
-      {model && !model.ok ? <div className="ait-error">{model.text}</div> : null}
       {s.pipeline === 'standalone' ? (
-        <RecommendedModelCard compact settings={s} update={update} onDownload={() => void chrome.tabs.create({ url: chrome.runtime.getURL('studio.html?view=settings&pull=1') })} />
+        <ModelCheckCard compact settings={s} update={update} getKey={(id) => secrets.get(`provider:${id}`)} onOpenSettings={(download) => open(download ? 'studio.html?view=settings&pull=1' : 'studio.html?view=settings')} />
       ) : null}
       {engine === 'down' ? <div className="ait-error">Движок не отвечает по адресу {s.engine.url}. Запустите его или переключитесь в режим без движка.</div> : null}
       {engine === 'unpaired' ? <div className="ait-notice">Движок запущен, но код сопряжения не подходит. Введите его в настройках.</div> : null}
@@ -84,6 +74,17 @@ function Popup() {
         <button className="ait-btn" disabled={!canRun} onClick={() => command('select-area')}>Перевести область</button>
         <button className="ait-btn" disabled={!canRun} onClick={() => command('toggle-original')}>Оригинал ⇄</button>
       </div>
+      {busy && tab?.id !== undefined ? (
+        <button
+          className="ait-btn danger"
+          onClick={() => {
+            void chrome.runtime.sendMessage({ type: 'cancel-all', tabId: tab.id });
+            setBusy(0);
+          }}
+        >
+          Остановить перевод ({busy} в работе)
+        </button>
+      ) : null}
       {!canRun ? <p className="ait-hint">На этой странице расширение не работает. Откройте сайт с мангой.</p> : null}
 
       <label className="ait-switch pp-auto">
@@ -147,7 +148,6 @@ function Popup() {
               cfg={vision}
               getKey={() => secrets.get(`provider:${vision.id}`)}
               onPick={(model, canSee) => {
-                setModel(null);
                 update({ providers: s.providers.map((p) => (p.id === vision.id ? { ...p, model, vision: canSee ?? p.vision } : p)) });
               }}
             />
@@ -167,7 +167,7 @@ function Popup() {
         <span className="ait-muted">{usage ? `${usage.pages} стр. · $${usage.costUsd.toFixed(2)}` : ''}</span>
       </footer>
       <div className="pp-update">
-        <UpdateCheck compact current={chrome.runtime.getManifest().version} />
+        <UpdateCheck compact current={chrome.runtime.getManifest().version} install={async () => open('studio.html?view=settings&update=1')} />
       </div>
     </div>
   );

@@ -13,9 +13,9 @@ import {
   type PromptProfile,
   type ProviderConfig,
 } from '@ait/core';
-import { ModelPicker, RecommendedModelCard, UpdateCheck } from '../ModelPicker';
+import { LocalModels, ModelCheckCard, ModelPicker, UpdateCheck } from '../ModelPicker';
 import { usePlatform } from '../platform';
-import { ErrorBox, Field, Segmented, Switch, toast, useAction } from '../ui';
+import { ErrorBox, Field, FoldPanel, Segmented, Switch, toast, useAction } from '../ui';
 
 export interface SettingsProps {
   settings: AppSettings;
@@ -151,6 +151,12 @@ function ProfileEditor({ p, onChange }: { p: PromptProfile; onChange: (p: Prompt
 
 export function SettingsPanel({ settings: s, update }: SettingsProps) {
   const platform = usePlatform();
+  const params = new URLSearchParams(location.search);
+  const getKey = (id: string) => platform.secrets.get(`provider:${id}`);
+  useEffect(() => {
+    if (params.get('update') === '1') document.getElementById('ait-update')?.scrollIntoView({ block: 'center' });
+    if (params.get('updated')) toast(`Обновлено до версии ${params.get('updated')}`);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [addPreset, setAddPreset] = useState('anthropic');
   const [profileId, setProfileId] = useState(s.activeProfileId);
   const [siteKey, setSiteKey] = useState('');
@@ -168,10 +174,30 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
     });
   const profile = s.profiles.find((p) => p.id === profileId) ?? s.profiles[0];
   const visionCandidates = s.providers.filter((p) => p.vision);
+  const localProviders = s.providers.filter((p) => isLocalProvider(p));
+  const cloudProviders = s.providers.filter((p) => !isLocalProvider(p));
+  const addRow = (presets: typeof PROVIDER_PRESETS) => {
+    const value = presets.some((p) => p.preset === addPreset) ? addPreset : presets[0]?.preset ?? '';
+    return (
+      <div className="ait-row">
+        <Field label="Добавить">
+          <select className="ait-select" value={value} onChange={(e) => setAddPreset(e.target.value)}>
+            {presets.map((p) => <option key={p.preset} value={p.preset}>{p.label}</option>)}
+          </select>
+        </Field>
+        <div style={{ flex: '0 0 auto' }}>
+          <button className="ait-btn" onClick={() => update({ providers: [...s.providers, configFromPreset(value, shortId(value + '-'))] })}>
+            Добавить
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div>
-      {s.pipeline === 'standalone' ? <RecommendedModelCard settings={s} update={update} autoStart={new URLSearchParams(location.search).get('pull') === '1'} /> : null}
+      {s.pipeline === 'standalone' ? <ModelCheckCard settings={s} update={update} getKey={getKey} /> : null}
+      {s.pipeline === 'standalone' && platform.kind === 'extension' ? <LocalModels settings={s} update={update} getKey={getKey} autoStart={params.get('pull') === '1'} /> : null}
       <div className="ait-panel">
         <h2>Как переводить</h2>
         <div className="ait-grid2">
@@ -289,23 +315,18 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
         </div>
       </div>
 
-      {s.providers.map((p) => (
-        <ProviderEditor key={p.id} cfg={p} onChange={setProvider} onRemove={() => removeProvider(p.id)} />
-      ))}
-      <div className="ait-panel">
-        <div className="ait-row">
-          <Field label="Добавить провайдера">
-            <select className="ait-select" value={addPreset} onChange={(e) => setAddPreset(e.target.value)}>
-              {PROVIDER_PRESETS.map((p) => <option key={p.preset} value={p.preset}>{p.label}</option>)}
-            </select>
-          </Field>
-          <div style={{ flex: '0 0 auto' }}>
-            <button className="ait-btn" onClick={() => update({ providers: [...s.providers, configFromPreset(addPreset, shortId(addPreset + '-'))] })}>
-              Добавить
-            </button>
-          </div>
-        </div>
-      </div>
+      <FoldPanel title="Локальные серверы" summary={localProviders.map((p) => p.label).join(', ') || 'нет'} testId="local-servers">
+        {localProviders.map((p) => (
+          <ProviderEditor key={p.id} cfg={p} onChange={setProvider} onRemove={() => removeProvider(p.id)} />
+        ))}
+        {addRow(PROVIDER_PRESETS.filter((p) => p.local))}
+      </FoldPanel>
+      <FoldPanel title="Облачные модели" summary={cloudProviders.length ? cloudProviders.map((p) => p.label).join(', ') : 'не подключены — Claude, OpenAI, Gemini, OpenRouter…'} testId="cloud-providers">
+        {cloudProviders.map((p) => (
+          <ProviderEditor key={p.id} cfg={p} onChange={setProvider} onRemove={() => removeProvider(p.id)} />
+        ))}
+        {addRow(PROVIDER_PRESETS.filter((p) => !p.local))}
+      </FoldPanel>
 
       <div className="ait-panel">
         <h2>Профили перевода</h2>
@@ -381,7 +402,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
           <Switch checked={s.debug} onChange={(debug) => update({ debug })} label="Показывать отладку (время этапов, токены, стоимость)" />
         </div>
         <div style={{ marginTop: 14 }}>
-          <UpdateCheck current={platform.version} />
+          <span id="ait-update"><UpdateCheck current={platform.version} install={platform.installUpdate} autoCheck={params.get('update') === '1'} /></span>
         </div>
       </div>
     </div>

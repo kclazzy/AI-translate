@@ -275,3 +275,12 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 @keyframes ait-spin { to { transform: rotate(360deg); } }
+
+/* Folded settings panels */
+.ait-fold > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.ait-fold > summary::-webkit-details-marker { display: none; }
+.ait-fold > summary h2 { margin: 0; }
+.ait-fold > summary h2::before { content: '▸'; display: inline-block; width: 1.1em; transition: transform 0.15s; color: var(--ink-2); }
+.ait-fold[open] > summary h2::before { transform: rotate(90deg); }
+.ait-fold-body { display: grid; gap: 12px; margin-top: 12px; }
+.ait-fold-body > .ait-panel { margin: 0; box-shadow: none; }

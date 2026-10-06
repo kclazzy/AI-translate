@@ -1,5 +1,13 @@
 apply plugin: 'com.android.application'
 
+// Version from the monorepo package.json: 0.3.0 → versionCode 300, so a new APK installs over the old one.
+def aitVersion = new groovy.json.JsonSlurper().parse(file('../../../../package.json')).version
+def aitParts = aitVersion.tokenize('.').collect { it.replaceAll('[^0-9]', '') as int }
+def aitVersionCode = aitParts[0] * 10000 + aitParts[1] * 100 + aitParts[2]
+// A stable signing key (GitHub secrets AIT_KEYSTORE_B64 / AIT_KEYSTORE_PASSWORD) lets updates
+// install over the previous version. Without it the default debug key is used.
+def aitKeystore = System.getenv('AIT_KEYSTORE')
+
 android {
     namespace = "io.github.kclazzy.aitranslate"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +15,8 @@ android {
         applicationId "io.github.kclazzy.aitranslate"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode aitVersionCode
+        versionName aitVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,7 +24,20 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (aitKeystore) {
+            stable {
+                storeFile file(aitKeystore)
+                storePassword System.getenv('AIT_KEYSTORE_PASSWORD')
+                keyAlias 'ait'
+                keyPassword System.getenv('AIT_KEYSTORE_PASSWORD')
+            }
+        }
+    }
     buildTypes {
+        debug {
+            if (aitKeystore) signingConfig signingConfigs.stable
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

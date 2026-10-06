@@ -57,11 +57,11 @@ export async function httpError(res: Response, provider: string, url = '', model
   if (res.status === 413) return new AppError('IMAGE_TOO_LARGE', { detail: `${provider}: ${msg}` });
   if (res.status === 408 || res.status === 504) return new AppError('TIMEOUT', { detail: `${provider}: ${msg}` });
   if (res.status === 404 || /model .*not found|no such model|model_not_found/i.test(msg)) {
-    const pull = name === 'Ollama' && model ? ` Выполните в командной строке: ollama pull ${model}` : name === 'LM Studio' ? ' Загрузите модель в LM Studio и проверьте её имя в настройках.' : ' Проверьте адрес API и имя модели в настройках.';
+    const pull = name === 'Ollama' && model ? ` Скачайте её в Настройки → Локальные модели или выполните: ollama pull ${model}` : name === 'LM Studio' ? ' Загрузите модель в LM Studio и проверьте её имя в настройках.' : ' Проверьте адрес API и имя модели в настройках.';
     return new AppError('PROVIDER_UNAVAILABLE', { retryable: false, detail: `Модель «${model || '?'}» не найдена на сервере (${provider}).${pull}` });
   }
   if (res.status >= 500 || res.status === 529) {
-    const vision = /image|vision|multimodal/i.test(msg) ? ' Похоже, модель не умеет читать изображения: выберите vision-модель (например qwen2.5vl:7b).' : '';
+    const vision = /image|vision|multimodal/i.test(msg) ? ' Похоже, модель не умеет читать изображения: выберите модель, читающую картинки (например qwen3.5 — Настройки → Локальные модели).' : '';
     const memory = /memory|out of memory|cuda|vram/i.test(msg) ? ' Не хватает видеопамяти: закройте другие модели или выберите модель поменьше.' : '';
     return new AppError('PROVIDER_UNAVAILABLE', { detail: `${provider} вернул ошибку ${res.status}: ${msg}.${vision}${memory}` });
   }

@@ -1,6 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { createRoot } from 'react-dom/client';
-import { browserBackend, bytesToBase64, IdbStore, migrateSettings, SecretStore, TranslateService, type AppSettings } from '@ait/core';
+import { browserBackend, bytesToBase64, IdbStore, migrateSettings, pickAsset, SecretStore, TranslateService, type AppSettings, type UpdateInfo } from '@ait/core';
 import { downloadFile, StudioApp, type StudioPlatform } from '@ait/studio';
 import '@ait/studio/styles.css';
 import './mobile.css';
@@ -49,6 +49,33 @@ async function takeSharedFiles(): Promise<File[] | undefined> {
   return stored?.map((f) => new File([f.bytes as BlobPart], f.name, { type: f.type }));
 }
 
+/**
+ * Update from inside the app. Android: the system downloads the new APK and offers to install it
+ * over the current one. iPhone: a sideloaded app is re-installed the same way it was installed.
+ * Web/PWA: fetch the new service worker and reload.
+ */
+async function installUpdate(info: UpdateInfo, progress: (text: string, pct?: number) => void): Promise<void> {
+  const open = (url: string) => {
+    // Capacitor hands non-app URLs to the system browser.
+    window.location.href = url;
+  };
+  if (Capacitor.getPlatform() === 'android') {
+    const apk = pickAsset(info, 'android');
+    progress(apk ? 'Скачивание APK началось в браузере. Когда закончится, откройте файл и нажмите «Обновить».' : 'Открываю страницу релиза…');
+    open(apk?.url ?? info.url);
+    return;
+  }
+  if (Capacitor.getPlatform() === 'ios') {
+    progress('Скачайте новый .ipa и установите его так же, как в первый раз (AltStore / Sideloadly) — данные приложения сохранятся.');
+    open(info.url);
+    return;
+  }
+  progress('Загружаю новую версию…');
+  const reg = await navigator.serviceWorker?.getRegistration();
+  await reg?.update();
+  setTimeout(() => location.reload(), 500);
+}
+
 const platform: StudioPlatform = {
   kind: 'mobile',
   db,
@@ -58,7 +85,8 @@ const platform: StudioPlatform = {
   loadSettings,
   saveSettings,
   saveFile,
-  version: '0.2.2',
+  version: '0.3.0',
+  installUpdate,
 };
 
 if ('serviceWorker' in navigator && !Capacitor.isNativePlatform() && location.protocol === 'https:') {

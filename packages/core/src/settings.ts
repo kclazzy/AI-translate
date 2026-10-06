@@ -1,3 +1,4 @@
+import type { ModelCheck } from './llm/selftest';
 import type { PrivacyMode } from './llm/privacy';
 import type { ProviderConfig } from './llm/types';
 import { configFromPreset } from './llm/presets';
@@ -47,6 +48,12 @@ export interface AppSettings {
   cacheDays: number;
   /** First-run setup finished (mobile app shows a setup screen until then). */
   onboarded?: boolean;
+  /** Video memory the user picked (GB); decides the recommended local model. */
+  gpuVramGb?: number;
+  /** Last "Проверить модель" result per server + model (see modelCheckKey). */
+  modelChecks?: Record<string, ModelCheck>;
+  /** Folder the user wants Ollama to keep models in (applied via Ollama settings or OLLAMA_MODELS). */
+  ollamaModelsDir?: string;
 }
 
 export function defaultSettings(): AppSettings {

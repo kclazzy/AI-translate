@@ -1,5 +1,5 @@
 import { errorMessage } from '@ait/core/errors';
-import type { BackgroundToContent, ContentToBackground, ImageRef, RenderedTiles } from '../shared/messages';
+import type { BackgroundToContent, ContentToBackground, ImageRef, JobStatus, RenderedTiles } from '../shared/messages';
 import { Overlay } from './overlay';
 import { asCandidate, candidateAt, imgSrc, inlineData, markUi, scanPage, viewportRect, type Candidate } from './scanner';
 
@@ -15,6 +15,10 @@ interface Item {
   src?: string;
   status: 'queued' | 'working' | 'done' | 'error';
   overlay: Overlay;
+  /** When the background accepted the job; until then the worker may not know about it yet. */
+  sentAt?: number;
+  /** Consecutive status polls in which the worker did not know the job. */
+  lost?: number;
   result?: RenderedTiles;
   docRect?: { x: number; y: number; width: number; height: number };
 }
@@ -74,9 +78,58 @@ function main() {
     const item: Item = { id, cand: c, src: c.src, status: 'queued', overlay };
     items.set(id, item);
     overlay.stage({ stage: 'queued' });
-    const image: ImageRef = { id, kind: c.kind, src: c.src, dataUrl: await inlineData(c), rect: viewportRect(c.el), dpr: devicePixelRatio };
-    if (image.dataUrl) image.src = undefined;
-    await send({ type: 'translate', image, pageUrl: location.href, title: document.title, priority: opts.priority ?? priorityOf(c.el), force: opts.force });
+    try {
+      const image: ImageRef = { id, kind: c.kind, src: c.src, dataUrl: await inlineData(c), rect: viewportRect(c.el), dpr: devicePixelRatio };
+      if (image.dataUrl) image.src = undefined;
+      await send({ type: 'translate', image, pageUrl: location.href, title: document.title, priority: opts.priority ?? priorityOf(c.el), force: opts.force });
+      item.sentAt = Date.now();
+      startWatch();
+    } catch (e) {
+      // Without this the overlay would say "В очереди" forever.
+      if (items.get(id) !== item) return;
+      item.status = 'error';
+      overlay.error('Не удалось отправить картинку на перевод', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // ---- live status: queue position, elapsed time, lost jobs --------------------------------
+  let watchTimer: ReturnType<typeof setInterval> | null = null;
+  function startWatch() {
+    watchTimer ??= setInterval(() => void pollStatus(), 3000);
+  }
+  const fmt = (ms: number) => {
+    const sec = Math.floor(ms / 1000);
+    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  };
+  async function pollStatus() {
+    const active = [...items.values()].filter((it) => (it.status === 'queued' || it.status === 'working') && it.sentAt);
+    if (!active.length) {
+      if (watchTimer) clearInterval(watchTimer);
+      watchTimer = null;
+      return;
+    }
+    let res: Record<string, JobStatus>;
+    try {
+      res = await send<Record<string, JobStatus>>({ type: 'status', ids: active.map((it) => it.id) });
+    } catch {
+      return; // the service worker is restarting; try again on the next tick
+    }
+    for (const it of active) {
+      if (items.get(it.id) !== it || it.status === 'done' || it.status === 'error') continue;
+      const st = res?.[it.id] ?? { state: 'unknown' };
+      if (st.state === 'pending') {
+        it.lost = 0;
+        it.overlay.note(st.ahead ? `перед ней ${st.ahead}` : 'следующая', st.ahead > 1 ? 'Локальная модель переводит по одной картинке за раз' : undefined);
+      } else if (st.state === 'running') {
+        it.lost = 0;
+        const slow = st.elapsedMs > 90_000;
+        it.overlay.note(fmt(st.elapsedMs), slow ? 'Модель отвечает долго: проверьте её в настройках или выберите модель полегче' : undefined);
+      } else if (Date.now() - (it.sentAt ?? 0) > 5000 && (it.lost = (it.lost ?? 0) + 1) >= 2) {
+        // The worker restarted (extension updated, browser killed the page) and forgot the job.
+        it.status = 'error';
+        it.overlay.error('Задача потерялась', 'Расширение перезапускалось. Нажмите «Повторить».');
+      }
+    }
   }
 
   function priorityOf(el: Element): number {
@@ -122,6 +175,11 @@ function main() {
       case 'job-error': {
         const it = items.get(msg.id);
         if (!it) break;
+        if (msg.error.code === 'CANCELLED') {
+          it.overlay.destroy();
+          items.delete(msg.id);
+          break;
+        }
         it.status = 'error';
         it.overlay.error(errorMessage(msg.error), msg.error.detail);
         break;

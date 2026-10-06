@@ -12,6 +12,7 @@ export class OpenAICompatibleProvider implements LlmProvider {
   constructor(readonly config: ProviderConfig, private fetchImpl: FetchLike = (u, i) => fetch(u, i)) {}
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
+    if (isOllama(this.config)) return this.completeOllama(req);
     const local = isLocalUrl(this.config.baseUrl);
     const noThinking = this.config.noThinking ?? local;
     const messages: { role: string; content: unknown }[] = [{ role: 'system', content: req.system }];
@@ -67,6 +68,54 @@ export class OpenAICompatibleProvider implements LlmProvider {
       dispose();
     }
   }
+
+  /**
+   * Ollama's native /api/chat: the only reliable way to switch thinking off for Qwen3.5
+   * (a thinking model would otherwise "think" for minutes per page) and to raise the
+   * context window, which defaults to 4096 tokens and is too small for a page plus prompt.
+   */
+  private async completeOllama(req: CompletionRequest): Promise<CompletionResult> {
+    const noThinking = this.config.noThinking ?? true;
+    const messages: { role: string; content: string; images?: string[] }[] = [{ role: 'system', content: req.system }];
+    for (const m of req.messages) {
+      if (typeof m.content === 'string') messages.push({ role: m.role, content: m.content });
+      else {
+        const images = m.content.filter((p) => p.type === 'image').map((p) => (p as { base64: string }).base64);
+        const text = m.content.filter((p) => p.type === 'text').map((p) => (p as { text: string }).text).join('\n');
+        messages.push({ role: m.role, content: text, ...(images.length ? { images } : {}) });
+      }
+    }
+    const maxTokens = req.maxTokens ?? this.config.maxOutputTokens ?? 4096;
+    const body: Record<string, unknown> = {
+      model: this.config.model,
+      messages,
+      stream: false,
+      think: !noThinking,
+      keep_alive: '15m',
+      options: { temperature: req.temperature ?? this.config.temperature ?? 0.2, num_predict: maxTokens, num_ctx: 16384 },
+    };
+    if (req.json) body.format = 'json';
+    const { signal, dispose } = timeoutSignal(this.config.timeoutMs ?? 600_000, req.signal);
+    try {
+      const res = await safeFetch(this.fetchImpl, ollamaUrl(this.config.baseUrl, 'api/chat'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal }, this.config.label);
+      if (!res.ok) throw await httpError(res, this.config.label, this.config.baseUrl, this.config.model);
+      const json = (await res.json()) as { message?: { content?: string }; prompt_eval_count?: number; eval_count?: number; model?: string };
+      const text = stripThinking(json.message?.content ?? '');
+      if (!text) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'Модель вернула пустой ответ' });
+      return { text, inputTokens: json.prompt_eval_count ?? 0, outputTokens: json.eval_count ?? 0, model: json.model ?? this.config.model };
+    } finally {
+      dispose();
+    }
+  }
+}
+
+export function isOllama(cfg: Pick<ProviderConfig, 'preset' | 'baseUrl'>): boolean {
+  return cfg.preset === 'ollama' || /:11434(\/|$)/.test(cfg.baseUrl);
+}
+
+/** Ollama's native API lives next to its OpenAI-compatible /v1. */
+export function ollamaUrl(baseUrl: string, path: string): string {
+  return `${baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')}/${path}`;
 }
 
 /** Remove <think>…</think> reasoning that some local models put in the answer. */

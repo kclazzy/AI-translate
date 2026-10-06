@@ -1,6 +1,7 @@
-import { AppError, base64ToBytes, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type StoredResult } from '@ait/core';
+import { AppError, base64ToBytes, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type StoredResult } from '@ait/core';
 import { loadBundledFonts } from '@ait/studio/fonts';
-import type { FromOffscreen, RenderedTiles, ToOffscreen } from '../shared/messages';
+import type { StageEvent } from '@ait/core';
+import type { FromOffscreen, JobStatus, RenderedTiles, ToOffscreen } from '../shared/messages';
 import { db, loadSettings, secrets } from '../shared/store';
 
 /**
@@ -11,6 +12,16 @@ import { db, loadSettings, secrets } from '../shared/store';
 export const service = new TranslateService(db, secrets, browserBackend, loadSettings);
 const queue = new TaskQueue(2);
 let fontsReady: Promise<void> | null = null;
+/** What each job is doing, so the page can show progress and notice lost jobs. */
+const jobs = new Map<string, { tabId: number; startedAt?: number; stage?: StageEvent }>();
+
+export function jobStatus(jobId: string): JobStatus {
+  const info = jobs.get(jobId);
+  const pos = queue.position(jobId);
+  if (pos.state === 'unknown') return { state: 'unknown' };
+  if (pos.state === 'pending') return { state: 'pending', ahead: pos.ahead };
+  return { state: 'running', elapsedMs: info?.startedAt ? Date.now() - info.startedAt : 0, stage: info?.stage?.stage };
+}
 let pruned = false;
 
 export function toRendered(r: StoredResult, cached: boolean): RenderedTiles {
@@ -49,14 +60,21 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
     case 'run':
     case 'crop-run': {
       const settings = await loadSettings();
-      queue.concurrency = Math.max(1, settings.concurrency);
+      // Local servers (Ollama, LM Studio) answer one request at a time: running two pages at once
+      // makes both twice as slow and can push a single page past the timeout.
+      const vision = settings.providers.find((p) => p.id === settings.visionProviderId);
+      const local = settings.pipeline !== 'engine' && (!vision || isLocalProvider(vision));
+      queue.concurrency = local ? 1 : Math.max(1, settings.concurrency);
       const { jobId, tabId } = msg;
       const priority = msg.priority ?? 100;
+      jobs.set(jobId, { tabId });
       void queue
         .add({
           key: jobId,
           priority,
           run: async (signal) => {
+            const info = jobs.get(jobId);
+            if (info) info.startedAt = Date.now();
             const bytes = msg.type === 'run' ? base64ToBytes(msg.bytesB64) : await cropScreenshot(msg.screenshot, msg.rect, msg.dpr);
             const { result, cached } = await service.translate(bytes, msg.type === 'run' ? msg.mime : 'image/png', {
               sourceUrl: msg.pageUrl,
@@ -64,16 +82,28 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
               generic: msg.type === 'crop-run' ? msg.generic ?? true : msg.generic,
               force: msg.type === 'run' ? msg.force : false,
               signal,
-              onStage: (event) => emit({ source: 'offscreen', type: 'stage', jobId, tabId, event }),
+              onStage: (event) => {
+                const i = jobs.get(jobId);
+                if (i) i.stage = event;
+                emit({ source: 'offscreen', type: 'stage', jobId, tabId, event });
+              },
             });
             emit({ source: 'offscreen', type: 'done', jobId, tabId, result: toRendered(result, cached) });
           },
         })
-        .catch((e) => emit({ source: 'offscreen', type: 'error', jobId, tabId, error: toAppError(e).toJSON() }));
-      return { queued: true };
+        .catch((e) => emit({ source: 'offscreen', type: 'error', jobId, tabId, error: toAppError(e).toJSON() }))
+        .finally(() => jobs.delete(jobId));
+      return { queued: true, status: jobStatus(jobId) };
     }
     case 'cancel':
       return { cancelled: queue.cancel(msg.jobId) };
+    case 'cancel-tab': {
+      let n = 0;
+      for (const [id, j] of jobs) if (msg.tabId === undefined || j.tabId === msg.tabId) n += queue.cancel(id) ? 1 : 0;
+      return { cancelled: n };
+    }
+    case 'status':
+      return Object.fromEntries(msg.jobIds.map((id) => [id, jobStatus(id)]));
     case 'get-result': {
       const r = await service.getResult(msg.key);
       return r ? toRendered(r, true) : null;

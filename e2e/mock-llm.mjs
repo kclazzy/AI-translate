@@ -17,13 +17,18 @@ export function startMockLlm(port = 18080) {
     if (req.method === 'OPTIONS') return res.writeHead(204, cors).end();
     if (req.url.endsWith('/models'))
       return res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify({ data: [{ id: 'mock-vl', type: 'vlm', state: 'loaded' }, { id: 'qwen3.8-27b-gsq-rco', type: 'vlm', state: 'not-loaded' }, { id: 'text-only-14b', type: 'llm', state: 'not-loaded' }] }));
+    if (req.url === '/api/tags') return res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify({ models: [{ name: 'mock-vl', size: 5e9 }] }));
     if (req.method === 'GET') return res.writeHead(404, cors).end();
+    // Ollama's native API answers in its own shape.
+    const native = req.url === '/api/chat';
     let body = '';
     req.on('data', (c) => (body += c));
     req.on('end', () => {
       const json = JSON.parse(body || '{}');
       calls.push(json);
-      const user = json.messages?.at(-1)?.content;
+      const last = json.messages?.at(-1);
+      const user = native && last?.images?.length ? [{ type: 'text', text: last.content }, ...last.images.map(() => ({ type: 'image_url' }))] : last?.content;
+      const reply = (content, usage) => res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify(native ? { model: json.model, message: { role: 'assistant', content }, prompt_eval_count: usage[0], eval_count: usage[1] } : { choices: [{ message: { content } }], usage: { prompt_tokens: usage[0], completion_tokens: usage[1] }, model: json.model }));
       let answer;
       if (Array.isArray(user)) {
         const text = user.filter((p) => p.type === 'text').map((p) => p.text).join(' ');
@@ -31,7 +36,7 @@ export function startMockLlm(port = 18080) {
           // Engine OCR: crops arrive in reading order (b1 = first bubble).
           const ids = [...text.matchAll(/Crop (b\d+):/g)].map((x) => x[1]);
           const texts = ids.map((id) => ({ id, text: geometry.page[Number(id.slice(1)) - 1]?.text ?? '', type: 'DIALOGUE' }));
-          return res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ texts }) } }], usage: { prompt_tokens: 300, completion_tokens: 40 }, model: json.model }));
+          return reply(JSON.stringify({ texts }), [300, 40]);
         }
         const m = /The image is (\d+)×(\d+)/.exec(text);
         const w = Number(m?.[1] ?? 0);
@@ -45,9 +50,7 @@ export function startMockLlm(port = 18080) {
         const blocks = JSON.parse(/<blocks>\n(.*)\n<\/blocks>/s.exec(user)?.[1] ?? '[]');
         answer = { translations: blocks.map((b) => ({ id: b.id, text: TRANSLATIONS[b.text] ?? `RU ${b.text}` })), entities: [], summary: '' };
       }
-      res.writeHead(200, { ...cors, 'content-type': 'application/json' }).end(
-        JSON.stringify({ choices: [{ message: { content: JSON.stringify(answer) } }], usage: { prompt_tokens: 1200, completion_tokens: 150 }, model: json.model }),
-      );
+      reply(JSON.stringify(answer), [1200, 150]);
     });
   });
   return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve({ server, calls })));

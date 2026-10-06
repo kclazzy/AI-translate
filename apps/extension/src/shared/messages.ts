@@ -30,7 +30,8 @@ export type ContentToBackground =
   | { type: 'capture-area'; image: ImageRef; pageUrl: string; title: string }
   | { type: 'get-page-state'; host: string }
   | { type: 'open-editor'; key: string }
-  | { type: 'get-result'; key: string };
+  | { type: 'get-result'; key: string }
+  | { type: 'status'; ids: string[] };
 
 // background → content
 export type BackgroundToContent =
@@ -42,11 +43,19 @@ export type BackgroundToContent =
   | { type: 'result-changed'; key: string }
   | { type: 'state'; autoTranslate: boolean; minImageSize: number };
 
+/** Where a job is. "unknown" means the worker has never heard of it (lost after a restart) or it just finished. */
+export type JobStatus =
+  | { state: 'pending'; ahead: number }
+  | { state: 'running'; elapsedMs: number; stage?: StageEvent['stage'] }
+  | { state: 'unknown' };
+
 // background ↔ offscreen
 export type ToOffscreen =
   | { target: 'offscreen'; type: 'run'; jobId: string; tabId: number; bytesB64: string; mime?: string; pageUrl: string; title: string; priority: number; generic?: boolean; force?: boolean }
   | { target: 'offscreen'; type: 'crop-run'; jobId: string; tabId: number; screenshot: string; rect: { x: number; y: number; width: number; height: number }; dpr: number; pageUrl: string; title: string; generic?: boolean; priority?: number }
   | { target: 'offscreen'; type: 'cancel'; jobId: string }
+  | { target: 'offscreen'; type: 'cancel-tab'; tabId?: number }
+  | { target: 'offscreen'; type: 'status'; jobIds: string[] }
   | { target: 'offscreen'; type: 'get-result'; key: string };
 
 export type FromOffscreen =
@@ -59,4 +68,5 @@ export type UiToBackground =
   | { type: 'popup-command'; command: 'translate-page' | 'select-area' | 'toggle-original'; tabId: number }
   | { type: 'set-auto'; host: string; enabled: boolean; tabId: number }
   | { type: 'settings-changed' }
+  | { type: 'cancel-all'; tabId?: number }
   | { type: 'result-changed'; key: string };

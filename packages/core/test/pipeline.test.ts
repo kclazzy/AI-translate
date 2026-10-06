@@ -24,7 +24,7 @@ function config(over: Partial<PipelineConfig> = {}): PipelineConfig {
     glossary: [],
     translateSfx: true,
     sfxStyle: 'translated',
-    vision: { ...configFromPreset('ollama', 'ollama'), vision: true },
+    vision: { ...configFromPreset('lmstudio', 'vlm'), model: 'qwen2.5vl:7b', vision: true },
     translator: null,
     ...over,
   };

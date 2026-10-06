@@ -1,6 +1,7 @@
 import { browserBackend, TranslateService } from '@ait/core';
 import { downloadFile, type StudioPlatform } from '@ait/studio';
 import { db, loadSettings, saveSettings, secrets } from '../shared/store';
+import { installExtensionUpdate } from './updater';
 
 export function extensionPlatform(): StudioPlatform {
   return {
@@ -14,5 +15,6 @@ export function extensionPlatform(): StudioPlatform {
     saveFile: downloadFile,
     notifyResultChanged: (key) => void chrome.runtime.sendMessage({ type: 'result-changed', key }).catch(() => undefined),
     version: chrome.runtime.getManifest().version,
+    installUpdate: installExtensionUpdate,
   };
 }

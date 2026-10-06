@@ -1,5 +1,5 @@
 import { AppError, bytesToBase64, dataUrlToBytes, toAppError } from '@ait/core';
-import type { BackgroundToContent, ContentToBackground, FromOffscreen, ToOffscreen, UiToBackground } from '../shared/messages';
+import type { BackgroundToContent, ContentToBackground, FromOffscreen, JobStatus, ToOffscreen, UiToBackground } from '../shared/messages';
 import { hostOf, loadSettings, saveSettings } from '../shared/store';
 
 /**
@@ -166,6 +166,10 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       }
       return { queued: true };
     }
+    case 'status': {
+      const res = await toOffscreen<Record<string, JobStatus>>({ target: 'offscreen', type: 'status', jobIds: msg.ids.map((id) => `${tabId}|${id}`) });
+      return Object.fromEntries(msg.ids.map((id) => [id, res?.[`${tabId}|${id}`] ?? { state: 'unknown' }]));
+    }
     case 'cancel':
       track(tabId, `${tabId}|${msg.id}`, false);
       return toOffscreen({ target: 'offscreen', type: 'cancel', jobId: `${tabId}|${msg.id}` });
@@ -208,6 +212,12 @@ async function handleUi(msg: UiToBackground): Promise<unknown> {
     case 'settings-changed':
       await broadcastState();
       return null;
+    case 'cancel-all': {
+      if (msg.tabId === undefined) running.clear();
+      else running.delete(msg.tabId);
+      if (msg.tabId !== undefined) setBadge(msg.tabId);
+      return toOffscreen({ target: 'offscreen', type: 'cancel-tab', tabId: msg.tabId });
+    }
     case 'result-changed': {
       const tabs = await chrome.tabs.query({});
       for (const t of tabs) if (t.id !== undefined) sendToTab(t.id, { type: 'result-changed', key: msg.key });
@@ -269,7 +279,15 @@ async function installOllamaOriginRule(): Promise<void> {
 void installOllamaOriginRule();
 chrome.runtime.onStartup?.addListener(() => void installOllamaOriginRule());
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
+  // After an in-app update: show the settings page with a confirmation.
+  if (details.reason === 'update') {
+    void chrome.storage.local.get('justUpdated').then(({ justUpdated }) => {
+      if (!justUpdated) return;
+      void chrome.storage.local.remove('justUpdated');
+      void chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?view=settings&updated=${encodeURIComponent((justUpdated as { to: string }).to)}`) });
+    });
+  }
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({ id: 'ait-translate-image', title: 'Перевести изображение', contexts: ['image'] });
     chrome.contextMenus.create({ id: 'ait-translate-page', title: 'Перевести все картинки на странице', contexts: ['page'] });

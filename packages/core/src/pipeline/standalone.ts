@@ -3,7 +3,7 @@ import type { ImageBackend } from '../image/backend';
 import { cleanBlock } from '../image/clean';
 import { boxToPolygon, clampBox, overlapRatio, TiledImage } from '../image/tiled';
 import { detectScript } from '../languages';
-import { assertPrivacy } from '../llm/privacy';
+import { assertPrivacy, isLocalProvider } from '../llm/privacy';
 import { createProvider } from '../llm/presets';
 import type { FetchLike, LlmProvider } from '../llm/types';
 import { mergeContext, type TranslationContext } from '../translate/context';
@@ -97,7 +97,8 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
       });
       return { answer: parseVisionAnswer(res.text, withTranslation), usage: usageFrom(provider, res.model, res.inputTokens, res.outputTokens) };
     },
-    { retries: 2, signal },
+    // A local model that timed out will time out again: report it instead of waiting 3× longer.
+    { retries: 2, signal, shouldRetry: (e) => e.retryable && !(e.code === 'TIMEOUT' && isLocalProvider(config.vision!)) },
   );
 }
 
@@ -137,7 +138,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   const located: Located[] = [];
   let entities: unknown[] = [];
   const summaries: string[] = [];
-  const answers = await mapLimit(views, 2, async (view, i) => {
+  // A local server runs one request at a time anyway; parallel requests only split the GPU.
+  const answers = await mapLimit(views, isLocalProvider(config.vision) ? 1 : 2, async (view, i) => {
     const r = await readView(vision, original, view, config, req.context, !separate, deps, signal);
     stage('ocr', (i + 1) / views.length);
     return { view, ...r };

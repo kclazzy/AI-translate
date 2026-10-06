@@ -26,7 +26,11 @@ jobs:
         run: pnpm build && npx cap sync android
       - name: Build debug APK (installable, not for the Play Store)
         working-directory: apps/mobile/android
+        env:
+          AIT_KEYSTORE_B64: ${{ secrets.AIT_KEYSTORE_B64 }}
+          AIT_KEYSTORE_PASSWORD: ${{ secrets.AIT_KEYSTORE_PASSWORD }}
         run: |
+          if [ -n "$AIT_KEYSTORE_B64" ]; then echo "$AIT_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/ait.keystore"; export AIT_KEYSTORE="$RUNNER_TEMP/ait.keystore"; fi
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon

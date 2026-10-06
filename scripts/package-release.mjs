@@ -56,9 +56,9 @@ function mobileSource(zip, prefix, platform) {
    extension-firefox/manifest.json.
 
 2. МОДЕЛЬ
-   Откройте настройки расширения и выберите модель, которая понимает изображения.
-   Локально: установите Ollama, выполните «ollama pull qwen2.5vl:7b» и задайте переменную
-   OLLAMA_ORIGINS=chrome-extension://*,moz-extension://* (затем перезапустите Ollama).
+   Локально: установите Ollama (https://ollama.com/download), откройте настройки расширения →
+   «Локальные модели»: видеокарта определится сама, нажмите «Скачать» у рекомендуемой модели,
+   затем «Проверить модель» — увидите, что она прочитала и за сколько секунд.
    Облако: добавьте провайдера (Gemini, Claude, OpenAI, OpenRouter) и вставьте ключ.
 
 3. ЛОКАЛЬНЫЙ ДВИЖОК (по желанию, для видеокарты)
@@ -67,6 +67,10 @@ function mobileSource(zip, prefix, platform) {
    («Где обрабатывать» → «Локальный движок»).
    Для RTX 50xx и японского OCR: engine\\scripts\\install-gpu-extras.bat.
    Для телефонов в той же сети: start-engine.bat --lan
+
+4. ОБНОВЛЕНИЕ
+   Настройки → «Проверить обновления» → «Обновить сейчас». Один раз выберите папку
+   extension-chrome — дальше расширение обновляется само.
 
 Подробности: README.md в репозитории https://github.com/kclazzy/AI-translate
 `,

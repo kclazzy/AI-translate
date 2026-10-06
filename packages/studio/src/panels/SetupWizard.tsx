@@ -15,7 +15,7 @@ export function SetupWizard({ settings, update, onDone }: { settings: AppSetting
   const [preset, setPreset] = useState('gemini');
   const [key, setKey] = useState('');
   const [lanUrl, setLanUrl] = useState('http://192.168.1.10:11434/v1');
-  const [lanModel, setLanModel] = useState('qwen2.5vl:7b');
+  const [lanModel, setLanModel] = useState('qwen3.5:9b-q4_K_M');
   const [engineUrl, setEngineUrl] = useState('http://192.168.1.10:8765');
   const [code, setCode] = useState('');
 

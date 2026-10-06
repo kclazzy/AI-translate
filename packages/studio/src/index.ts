@@ -6,4 +6,4 @@ export { CachedPageEditor, ProjectPageEditor } from './editor/EditorHost';
 export { SettingsPanel } from './panels/SettingsPanel';
 export { importFiles, exportZip, exportPdf, flattenTiles } from './files';
 export { ProjectStore } from './projects';
-export { ModelPicker, RecommendedModelCard, UpdateCheck } from './ModelPicker';
+export { detectGpu, LocalModels, ModelCheckCard, ModelPicker, UpdateCheck } from './ModelPicker';

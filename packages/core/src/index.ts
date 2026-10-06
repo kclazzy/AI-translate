@@ -32,3 +32,4 @@ export * from './pipeline/run';
 export * from './project/format';
 export * from './storage/idb';
 export * from './storage/secrets';
+export * from './llm/selftest';

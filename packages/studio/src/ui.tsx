@@ -129,3 +129,16 @@ export const Icon = {
   Lock: () => (<svg viewBox="0 0 24 24" {...P}><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>),
   Clock: () => (<svg viewBox="0 0 24 24" {...P}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>),
 };
+
+/** A settings panel that stays folded until the user opens it. */
+export function FoldPanel({ title, summary, defaultOpen, children, testId }: { title: string; summary?: ReactNode; defaultOpen?: boolean; children: ReactNode; testId?: string }) {
+  return (
+    <details className="ait-panel ait-fold" open={defaultOpen} data-testid={testId}>
+      <summary>
+        <h2>{title}</h2>
+        {summary ? <span className="ait-muted">{summary}</span> : null}
+      </summary>
+      <div className="ait-fold-body">{children}</div>
+    </details>
+  );
+}
