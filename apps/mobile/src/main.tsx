@@ -58,7 +58,7 @@ const platform: StudioPlatform = {
   loadSettings,
   saveSettings,
   saveFile,
-  version: '0.2.1',
+  version: '0.2.2',
 };
 
 if ('serviceWorker' in navigator && !Capacitor.isNativePlatform() && location.protocol === 'https:') {

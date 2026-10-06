@@ -26,8 +26,13 @@ writeFileSync(join(ext, 'manifest.json'), JSON.stringify(manifest));
 
 let installed = false;
 const pulls = [];
+const origins = [];
+// Same rule as real Ollama: no Origin, or a localhost/127.0.0.1/0.0.0.0 origin, unless OLLAMA_ORIGINS says otherwise.
+const allowedOrigin = (o) => !o || /^(https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?|app:\/\/|file:\/\/|tauri:\/\/|vscode-webview:\/\/)/.test(o);
 const ollama = createServer((req, res) => {
   const json = (code, body) => res.writeHead(code, { 'content-type': 'application/json' }).end(JSON.stringify(body));
+  origins.push(`${req.method} ${req.url} ${req.headers.origin ?? '-'}`);
+  if (!allowedOrigin(req.headers.origin)) return res.writeHead(403).end();
   if (req.url === '/api/tags') return json(200, { models: installed ? [{ name: 'qwen2.5vl:7b', size: 6e9 }] : [{ name: 'llama3.2:3b' }] });
   if (req.url === '/api/pull' && req.method === 'POST') {
     let b = '';
@@ -77,6 +82,7 @@ try {
   await tab.screenshot({ path: join(OUT, 'ollama-progress.png') });
   check('progress is shown while downloading', true);
   await tab.waitForFunction(() => document.body.innerText.includes('установлена и выбрана'), { timeout: 20000 });
+  check('POST requests reach Ollama without OLLAMA_ORIGINS', !origins.some((o) => o.includes('chrome-extension')), origins.filter((o) => o.startsWith('POST')).join(' | '));
   check('model selected after download', pulls.length === 1 && pulls[0].model === 'qwen2.5vl:7b', JSON.stringify(pulls));
   const saved = await tab.evaluate(async () => {
     const db = await new Promise((res) => {

@@ -97,7 +97,7 @@ async function fetchImage(src: string, pageUrl: string): Promise<{ bytes: Uint8A
             id: ruleId,
             priority: 1,
             action: { type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS, requestHeaders: [{ header: 'referer', operation: chrome.declarativeNetRequest.HeaderOperation.SET, value: pageUrl }] },
-            condition: { requestDomains: [url.hostname], initiatorDomains: [chrome.runtime.id], resourceTypes: [chrome.declarativeNetRequest.ResourceType.XMLHTTPREQUEST, chrome.declarativeNetRequest.ResourceType.OTHER] },
+            condition: { requestDomains: [url.hostname], initiatorDomains: [new URL(chrome.runtime.getURL('')).host], resourceTypes: [chrome.declarativeNetRequest.ResourceType.XMLHTTPREQUEST, chrome.declarativeNetRequest.ResourceType.OTHER] },
           },
         ],
       });
@@ -231,6 +231,43 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   p.then(sendResponse, (e) => sendResponse({ error: toAppError(e).toJSON() }));
   return true;
 });
+
+/**
+ * Ollama rejects requests whose Origin is chrome-extension://… unless OLLAMA_ORIGINS is set.
+ * For our own requests to Ollama on this computer we present a localhost origin, which Ollama
+ * allows by default — so no environment variable is needed. Only this extension's requests
+ * to port 11434 on the loopback address are touched.
+ */
+const OLLAMA_ORIGIN_RULE_ID = 11434;
+async function installOllamaOriginRule(): Promise<void> {
+  const dnr = chrome.declarativeNetRequest;
+  if (!dnr?.updateDynamicRules) return;
+  try {
+    await dnr.updateDynamicRules({
+      removeRuleIds: [OLLAMA_ORIGIN_RULE_ID],
+      addRules: [
+        {
+          id: OLLAMA_ORIGIN_RULE_ID,
+          priority: 2,
+          action: {
+            type: dnr.RuleActionType.MODIFY_HEADERS,
+            requestHeaders: [{ header: 'origin', operation: dnr.HeaderOperation.SET, value: 'http://127.0.0.1' }],
+          },
+          condition: {
+            regexFilter: '^https?://(localhost|127\\.0\\.0\\.1|\\[::1\\]):11434/',
+            // Firefox uses an internal UUID host for moz-extension:// pages, not the add-on id.
+            initiatorDomains: [new URL(chrome.runtime.getURL('')).host],
+            resourceTypes: [dnr.ResourceType.XMLHTTPREQUEST, dnr.ResourceType.OTHER],
+          },
+        },
+      ],
+    });
+  } catch (e) {
+    dlog('ollama origin rule failed', e);
+  }
+}
+void installOllamaOriginRule();
+chrome.runtime.onStartup?.addListener(() => void installOllamaOriginRule());
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
