@@ -62,10 +62,13 @@ if (MODE === 'engine') {
 
 let browser;
 try {
+  // Chrome 137+ ignores --load-extension; current puppeteer loads extensions over CDP instead.
+  const cdpExtensions = !!process.env.E2E_CDP_EXTENSIONS;
   browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: false,
-  args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, '--no-sandbox', '--no-first-run', '--window-size=1280,1300', '--disable-gpu', '--disable-features=DisableLoadExtensionCommandLineSwitch'],
+  ...(cdpExtensions ? { pipe: true, enableExtensions: [ext] } : {}),
+  args: [...(cdpExtensions ? [] : [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`]), '--no-sandbox', '--no-first-run', '--window-size=1280,1300', '--disable-gpu'],
   defaultViewport: { width: 1200, height: 1200 },
   });
 } catch (e) {

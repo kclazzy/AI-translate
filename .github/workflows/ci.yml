@@ -39,6 +39,7 @@ jobs:
       - name: End-to-end tests in Chrome for Testing
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+          E2E_CDP_EXTENSIONS: '1'
         run: |
           # The pinned puppeteer drives old local test browsers; current Chrome needs a current puppeteer.
           pnpm --filter @ait/e2e add -D puppeteer-core@latest
