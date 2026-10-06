@@ -1,5 +1,6 @@
 import { AppError, base64ToBytes, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type StoredResult } from '@ait/core';
 import { loadBundledFonts } from '@ait/studio/fonts';
+import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
 import type { StageEvent } from '@ait/core';
 import type { FromOffscreen, JobStatus, RenderedTiles, ToOffscreen } from '../shared/messages';
 import { db, loadSettings, secrets } from '../shared/store';
@@ -109,6 +110,27 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
     case 'get-result': {
       const r = await service.getResult(msg.key);
       return r ? toRendered(r, true) : null;
+    }
+    case 'build-file': {
+      // Assemble the translated pages of a chapter into one file and hand back a blob URL.
+      const pages: ExportPage[] = [];
+      for (const [i, key] of msg.keys.entries()) {
+        const r = await service.getResult(key);
+        if (r) pages.push({ name: `${String(i + 1).padStart(3, '0')}.png`, width: r.page.width, height: r.page.height, tiles: r.rendered });
+      }
+      if (!pages.length) throw new AppError('UNKNOWN', { retryable: false, message: 'Нет переведённых страниц' });
+      // Letters (any alphabet), digits and simple punctuation only: Chrome rejects some characters.
+      const safe = (msg.title || 'Глава').replace(/[^\p{L}\p{N} ._,()\-]+/gu, ' ').replace(/\s+/g, ' ').replace(/^[ .]+|[ .]+$/g, '').slice(0, 100) || 'Глава';
+      const backend = browserBackend;
+      let bytes: Uint8Array;
+      let mime: string;
+      if (msg.format === 'pdf') [bytes, mime] = [await exportPdf(backend, pages), 'application/pdf'];
+      else if (msg.format === 'cbz') [bytes, mime] = [await exportCbz(backend, pages, safe), 'application/vnd.comicbook+zip'];
+      else if (msg.format === 'epub') [bytes, mime] = [await exportEpub(backend, pages, safe, msg.lang), 'application/epub+zip'];
+      else [bytes, mime] = [await exportZip(backend, pages, 'image/png'), 'application/zip'];
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
+      setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
+      return { url, name: `${safe}.${msg.format}`, pages: pages.length, size: bytes.length };
     }
   }
 }

@@ -32,14 +32,18 @@ export type ContentToBackground =
   | { type: 'open-editor'; key: string }
   | { type: 'get-result'; key: string }
   | { type: 'status'; ids: string[] }
-  | { type: 'open-setup' };
+  | { type: 'open-setup' }
+  | { type: 'build-download'; keys: string[]; title: string; format: ChapterFormat };
+
+/** File formats for «Перевести и скачать». */
+export type ChapterFormat = 'pdf' | 'cbz' | 'zip' | 'epub';
 
 // background → content
 export type BackgroundToContent =
   | { type: 'job-stage'; id: string; event: StageEvent }
   | { type: 'job-done'; id: string; result: RenderedTiles }
   | { type: 'job-error'; id: string; error: SerializedError }
-  | { type: 'command'; command: 'translate-page' | 'select-area' | 'toggle-original' | 'set-auto'; value?: boolean }
+  | { type: 'command'; command: 'translate-page' | 'select-area' | 'toggle-original' | 'set-auto' | 'download-chapter'; value?: boolean | ChapterFormat }
   | { type: 'translate-src'; src: string }
   | { type: 'result-changed'; key: string }
   | { type: 'get-langs' }
@@ -66,6 +70,7 @@ export type ToOffscreen =
   | { target: 'offscreen'; type: 'cancel'; jobId: string }
   | { target: 'offscreen'; type: 'cancel-tab'; tabId?: number }
   | { target: 'offscreen'; type: 'status'; jobIds: string[] }
+  | { target: 'offscreen'; type: 'build-file'; keys: string[]; title: string; format: ChapterFormat; lang: string }
   | { target: 'offscreen'; type: 'get-result'; key: string };
 
 export type FromOffscreen =
@@ -75,7 +80,7 @@ export type FromOffscreen =
 
 // UI pages → background
 export type UiToBackground =
-  | { type: 'popup-command'; command: 'translate-page' | 'select-area' | 'toggle-original'; tabId: number }
+  | { type: 'popup-command'; command: 'translate-page' | 'select-area' | 'toggle-original' | 'download-chapter'; tabId: number; format?: ChapterFormat }
   | { type: 'set-auto'; host: string; enabled: boolean; tabId: number }
   | { type: 'settings-changed' }
   | { type: 'cancel-all'; tabId?: number }

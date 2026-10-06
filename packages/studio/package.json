@@ -1,6 +1,6 @@
 {
   "name": "@ait/studio",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "type": "module",
   "main": "src/index.ts",
@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./styles.css": "./src/styles.css",
     "./fonts": "./src/fonts.ts",
-    "./model-picker": "./src/ModelPicker.tsx"
+    "./model-picker": "./src/ModelPicker.tsx",
+    "./files": "./src/files.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
@@ -28,6 +29,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@napi-rs/canvas": "^0.1.100",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "typescript": "^5.9.0",

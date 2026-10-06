@@ -10,7 +10,7 @@ export function buildManifest(target: 'chrome' | 'firefox', version: string): Re
     action: { default_popup: 'popup.html', default_title: 'AI Translate', default_icon: { 16: 'icons/16.png', 32: 'icons/32.png' } },
     options_ui: { page: 'options.html', open_in_tab: true },
     content_scripts: [{ matches: ['<all_urls>'], js: ['content.js'], run_at: 'document_idle', all_frames: false }],
-    permissions: ['storage', 'unlimitedStorage', 'activeTab', 'scripting', 'contextMenus', 'declarativeNetRequestWithHostAccess'],
+    permissions: ['storage', 'unlimitedStorage', 'activeTab', 'scripting', 'contextMenus', 'declarativeNetRequestWithHostAccess', 'downloads'],
     host_permissions: ['<all_urls>'],
     commands: {
       'translate-page': { suggested_key: { default: 'Alt+Shift+T' }, description: 'Перевести все картинки на странице' },

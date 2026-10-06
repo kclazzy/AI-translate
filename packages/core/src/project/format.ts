@@ -90,6 +90,12 @@ export async function readArchiveImages(bytes: Uint8Array): Promise<{ name: stri
   }
   const files = checkArchive(zip).filter((f) => /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(f.name) && !f.name.startsWith('__MACOSX'));
   files.sort((a, b) => naturalCompare(a.name, b.name));
+  // EPUB: keep the reading order of the book (spine), not the file names.
+  const order = await epubImageOrder(zip);
+  if (order.length) {
+    const rank = new Map(order.map((n, i) => [n, i]));
+    files.sort((a, b) => (rank.get(a.name) ?? 1e9) - (rank.get(b.name) ?? 1e9) || naturalCompare(a.name, b.name));
+  }
   const out: { name: string; bytes: Uint8Array; mime: string }[] = [];
   for (const f of files) {
     const data = await f.async('uint8array');
@@ -98,6 +104,47 @@ export async function readArchiveImages(bytes: Uint8Array): Promise<{ name: stri
     out.push({ name: f.name.split('/').pop() ?? f.name, bytes: data, mime });
   }
   return out;
+}
+
+/** Image paths of an EPUB in reading order (spine → pages → <img>/<image>), or [] if not an EPUB. */
+export async function epubImageOrder(zip: JSZip): Promise<string[]> {
+  const container = zip.file('META-INF/container.xml');
+  if (!container) return [];
+  const rootPath = /full-path="([^"]+)"/.exec(await container.async('string'))?.[1];
+  const opfFile = rootPath ? zip.file(rootPath) : null;
+  if (!opfFile) return [];
+  const opf = await opfFile.async('string');
+  const base = rootPath!.includes('/') ? rootPath!.slice(0, rootPath!.lastIndexOf('/') + 1) : '';
+  const resolve = (dir: string, href: string) => {
+    const parts = (dir + decodeURIComponent(href.split('#')[0])).split('/');
+    const out: string[] = [];
+    for (const p of parts) {
+      if (p === '..') out.pop();
+      else if (p && p !== '.') out.push(p);
+    }
+    return out.join('/');
+  };
+  const items = new Map<string, string>();
+  for (const m of opf.matchAll(/<item\b[^>]*>/g)) {
+    const id = /\bid="([^"]+)"/.exec(m[0])?.[1];
+    const href = /\bhref="([^"]+)"/.exec(m[0])?.[1];
+    if (id && href) items.set(id, resolve(base, href));
+  }
+  const order: string[] = [];
+  for (const m of opf.matchAll(/<itemref\b[^>]*idref="([^"]+)"/g)) {
+    const path = items.get(m[1]);
+    if (!path) continue;
+    if (/\.(png|jpe?g|webp|gif|avif)$/i.test(path)) {
+      order.push(path);
+      continue;
+    }
+    const doc = zip.file(path);
+    if (!doc) continue;
+    const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : '';
+    const html = await doc.async('string');
+    for (const im of html.matchAll(/<(?:img|image)\b[^>]*?(?:src|xlink:href|href)="([^"]+)"/g)) order.push(resolve(dir, im[1]));
+  }
+  return order;
 }
 
 const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/bmp': 'bmp', 'image/avif': 'avif' };

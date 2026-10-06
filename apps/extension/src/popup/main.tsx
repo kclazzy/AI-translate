@@ -50,6 +50,7 @@ function Popup() {
   const [unloaded, setUnloaded] = useState<string[] | null>(null);
   const [langs, setLangs] = useState<PageLangs | null>(null);
   const [preflight, setPreflight] = useState(false);
+  const [fmt, setFmt] = useState<'pdf' | 'cbz' | 'zip' | 'epub'>('pdf');
 
   useEffect(() => {
     void loadSettings().then((x) => {
@@ -82,7 +83,7 @@ function Popup() {
     setS(next);
     void saveSettings(next);
   };
-  const command = async (command: 'translate-page' | 'select-area' | 'toggle-original') => {
+  const command = async (command: 'translate-page' | 'select-area' | 'toggle-original' | 'download-chapter') => {
     if (!tab?.id) return;
     if (command !== 'toggle-original') {
       // Before a local translation: is everything installed and running? If not, open the helper,
@@ -96,7 +97,7 @@ function Popup() {
         return;
       }
     }
-    void chrome.runtime.sendMessage({ type: 'popup-command', command, tabId: tab.id });
+    void chrome.runtime.sendMessage({ type: 'popup-command', command, tabId: tab.id, format: command === 'download-chapter' ? fmt : undefined });
     if (command !== 'toggle-original') window.close();
   };
   const open = (path: string) => void chrome.tabs.create({ url: chrome.runtime.getURL(path) });
@@ -154,6 +155,17 @@ function Popup() {
       <button className="ait-bubble-btn pp-main" disabled={!canRun || missing} onClick={() => void command('translate-page')}>
         {preflight ? 'Проверяю программы…' : 'Перевести страницу'}
       </button>
+      <div className="pp-row" data-testid="download-row">
+        <button className="ait-btn" disabled={!canRun || missing} onClick={() => void command('download-chapter')} title="Перевести все картинки страницы и скачать главу одним файлом">
+          Перевести и скачать
+        </button>
+        <select className="ait-select" style={{ flex: '0 0 92px' }} value={fmt} onChange={(e) => setFmt(e.target.value as typeof fmt)} aria-label="Формат файла">
+          <option value="pdf">PDF</option>
+          <option value="cbz">CBZ</option>
+          <option value="epub">EPUB</option>
+          <option value="zip">ZIP</option>
+        </select>
+      </div>
       <div className="pp-row">
         <button className="ait-btn" disabled={!canRun} onClick={() => void command('select-area')}>Перевести область</button>
         <button

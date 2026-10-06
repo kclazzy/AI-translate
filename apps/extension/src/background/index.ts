@@ -197,6 +197,29 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       const s = await loadSettings();
       return { autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(msg.host), minImageSize: s.minImageSize, enabled: s.enabled !== false, targetLang: s.targetLang };
     }
+    case 'build-download': {
+      const s = await loadSettings();
+      const r = await toOffscreen<{ url: string; name: string; pages: number; size: number } | { error: string }>({ target: 'offscreen', type: 'build-file', keys: msg.keys, title: msg.title, format: msg.format, lang: s.targetLang });
+      if (!r || 'error' in r) throw new AppError('UNKNOWN', { retryable: false, detail: r && 'error' in r ? r.error : 'build failed' });
+      let id: number;
+      try {
+        id = await chrome.downloads.download({ url: r.url, filename: r.name, saveAs: false, conflictAction: 'uniquify' });
+      } catch (e) {
+        // Some systems only accept Latin file names: transliterate, then fall back to a plain name.
+        dlog('download name rejected', r.name, e);
+        const latin = translit(r.name).replace(/[^A-Za-z0-9 ._,()-]+/g, ' ').replace(/\s+/g, ' ').trim();
+        try {
+          r.name = /^[ .]*\.[a-z]+$/.test(latin) ? '' : latin;
+          if (!r.name) throw new Error('empty');
+          id = await chrome.downloads.download({ url: r.url, filename: r.name, saveAs: false, conflictAction: 'uniquify' });
+        } catch {
+          r.name = `AI Translate ${new Date().toISOString().slice(0, 10)}.${msg.format}`;
+          id = await chrome.downloads.download({ url: r.url, filename: r.name, saveAs: false, conflictAction: 'uniquify' });
+        }
+      }
+      dlog('download', r.name, r.pages, r.size);
+      return { ok: true, name: r.name, pages: r.pages, id };
+    }
     case 'open-setup':
       readyCache = null;
       await offerSetup(tabId, true);
@@ -242,6 +265,19 @@ async function setEnabled(enabled: boolean): Promise<{ unloaded: string[] }> {
   return { unloaded };
 }
 
+const TRANSLIT: Record<string, string> = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya', і: 'i', ї: 'yi', є: 'ye', ґ: 'g' };
+/** Russian/Ukrainian letters → Latin, keeping capitals. */
+function translit(s: string): string {
+  return [...s]
+    .map((ch) => {
+      const lower = ch.toLowerCase();
+      const t = TRANSLIT[lower];
+      if (t === undefined) return ch;
+      return ch !== lower && t ? t[0].toUpperCase() + t.slice(1) : t;
+    })
+    .join('');
+}
+
 let readyCache: { at: number; r: Readiness } | null = null;
 /** Are the local programs this setup needs running? Cached briefly: it runs for every picture. */
 async function readiness(): Promise<Readiness> {
@@ -267,7 +303,7 @@ async function handleUi(msg: UiToBackground): Promise<unknown> {
     case 'popup-command':
       // A user command (or the setup helper continuing one) re-checks the programs right away.
       readyCache = null;
-      sendToTab(msg.tabId, { type: 'command', command: msg.command });
+      sendToTab(msg.tabId, { type: 'command', command: msg.command, value: msg.format });
       return null;
     case 'set-auto': {
       const s = await loadSettings();

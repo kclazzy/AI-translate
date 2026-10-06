@@ -48,6 +48,8 @@ export function sniffImageMime(bytes: Uint8Array): string | null {
   if (bytes[0] === 0x42 && bytes[1] === 0x4d) return 'image/bmp';
   // AVIF: ftypavif / ftypavis at offset 4
   if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70 && bytes[8] === 0x61 && bytes[9] === 0x76 && bytes[10] === 0x69) return 'image/avif';
+  // TIFF: II*\0 or MM\0* — browsers cannot decode it; reported as such by the importers.
+  if ((bytes[0] === 0x49 && bytes[1] === 0x49 && bytes[2] === 0x2a && bytes[3] === 0) || (bytes[0] === 0x4d && bytes[1] === 0x4d && bytes[2] === 0 && bytes[3] === 0x2a)) return 'image/tiff';
   return null;
 }
 

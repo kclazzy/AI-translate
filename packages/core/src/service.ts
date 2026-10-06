@@ -98,6 +98,7 @@ export class TranslateService {
   async translate(bytes: Uint8Array, mime: string | undefined, opts: TranslateOptions = {}): Promise<{ result: StoredResult; cached: boolean }> {
     if (bytes.length > MAX_INPUT_BYTES) throw new AppError('IMAGE_TOO_LARGE', { retryable: false });
     const realMime = sniffImageMime(bytes);
+    if (realMime === 'image/tiff') throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: 'TIFF браузер не открывает — сохраните картинку как PNG или JPG.' });
     if (!realMime) throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: mime });
     const seriesKey = opts.seriesKey ?? seriesKeyFromUrl(opts.sourceUrl);
     const { settings, config } = await this.config(seriesKey);

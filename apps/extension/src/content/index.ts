@@ -1,6 +1,6 @@
 import { errorMessage } from '@ait/core/errors';
 import { dominantLanguage, nativeName } from '@ait/core/languages';
-import type { BackgroundToContent, ContentToBackground, ImageRef, JobStatus, PageLangs, RenderedTiles } from '../shared/messages';
+import type { BackgroundToContent, ChapterFormat, ContentToBackground, ImageRef, JobStatus, PageLangs, RenderedTiles } from '../shared/messages';
 import { Overlay } from './overlay';
 import { asCandidate, candidateAt, imgSrc, inlineData, lazySrc, markUi, scanPage, viewportRect, type Candidate } from './scanner';
 
@@ -213,6 +213,7 @@ function main() {
           break;
         }
         if (msg.command === 'translate-page') translatePage();
+        else if (msg.command === 'download-chapter') downloadChapter((msg.value as ChapterFormat) || 'pdf');
         else if (msg.command === 'select-area') selectArea();
         else if (msg.command === 'toggle-original') {
           originalsShown = !originalsShown;
@@ -251,6 +252,77 @@ function main() {
 
   /** «Перевести страницу» also covers pictures that load later while scrolling (until reload). */
   let pageMode = false;
+
+  // ---- «Перевести и скачать»: the whole chapter as one file --------------------------------
+  let chapter: { format: ChapterFormat; timer: ReturnType<typeof setInterval>; panel: HTMLElement; text: HTMLElement; lastChange: number; lastDone: number } | null = null;
+
+  function downloadChapter(format: ChapterFormat) {
+    if (chapter) return;
+    translatePage();
+    const host = document.createElement('div');
+    markUi(host);
+    const root = host.attachShadow({ mode: 'closed' });
+    root.innerHTML = `<style>
+      .p { position: fixed; z-index: 2147483602; right: 16px; bottom: 16px; background: #1c2230; color: #fff; font: 14px/1.35 system-ui, sans-serif;
+        padding: 10px 12px; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.3); display: flex; gap: 10px; align-items: center; max-width: 360px; }
+      button { all: initial; cursor: pointer; color: #fff; font: inherit; border: 1px solid #fff6; border-radius: 6px; padding: 2px 8px; }
+    </style><div class="p" role="status"><span class="t"></span><button type="button">Отменить</button></div>`;
+    const text = root.querySelector('.t') as HTMLElement;
+    (root.querySelector('button') as HTMLButtonElement).addEventListener('click', () => {
+      if (!chapter) return host.remove();
+      clearInterval(chapter.timer);
+      chapter = null;
+      for (const it of pageItemsInOrder()) if (it.status === 'queued' || it.status === 'working') void send({ type: 'cancel', id: it.id }).catch(() => undefined);
+      host.remove();
+    });
+    document.documentElement.appendChild(host);
+    chapter = { format, timer: setInterval(() => void tickChapter(), 1000), panel: host, text, lastChange: Date.now(), lastDone: -1 };
+    void tickChapter();
+  }
+
+  /** Items of the page (not screen-area results), in reading (document) order. */
+  function pageItemsInOrder(): Item[] {
+    return [...items.values()]
+      .filter((it) => !it.docRect && it.cand.el.isConnected)
+      .sort((a, b) => (a.cand.el.compareDocumentPosition(b.cand.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+  }
+
+  async function tickChapter() {
+    const c = chapter;
+    if (!c) return;
+    const list = pageItemsInOrder();
+    const done = list.filter((it) => it.status === 'done').length;
+    const failed = list.filter((it) => it.status === 'error').length;
+    const pending = list.length - done - failed;
+    if (done + failed !== c.lastDone) {
+      c.lastDone = done + failed;
+      c.lastChange = Date.now();
+    }
+    const label = c.format.toUpperCase();
+    c.text.textContent = `Глава → ${label}: готово ${done} из ${list.length}${failed ? `, не удалось ${failed}` : ''}`;
+    // Everything finished (or nothing moved for 15 minutes): build the file from what is ready.
+    const stalled = Date.now() - c.lastChange > 15 * 60_000;
+    if (list.length && (pending === 0 || stalled)) {
+      clearInterval(c.timer);
+      const keys = list.filter((it) => it.status === 'done' && it.result).map((it) => it.result!.key);
+      if (!keys.length) {
+        c.text.textContent = 'Ни одна картинка не переведена — файл не создан.';
+        chapter = null;
+        setTimeout(() => c.panel.remove(), 8000);
+        return;
+      }
+      c.text.textContent = `Собираю ${label}: ${keys.length} стр.…`;
+      try {
+        const r = await send<{ ok: boolean; name: string; pages: number; error?: { detail?: string } }>({ type: 'build-download', keys, title: document.title, format: c.format });
+        if (!r?.ok) throw new Error(r?.error?.detail ?? 'не удалось собрать файл');
+        c.text.textContent = `Скачано: ${r.name}${failed ? ` (без ${failed} непереведённых картинок)` : ''}`;
+      } catch (e) {
+        c.text.textContent = `Не удалось собрать файл: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      chapter = null;
+      setTimeout(() => c.panel.remove(), 12_000);
+    }
+  }
 
   function translatePage() {
     pageMode = true;

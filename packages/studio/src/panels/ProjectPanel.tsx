@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { replaceInText, toAppError, errorMessage, type AppSettings, type ImageMime, type Project, type ProjectPage, type TextStyle } from '@ait/core';
 import { ProjectPageEditor } from '../editor/EditorHost';
-import { exportPdf, exportZip, importFiles, type ExportPage } from '../files';
+import { exportCbz, exportEpub, exportPdf, exportZip, importFiles, type ExportPage } from '../files';
 import { usePlatform } from '../platform';
 import { rerenderProjectPage, translateProjectPage, ProjectStore } from '../projects';
 import { ErrorBox, Field, Progress, Switch, toast, useAction, useObjectUrl } from '../ui';
@@ -43,8 +43,8 @@ function DropZone({ onFiles, label }: { onFiles: (f: File[]) => void; label: str
     >
       <p style={{ margin: '0 0 10px' }}>{label}</p>
       <button className="ait-btn" onClick={() => input.current?.click()}>Выбрать файлы</button>
-      <input ref={input} type="file" multiple hidden accept="image/*,.zip,.cbz,.pdf" onChange={(e) => e.target.files && onFiles([...e.target.files])} />
-      <p className="ait-hint">PNG, JPG, WEBP, ZIP/CBZ с главой, PDF</p>
+      <input ref={input} type="file" multiple hidden accept="image/*,.zip,.cbz,.epub,.pdf,.cbr,.rar" onChange={(e) => e.target.files && onFiles([...e.target.files])} />
+      <p className="ait-hint">PNG, JPG, WEBP, AVIF, GIF, BMP; глава целиком — PDF, ZIP, CBZ, EPUB</p>
     </div>
   );
 }
@@ -58,7 +58,7 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
   const [tab, setTab] = useState<'pages' | 'glossary' | 'context' | 'replace'>('pages');
   const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
-  const [exportFmt, setExportFmt] = useState<'zip-png' | 'zip-jpg' | 'zip-webp' | 'pdf'>('zip-png');
+  const [exportFmt, setExportFmt] = useState<'zip-png' | 'zip-jpg' | 'zip-webp' | 'pdf' | 'cbz' | 'epub'>('pdf');
   const abort = useRef<AbortController | null>(null);
   const scanlator = settings.uiMode === 'scanlator';
 
@@ -144,6 +144,8 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
     const onP = (d: number, t: number) => setProgress({ done: d, total: t, label: `Экспорт ${d} / ${t}` });
     try {
       if (exportFmt === 'pdf') await platform.saveFile(`${project.title}.pdf`, await exportPdf(platform.backend, pages, onP), 'application/pdf');
+      else if (exportFmt === 'cbz') await platform.saveFile(`${project.title}.cbz`, await exportCbz(platform.backend, pages, project.title, onP), 'application/vnd.comicbook+zip');
+      else if (exportFmt === 'epub') await platform.saveFile(`${project.title}.epub`, await exportEpub(platform.backend, pages, project.title, settings.targetLang, onP), 'application/epub+zip');
       else {
         const mime: ImageMime = exportFmt === 'zip-jpg' ? 'image/jpeg' : exportFmt === 'zip-webp' ? 'image/webp' : 'image/png';
         await platform.saveFile(`${project.title}.zip`, await exportZip(platform.backend, pages, mime, onP), 'application/zip');
@@ -227,6 +229,8 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
             <option value="zip-jpg">ZIP с JPG</option>
             <option value="zip-webp">ZIP с WEBP</option>
             <option value="pdf">PDF</option>
+            <option value="cbz">CBZ (читалки комиксов)</option>
+            <option value="epub">EPUB (книжные приложения)</option>
           </select>
           <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void doExport.run()} disabled={busy || !done}>Скачать</button>
           <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void saveProjectFile.run()} disabled={busy}>Сохранить проект</button>
