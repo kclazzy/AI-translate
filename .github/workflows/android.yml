@@ -18,16 +18,18 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: '21' }
-      - uses: android-actions/setup-android@v3
       - run: pnpm install --frozen-lockfile
       - name: Build web app and sync into the Android project
         working-directory: apps/mobile
         run: pnpm build && npx cap sync android
       - name: Build debug APK (installable, not for the Play Store)
         working-directory: apps/mobile/android
-        run: ./gradlew assembleDebug --no-daemon
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
       - run: cp apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk ai-translate-android-${{ github.ref_name }}.apk
       - uses: actions/upload-artifact@v4
         with:
