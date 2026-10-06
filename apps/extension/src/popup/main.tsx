@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { EngineClient, LANGUAGES, providerById, type AppSettings, type UsageTotals } from '@ait/core';
+import { EngineClient, errorMessage, LANGUAGES, listOpenAiModels, providerById, type AppSettings, type UsageTotals } from '@ait/core';
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import './popup.css';
-import { db, hostOf, loadSettings, saveSettings } from '../shared/store';
+import { db, hostOf, loadSettings, saveSettings, secrets } from '../shared/store';
 
 function Popup() {
   const [s, setS] = useState<AppSettings | null>(null);
   const [tab, setTab] = useState<chrome.tabs.Tab | null>(null);
   const [engine, setEngine] = useState<'ok' | 'down' | 'unpaired' | null>(null);
   const [usage, setUsage] = useState<UsageTotals | null>(null);
+  const [model, setModel] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     void loadSettings().then((x) => {
@@ -21,6 +22,19 @@ function Popup() {
           .health()
           .then((h) => setEngine((h as { paired?: boolean }).paired === false ? 'unpaired' : 'ok'))
           .catch(() => setEngine('down'));
+      const v = providerById(x, x.visionProviderId);
+      if (x.pipeline === 'standalone' && v && v.kind === 'openai-compatible') {
+        void (async () => {
+          try {
+            const key = await secrets.get(`provider:${v.id}`);
+            const ids = await listOpenAiModels(v.baseUrl, key);
+            const found = ids.some((id) => id === v.model || id.split(':')[0] === v.model.split(':')[0] && v.model.includes(':') === false);
+            setModel(found || !ids.length ? { ok: true, text: `${v.label}: модель ${v.model} доступна` } : { ok: false, text: `${v.label} работает, но модели «${v.model}» нет. ${v.preset === 'ollama' ? `Выполните: ollama pull ${v.model}` : `Доступны: ${ids.slice(0, 5).join(', ')}`}` });
+          } catch (e) {
+            setModel({ ok: false, text: `${errorMessage(e)} ${(e as { detail?: string }).detail ?? ''}` });
+          }
+        })();
+      }
     });
     void chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => setTab(t ?? null));
     void db.get<UsageTotals>('usage', 'totals').then((u) => setUsage(u ?? null));
@@ -55,6 +69,7 @@ function Popup() {
       {missing ? (
         <div className="ait-notice">Выберите модель, которая читает изображения. <button className="pp-link" onClick={() => chrome.runtime.openOptionsPage()}>Открыть настройки</button></div>
       ) : null}
+      {model && !model.ok ? <div className="ait-error">{model.text}</div> : null}
       {engine === 'down' ? <div className="ait-error">Движок не отвечает по адресу {s.engine.url}. Запустите его или переключитесь в режим без движка.</div> : null}
       {engine === 'unpaired' ? <div className="ait-notice">Движок запущен, но код сопряжения не подходит. Введите его в настройках.</div> : null}
 

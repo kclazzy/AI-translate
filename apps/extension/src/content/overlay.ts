@@ -18,12 +18,13 @@ const CSS = `
 .tiles img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
 .tiles.hidden { visibility: hidden; }
 .cmp { position: absolute; inset: 0; pointer-events: none; }
-.bar { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; pointer-events: auto; opacity: .35; transition: opacity .12s; font: 13px/1.2 system-ui, sans-serif; }
+.bar { position: absolute; top: 8px; right: 8px; display: flex; align-items: flex-start; gap: 4px; pointer-events: auto; opacity: .35; transition: opacity .12s; font: 13px/1.2 system-ui, sans-serif; }
 .wrap:hover .bar, .bar:hover, .bar.busy, .bar.err { opacity: 1; }
 .bar button, .pill { border: 1.5px solid #1c2230; background: #fff; color: #1c2230; border-radius: 999px; padding: 4px 9px; cursor: pointer; font: inherit; box-shadow: 2px 2px 0 #1c2230; }
 .bar button:hover { background: #fbe6ee; }
 .pill { cursor: default; background: #c8205f; color: #fff; }
-.pill.err { background: #fff; color: #c0392b; max-width: 260px; white-space: normal; }
+.pill.err { background: #fff; color: #c0392b; border-radius: 12px; padding: 8px 12px; max-width: 320px; white-space: normal; line-height: 1.35; }
+.pill.err small { display: block; color: #1c2230; margin-top: 4px; font-size: 12px; }
 .split { position: absolute; top: 0; bottom: 0; width: 3px; background: #c8205f; pointer-events: auto; cursor: ew-resize; }
 `;
 
@@ -97,11 +98,16 @@ export class Overlay {
     this.buttons([['✕', 'Отменить', this.actions.onCancel]]);
   }
 
-  error(message: string): void {
+  error(message: string, detail?: string): void {
     this.bar.className = 'bar err';
     this.pill = document.createElement('span');
     this.pill.className = 'pill err';
     this.pill.textContent = message;
+    if (detail) {
+      const d = document.createElement('small');
+      d.textContent = detail;
+      this.pill.append(d);
+    }
     const defs: [string, string, () => void][] = [['Повторить', 'Попробовать ещё раз', this.actions.onRetry]];
     if (this.actions.onClose) defs.push(['✕', 'Закрыть', this.actions.onClose]);
     else if (!this.hasResult) defs.push(['✕', 'Скрыть', () => this.destroy()]);

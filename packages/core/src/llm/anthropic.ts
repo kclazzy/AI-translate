@@ -32,7 +32,7 @@ export class AnthropicProvider implements LlmProvider {
     const { signal, dispose } = timeoutSignal(this.config.timeoutMs ?? 120_000, req.signal);
     try {
       const res = await safeFetch(this.fetchImpl, joinUrl(this.config.baseUrl || 'https://api.anthropic.com/v1', 'messages'), { method: 'POST', headers, body: JSON.stringify(body), signal }, this.config.label);
-      if (!res.ok) throw await httpError(res, this.config.label);
+      if (!res.ok) throw await httpError(res, this.config.label, this.config.baseUrl, this.config.model);
       const json = (await res.json()) as { content?: { type: string; text?: string }[]; usage?: { input_tokens?: number; output_tokens?: number }; model?: string };
       let text = (json.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('');
       if (req.json) text = '{' + text;

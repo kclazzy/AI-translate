@@ -34,7 +34,7 @@ export class OpenAICompatibleProvider implements LlmProvider {
     const { signal, dispose } = timeoutSignal(this.config.timeoutMs ?? 120_000, req.signal);
     try {
       const res = await safeFetch(this.fetchImpl, joinUrl(this.config.baseUrl, 'chat/completions'), { method: 'POST', headers, body: JSON.stringify(body), signal }, this.config.label);
-      if (!res.ok) throw await httpError(res, this.config.label);
+      if (!res.ok) throw await httpError(res, this.config.label, this.config.baseUrl, this.config.model);
       const json = (await res.json()) as {
         choices?: { message?: { content?: string | { type: string; text?: string }[] } }[];
         usage?: { prompt_tokens?: number; completion_tokens?: number };
@@ -65,7 +65,7 @@ export async function listOpenAiModels(baseUrl: string, apiKey: string | undefin
   const headers: Record<string, string> = {};
   if (apiKey) headers.authorization = `Bearer ${apiKey}`;
   const res = await safeFetch(fetchImpl, joinUrl(baseUrl, 'models'), { headers, signal }, baseUrl);
-  if (!res.ok) throw await httpError(res, baseUrl);
+  if (!res.ok) throw await httpError(res, baseUrl, baseUrl);
   const json = (await res.json()) as { data?: { id: string }[] };
   return (json.data ?? []).map((m) => m.id);
 }

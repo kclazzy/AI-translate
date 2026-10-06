@@ -172,3 +172,18 @@ describe('SSE parsing', () => {
     expect(parseSse(': keepalive')).toBeNull();
   });
 });
+
+describe('actionable provider errors', () => {
+  const ollama = { ...configFromPreset('ollama', 'o') };
+  const call = (f: (u: string, i?: RequestInit) => Promise<Response>) => new OpenAICompatibleProvider(ollama, f).complete({ system: 's', messages: [{ role: 'user', content: 'x' }] });
+
+  it('explains that Ollama is not running', async () => {
+    await expect(call(async () => { throw new TypeError('Failed to fetch'); })).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE', detail: expect.stringContaining('Запустите Ollama') });
+  });
+  it('explains a missing model with the pull command', async () => {
+    await expect(call(async () => jsonResponse({ error: { message: 'model "qwen2.5vl:7b" not found, try pulling it first' } }, 404))).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE', retryable: false, detail: expect.stringContaining('ollama pull qwen2.5vl:7b') });
+  });
+  it('explains OLLAMA_ORIGINS on 403 from a local server', async () => {
+    await expect(call(async () => new Response('', { status: 403 }))).rejects.toMatchObject({ detail: expect.stringContaining('OLLAMA_ORIGINS') });
+  });
+});

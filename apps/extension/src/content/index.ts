@@ -123,7 +123,7 @@ function main() {
         const it = items.get(msg.id);
         if (!it) break;
         it.status = 'error';
-        it.overlay.error(errorMessage(msg.error));
+        it.overlay.error(errorMessage(msg.error), msg.error.detail);
         break;
       }
       case 'command':
@@ -263,7 +263,7 @@ function main() {
       if (e.composedPath().includes(hoverHost)) return;
       const c = candidateAt(e.clientX, e.clientY, minSize);
       const id = c ? byElement.get(c.el) : undefined;
-      if (!c || (id && items.get(id)?.status === 'done')) {
+      if (!c || (id && items.has(id))) {
         if (hoverCand && !hideTimer) hideTimer = setTimeout(() => ((hoverBtn.style.display = 'none'), (hoverCand = null), (hideTimer = null)), 600);
         return;
       }
