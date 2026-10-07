@@ -284,3 +284,12 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ait-fold[open] > summary h2::before { transform: rotate(90deg); }
 .ait-fold-body { display: grid; gap: 12px; margin-top: 12px; }
 .ait-fold-body > .ait-panel { margin: 0; box-shadow: none; }
+
+/* «Как подключить» under a provider */
+.ait-guide { margin: 10px 0 0; padding: 8px 12px; border: 1px solid var(--rule); border-radius: 10px; font-size: 13px; line-height: 1.45; }
+.ait-guide > summary { cursor: pointer; font-weight: 600; }
+.ait-guide ol { margin: 8px 0 6px; padding-left: 20px; }
+.ait-guide li + li { margin-top: 4px; }
+.ait-guide p { margin: 6px 0 0; }
+.ait-guide a { color: var(--magenta); }
+.ait-guide-note { color: var(--ink-2); }

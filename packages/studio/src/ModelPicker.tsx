@@ -35,7 +35,7 @@ import { FoldPanel } from './ui';
  * Model selector with a refresh button: asks LM Studio / Ollama / any OpenAI-compatible
  * server which models it has and whether they read images.
  */
-export function ModelPicker({ cfg, getKey, onPick, compact }: { cfg: ProviderConfig; getKey: () => Promise<string | undefined>; onPick: (model: string, vision: boolean | undefined) => void; compact?: boolean }) {
+export function ModelPicker({ cfg, getKey, onPick, compact, hasKey }: { cfg: ProviderConfig; getKey: () => Promise<string | undefined>; onPick: (model: string, vision: boolean | undefined) => void; compact?: boolean; /** false: a cloud service without a saved key — do not ask it for models yet. */ hasKey?: boolean }) {
   const [models, setModels] = useState<DiscoveredModel[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,8 +56,12 @@ export function ModelPicker({ cfg, getKey, onPick, compact }: { cfg: ProviderCon
   }, [cfg.baseUrl, cfg.kind, cfg.label, cfg.apiKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (hasKey === false) {
+      setError(null);
+      return;
+    }
     void refresh();
-  }, [refresh]);
+  }, [refresh, hasKey]);
 
   const current = models?.find((m) => m.id === cfg.model);
   const options = models ? [...models] : [];

@@ -189,3 +189,15 @@ describe('speed and the local model', () => {
     expect(gpuShare({ name: 'm', sizeVram: 5e9, size: 10e9 })).toBe(0.5);
   });
 });
+
+describe('provider guides', () => {
+  it('every cloud service says where to get the key, which model to pick and what it costs', async () => {
+    const { PROVIDER_PRESETS } = await import('../src/llm/presets');
+    for (const p of PROVIDER_PRESETS) {
+      expect(p.guide?.steps.length, p.preset).toBeGreaterThan(0);
+      if (!p.needsKey) continue;
+      expect(p.guide!.keyUrl, p.preset).toMatch(/^https:\/\//);
+      expect(p.guide!.cost, p.preset).toBeTruthy();
+    }
+  });
+});

@@ -22,7 +22,33 @@ export interface SettingsProps {
   update: (patch: Partial<AppSettings>) => void;
 }
 
-function ProviderEditor({ cfg, onChange, onRemove }: { cfg: ProviderConfig; onChange: (c: ProviderConfig) => void; onRemove: () => void }) {
+/** «Как подключить»: where to get the key, which model to pick, what it costs. */
+export function ProviderGuideBox({ preset, open, title }: { preset: (typeof PROVIDER_PRESETS)[number] | undefined; open?: boolean; title?: string }) {
+  const g = preset?.guide;
+  if (!g) return null;
+  return (
+    <details className="ait-guide" open={open} data-testid={`guide-${preset!.preset}`}>
+      <summary>{title ?? 'Как подключить'}</summary>
+      <ol>
+        {g.steps.map((step, i) => (
+          <li key={i}>{step}</li>
+        ))}
+      </ol>
+      {g.keyUrl ? (
+        <p>
+          <a href={g.keyUrl} target="_blank" rel="noreferrer noopener">
+            {preset!.needsKey ? 'Открыть страницу ключей' : 'Открыть страницу загрузки'} ↗
+          </a>
+        </p>
+      ) : null}
+      {g.models ? <p><b>Модель:</b> {g.models}</p> : null}
+      {g.cost ? <p><b>Стоимость:</b> {g.cost}</p> : null}
+      {g.note ? <p className="ait-guide-note">{g.note}</p> : null}
+    </details>
+  );
+}
+
+function ProviderEditor({ cfg, onChange, onRemove, onUse, inUse }: { cfg: ProviderConfig; onChange: (c: ProviderConfig) => void; onRemove: () => void; onUse?: () => void; inUse?: boolean }) {
   const platform = usePlatform();
   const [key, setKey] = useState('');
   const [stored, setStored] = useState<string | undefined>();
@@ -69,6 +95,7 @@ function ProviderEditor({ cfg, onChange, onRemove }: { cfg: ProviderConfig; onCh
         </button>
       </div>
       {preset?.hint ? <p className="ait-hint">{preset.hint}</p> : null}
+      <ProviderGuideBox preset={preset} open={!!preset?.needsKey && !stored} />
       <div className="ait-grid2" style={{ marginTop: 12 }}>
         <Field label="Название">
           <input className="ait-input" value={cfg.label} onChange={(e) => onChange({ ...cfg, label: e.target.value })} />
@@ -76,8 +103,8 @@ function ProviderEditor({ cfg, onChange, onRemove }: { cfg: ProviderConfig; onCh
         <Field label="Адрес API (base URL)">
           <input className="ait-input" value={cfg.baseUrl} onChange={(e) => onChange({ ...cfg, baseUrl: e.target.value.trim() })} />
         </Field>
-        <Field label="Модель" hint="⟳ — получить список моделей с сервера">
-          <ModelPicker cfg={cfg} getKey={async () => key || stored} onPick={(model, vision) => onChange({ ...cfg, model, vision: vision ?? cfg.vision })} />
+        <Field label="Модель" hint={preset?.needsKey && !stored ? 'Сохраните ключ — и список моделей загрузится сам' : '⟳ — получить список моделей с сервера'}>
+          <ModelPicker cfg={cfg} hasKey={preset?.needsKey ? !!stored : undefined} getKey={async () => key || stored} onPick={(model, vision) => onChange({ ...cfg, model, vision: vision ?? cfg.vision })} />
           <input className="ait-input" value={cfg.model} onChange={(e) => onChange({ ...cfg, model: e.target.value.trim() })} aria-label="Имя модели вручную" placeholder="или введите имя вручную" />
         </Field>
         <Field label="Ключ API" hint={stored ? `Сохранён: ${maskKey(stored)}` : preset?.needsKey ? 'Нужен для этого сервиса' : 'Не нужен для локальных серверов'}>
@@ -93,6 +120,11 @@ function ProviderEditor({ cfg, onChange, onRemove }: { cfg: ProviderConfig; onCh
         <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void test.run()} disabled={test.busy}>
           {test.busy ? 'Проверка…' : 'Проверить подключение'}
         </button>
+        {onUse ? (
+          <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={onUse} disabled={inUse} data-testid="use-provider">
+            {inUse ? 'Используется' : 'Использовать для перевода'}
+          </button>
+        ) : null}
       </div>
       <div className="ait-grid2" style={{ marginTop: 10 }}>
         <Field label="Цена ввода, $ за 1M токенов" hint="Для оценки стоимости в отладке">
@@ -216,6 +248,17 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
         </div>
       </div>
     );
+  };
+  const guideFor = (presets: typeof PROVIDER_PRESETS) => {
+    const p = presets.find((x) => x.preset === addPreset) ?? presets[0];
+    return <ProviderGuideBox preset={p} title={`Как подключить: ${p?.label ?? ''}`} />;
+  };
+  /** Make this provider read the pictures (or translate, if it cannot see) and allow the cloud for it. */
+  const pickProvider = (p: ProviderConfig) => {
+    const cloud = !isLocalProvider(p);
+    if (p.vision) update({ visionProviderId: p.id, translationProviderId: null, ...(cloud ? { privacy: 'cloud' as const } : {}) });
+    else update({ translationProviderId: p.id, ...(cloud && s.privacy === 'local' ? { privacy: 'hybrid' as const } : {}) });
+    toast(p.vision ? `${p.label} теперь читает и переводит страницы` : `${p.label} теперь переводит текст`);
   };
 
   return (
@@ -349,15 +392,17 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
 
       <FoldPanel title="Локальные серверы" summary={localProviders.map((p) => p.label).join(', ') || 'нет'} testId="local-servers">
         {localProviders.map((p) => (
-          <ProviderEditor key={p.id} cfg={p} onChange={setProvider} onRemove={() => removeProvider(p.id)} />
+          <ProviderEditor key={p.id} cfg={p} onChange={setProvider} onRemove={() => removeProvider(p.id)} onUse={() => pickProvider(p)} inUse={p.vision ? s.visionProviderId === p.id && !s.translationProviderId : s.translationProviderId === p.id} />
         ))}
         {addRow(PROVIDER_PRESETS.filter((p) => p.local))}
+        {guideFor(PROVIDER_PRESETS.filter((p) => p.local))}
       </FoldPanel>
       <FoldPanel title="Облачные модели" summary={cloudProviders.length ? cloudProviders.map((p) => p.label).join(', ') : 'не подключены — Claude, OpenAI, Gemini, OpenRouter…'} testId="cloud-providers">
         {cloudProviders.map((p) => (
-          <ProviderEditor key={p.id} cfg={p} onChange={setProvider} onRemove={() => removeProvider(p.id)} />
+          <ProviderEditor key={p.id} cfg={p} onChange={setProvider} onRemove={() => removeProvider(p.id)} onUse={() => pickProvider(p)} inUse={p.vision ? s.visionProviderId === p.id && !s.translationProviderId : s.translationProviderId === p.id} />
         ))}
         {addRow(PROVIDER_PRESETS.filter((p) => !p.local))}
+        {guideFor(PROVIDER_PRESETS.filter((p) => !p.local))}
       </FoldPanel>
 
       <div className="ait-panel">
