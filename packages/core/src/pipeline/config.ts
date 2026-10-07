@@ -60,7 +60,7 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
 
 /** Stable hash of the output-affecting settings (API keys excluded). */
 export async function pipelineHash(c: PipelineConfig): Promise<string> {
-  const strip = (p: ProviderConfig | null) => (p ? { kind: p.kind, baseUrl: p.baseUrl, model: p.model } : null);
+  const strip = (p: ProviderConfig | null) => (p ? { kind: p.kind, baseUrl: p.baseUrl, model: p.model, temperature: p.temperature, noThinking: p.noThinking } : null);
   const payload = {
     v: 1,
     mode: c.mode,
@@ -68,7 +68,7 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     dst: c.targetLang,
     q: c.quality,
     profile: { ...c.profile, id: undefined, name: undefined },
-    glossary: c.glossary.filter((g) => g.enabled).map((g) => [g.source, g.target, g.matchMode, g.caseSensitive, g.forbidden]),
+    glossary: c.glossary.filter((g) => g.enabled).map((g) => [g.source, g.target, g.matchMode, g.caseSensitive, g.forbidden, g.note ?? '']),
     sfx: [c.translateSfx, c.sfxStyle],
     vision: strip(c.vision),
     translator: strip(c.translator),

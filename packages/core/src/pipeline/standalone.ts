@@ -337,7 +337,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     if (req.generic) {
       // UI/screen text: no bubbles; paint a plate behind the text instead.
       const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase });
-      b.bubble = r.bubble ? { ...r.bubble, shape: 'rect', safeArea: b.bbox } : null;
+      b.bubble = r.bubble ? { ...r.bubble, shape: 'rect', safeArea: [...b.bbox] as Box } : null;
       return;
     }
     const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, sfx: b.textType === 'SFX' });

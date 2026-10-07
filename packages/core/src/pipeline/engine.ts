@@ -5,6 +5,7 @@ import { mergeContext, type TranslationContext } from '../translate/context';
 import type { PageResult, StageEvent } from '../types';
 import { timeoutSignal } from '../util/retry';
 import type { FetchLike } from '../llm/types';
+import { isLocalUrl } from '../llm/privacy';
 import { pipelineHash, type PipelineConfig } from './config';
 import type { PipelineOutput, PipelineRequest } from './standalone';
 
@@ -170,6 +171,10 @@ export function parseSse(raw: string): { event: string; data: unknown } | null {
 export async function runEnginePipeline(req: PipelineRequest, deps: { backend: ImageBackend; fetchImpl?: FetchLike }): Promise<PipelineOutput> {
   const engine = req.config.engine;
   if (!engine?.url) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: 'Engine URL is empty' });
+  // The engine receives the picture: in local and hybrid modes it must be on this computer or the home network.
+  if (req.config.privacy !== 'cloud' && !isLocalUrl(engine.url)) {
+    throw new AppError('PRIVACY_VIOLATION', { retryable: false, detail: `engine ${engine.url} is not local; mode=${req.config.privacy}` });
+  }
   const client = new EngineClient(engine.url, engine.token, deps.fetchImpl);
   req.onStage?.({ stage: 'detecting' });
   const done = await client.translatePage(req.bytes, req.mime ?? 'application/octet-stream', req.config, req.context, { signal: req.signal, onStage: req.onStage });

@@ -149,10 +149,12 @@ export function renderTiles(backend: ImageBackend, cleaned: TiledImage, blocks: 
     for (const b of blocks) {
       const l = layouts.get(b.id);
       if (!l) continue;
-      const box = targetBox(b, d);
-      // Draw blocks near this tile (text may slightly exceed its box).
-      const margin = l.fontSize * 4;
-      if (box[1] + box[3] + margin < t.y || box[1] - margin > t.y + t.h) continue;
+      // Draw blocks whose letters reach this tile (overflowing text can run well past its box).
+      const box = l.box ?? targetBox(b, d);
+      const ys = l.vertical ? l.glyphs.map((g) => g.y) : l.lines.map((x) => x.y);
+      const top = box[1] + Math.min(0, ...ys) - l.fontSize * 1.5;
+      const bottom = box[1] + Math.max(box[3], ...ys) + l.fontSize * 1.5;
+      if (bottom < t.y || top > t.y + t.h) continue;
       drawBlock(ctx, b, l, d, t.y);
     }
     return { y: t.y, h: t.h, canvas };

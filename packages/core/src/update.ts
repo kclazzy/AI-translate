@@ -5,13 +5,21 @@ export const REPO = 'kclazzy/AI-translate';
 export const RELEASES_URL = `https://github.com/${REPO}/releases`;
 
 export function compareVersions(a: string, b: string): number {
-  const pa = a.replace(/^v/, '').split(/[.-]/).map((x) => Number.parseInt(x, 10) || 0);
-  const pb = b.replace(/^v/, '').split(/[.-]/).map((x) => Number.parseInt(x, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+  // 1.2.0-rc.1 < 1.2.0: the numeric part first, then a version with a suffix is older.
+  const split = (v: string) => {
+    const [core, ...pre] = v.replace(/^v/, '').split('-');
+    return { nums: core.split('.').map((x) => Number.parseInt(x, 10) || 0), pre: pre.join('-') };
+  };
+  const pa = split(a);
+  const pb = split(b);
+  for (let i = 0; i < Math.max(pa.nums.length, pb.nums.length); i++) {
+    const d = (pa.nums[i] ?? 0) - (pb.nums[i] ?? 0);
     if (d) return d > 0 ? 1 : -1;
   }
-  return 0;
+  if (pa.pre === pb.pre) return 0;
+  if (!pa.pre) return 1;
+  if (!pb.pre) return -1;
+  return pa.pre.localeCompare(pb.pre, 'en', { numeric: true }) > 0 ? 1 : -1;
 }
 
 export interface ReleaseAsset {

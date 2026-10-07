@@ -89,8 +89,10 @@ export class TranslateService {
     return { settings, config: pipelineConfigFromSettings(settings, seriesKey) };
   }
 
-  async cacheKey(bytes: Uint8Array, config: PipelineConfig): Promise<string> {
-    return `${(await sha256Hex(bytes)).slice(0, 40)}:${await pipelineHash(config)}`;
+  /** Same picture + same settings that change the result (incl. fonts and screen-text mode) = same key. */
+  async cacheKey(bytes: Uint8Array, config: PipelineConfig, extra: { generic?: boolean; fonts?: unknown } = {}): Promise<string> {
+    const look = extra.generic || extra.fonts ? `:${(await sha256Hex(JSON.stringify([!!extra.generic, extra.fonts ?? null]))).slice(0, 8)}` : '';
+    return `${(await sha256Hex(bytes)).slice(0, 40)}:${await pipelineHash(config)}${look}`;
   }
 
   async getContext(seriesKey: string | undefined): Promise<TranslationContext | undefined> {
@@ -111,7 +113,7 @@ export class TranslateService {
         if (p) config[k] = { ...p, keepAliveMin: Math.max(p.keepAliveMin ?? 0, opts.keepAliveMin) };
       }
     }
-    const key = await this.cacheKey(bytes, config);
+    const key = await this.cacheKey(bytes, config, { generic: opts.generic, fonts: settings.fonts });
     if (!opts.force) {
       const hit = await this.db.get<StoredResult>('results', key);
       if (hit) {

@@ -7,7 +7,10 @@ export function extractJson(text: string): unknown {
   let s = text.trim();
   const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(s);
   if (fence) s = fence[1].trim();
-  const start = s.indexOf('{');
+  const brace = s.indexOf('{');
+  const bracket = s.indexOf('[');
+  // A bare array answer ([{…},{…}]) is parsed whole, not as its first element.
+  const start = bracket >= 0 && (brace < 0 || bracket < brace) ? bracket : brace;
   if (start < 0) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'No JSON object in answer' });
   // Walk to the matching brace, respecting strings.
   let depth = 0;
@@ -23,8 +26,8 @@ export function extractJson(text: string): unknown {
       continue;
     }
     if (c === '"') inStr = true;
-    else if (c === '{') depth++;
-    else if (c === '}') {
+    else if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') {
       depth--;
       if (depth === 0) {
         end = i;
@@ -127,7 +130,7 @@ export function limitLength(translation: string, original: string): string {
 
 export function parseTranslationAnswer(raw: string, expected: { id: string; text: string }[]): TranslationAnswer {
   const json = extractJson(raw) as Record<string, unknown>;
-  const arr = Array.isArray(json.translations) ? (json.translations as unknown[]) : Array.isArray(json.blocks) ? (json.blocks as unknown[]) : null;
+  const arr = Array.isArray(json) ? (json as unknown[]) : Array.isArray(json.translations) ? (json.translations as unknown[]) : Array.isArray(json.blocks) ? (json.blocks as unknown[]) : null;
   if (!arr) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'Missing "translations" array' });
   const byId = new Map(expected.map((e) => [e.id, e.text]));
   const translations = new Map<string, { text: string; type?: TextType }>();

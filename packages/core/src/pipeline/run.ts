@@ -7,6 +7,7 @@ import type { PipelineConfig } from './config';
 import { runEnginePipeline } from './engine';
 import { runStandalonePipeline, type PipelineOutput, type PipelineRequest } from './standalone';
 import { createProvider } from '../llm/presets';
+import { assertPrivacy } from '../llm/privacy';
 import { qaPage } from '../translate/qa';
 
 export async function runPipeline(req: PipelineRequest, deps: { backend: ImageBackend; fetchImpl?: FetchLike }): Promise<PipelineOutput> {
@@ -16,7 +17,15 @@ export async function runPipeline(req: PipelineRequest, deps: { backend: ImageBa
     // Check the translation (linguistic + semantic) with the model that translated the text.
     req.onStage?.({ stage: 'checking' });
     const cfg = req.config.translator ?? req.config.vision;
-    const provider = cfg ? createProvider(cfg, deps.fetchImpl) : null;
+    let provider = cfg ? createProvider(cfg, deps.fetchImpl) : null;
+    // The review sends the texts to that model: never outside the privacy mode (rule checks still run).
+    if (cfg) {
+      try {
+        assertPrivacy(req.config.privacy, cfg, 'text');
+      } catch {
+        provider = null;
+      }
+    }
     const usage = await qaPage(out.page.blocks, { provider, mode, targetLang: req.config.targetLang, glossary: req.config.glossary, context: out.context ?? req.context, signal: req.signal });
     out.page.usage = [...out.page.usage, ...usage];
   }

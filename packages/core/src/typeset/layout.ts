@@ -98,10 +98,15 @@ function isCjkText(text: string): boolean {
   return /[぀-ヿ㐀-鿿가-힯]/.test(text) && !/\s/.test(text.trim());
 }
 
+/** Languages written without spaces: wrapped by character and joined without spaces. */
+function byCharacter(text: string, lang?: string): boolean {
+  return lang === 'ja' || lang === 'zh' || lang === 'zh-TW' || isCjkText(text);
+}
+
 function tokenize(text: string, lang?: string): string[] {
   const clean = text.replace(/\s+/g, ' ').trim();
   if (!clean) return [];
-  if (lang === 'ja' || lang === 'zh' || lang === 'zh-TW' || isCjkText(clean)) {
+  if (byCharacter(clean, lang)) {
     // Character-level wrapping; keep trailing punctuation with previous char.
     const out: string[] = [];
     for (const ch of clean) {
@@ -128,7 +133,7 @@ function tryHorizontal(m: Measurer, input: LayoutInput, size: number, allowHyphe
   const lh = size * (input.lineHeight ?? 1.12);
   const tokens = tokenize(input.text, input.lang);
   if (!tokens.length) return { fontSize: size, font, lineHeight: lh, lines: [], glyphs: [], vertical: false, alignment: input.alignment ?? 'center', overflow: false };
-  const joiner = tokens.length > 1 && !isCjkText(input.text) && input.lang !== 'ja' && input.lang !== 'zh' ? ' ' : '';
+  const joiner = tokens.length > 1 && !byCharacter(input.text.replace(/\s+/g, ' ').trim(), input.lang) ? ' ' : '';
   const maxLines = Math.floor(h / lh);
   if (maxLines < 1) return null;
 
