@@ -790,3 +790,73 @@ export function parseHex(hex: string): RGB {
   const n = parseInt(m[1], 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
+
+/** Where to look for text the model did not report: around one cleaned block. */
+export interface LeftoverProbe {
+  /** Bubble (or text) box of the block, page pixels. */
+  area: Box;
+  /** Background colour of the bubble. */
+  fill: RGB;
+  /** Measured letter height of the block's own lettering. */
+  letterHeight: number;
+}
+
+/**
+ * Lettering still visible after cleaning next to the blocks the model reported: a line or a
+ * whole second text in the same bubble that the model skipped. Looks for rows of letter-sized
+ * marks on the bubble colour, away from every known block. Returns page-pixel boxes.
+ */
+export function findLeftoverText(image: TiledImage, probes: LeftoverProbe[], known: Box[]): Box[] {
+  const found: Box[] = [];
+  const queue = [...probes];
+  for (let guard = 0; queue.length && guard < 40; guard++) {
+    const pr = queue.shift()!;
+    const h = pr.letterHeight;
+    if (h < 6) continue;
+    const region = clampBox(expandBox(pr.area, Math.round(h * 3)), image.width, image.height);
+    if (region[2] * region[3] > 4_000_000) continue;
+    const img = image.getRegion(...region);
+    const all: Box = [0, 0, img.width, img.height];
+    const near = new Uint8Array(img.width * img.height);
+    for (let p = 0; p < near.length; p++) if (colorDist(img.data, p * 4, pr.fill) <= 42) near[p] = 1;
+    const cand = onBackground(textMask(img, all, pr.fill, 60), img.width, img.height, all, near, 4);
+    const knownLocal = known.map((k): Box => expandBox([k[0] - region[0], k[1] - region[1], k[2], k[3]], Math.round(h * 0.3)));
+    const letters = components(cand, img.width, all).filter((c) => {
+      const [x, y, w, ch] = c.box;
+      if (c.pixels.length < 8 || ch < h * 0.45 || ch > h * 1.7 || w > h * 3) return false;
+      const cx = x + w / 2;
+      const cy = y + ch / 2;
+      return !knownLocal.some((k) => cx >= k[0] && cx <= k[0] + k[2] && cy >= k[1] && cy <= k[1] + k[3]);
+    });
+    // Group neighbouring letters into text.
+    const groups: { box: Box; n: number }[] = [];
+    for (const c of letters) {
+      let g = groups.find((x) => boxGap(x.box, c.box) <= h * 0.8);
+      if (!g) groups.push((g = { box: c.box, n: 0 }));
+      g.box = unionBox(g.box, c.box);
+      g.n++;
+      // Joining may connect two groups: merge them.
+      for (let i = groups.length - 1; i >= 0; i--) {
+        const o = groups[i];
+        if (o !== g && boxGap(o.box, g.box) <= h * 0.8) {
+          g.box = unionBox(g.box, o.box);
+          g.n += o.n;
+          groups.splice(i, 1);
+        }
+      }
+    }
+    for (const g of groups) {
+      if (g.n < 4 || g.box[2] < h * 2) continue;
+      const box: Box = [g.box[0] + region[0], g.box[1] + region[1], g.box[2], g.box[3]];
+      const same = found.findIndex((f) => boxGap(f, box) <= h * 0.8);
+      if (same >= 0) {
+        const grown = unionBox(found[same], box);
+        if (boxArea(grown) <= boxArea(found[same])) continue;
+        found[same] = grown;
+      } else found.push(box);
+      // The rest of that text may lie further from the bubble we started from: look around it too.
+      queue.push({ area: box, fill: pr.fill, letterHeight: h });
+    }
+  }
+  return found;
+}

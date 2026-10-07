@@ -284,6 +284,8 @@ describe('webtoon pages: the original lettering is fully removed', () => {
     const rendered = await renderOutput(napiBackend, out, { ...DEFAULT_STYLE_DEFAULTS, dialogueFont: 'TestSans', narrationFont: 'TestSans', sfxFont: 'TestSans' });
     writeFileSync(`${OUT}webtoon-rendered.png`, rendered.tiles[0].bytes);
     console.log(rendered.page.blocks.map((b) => `${b.id} ${b.textType} ${b.translatedText}`).join('\n'));
+    // No text is left over on the bubbles, so the picture is not read a second time.
+    expect(mock.calls.length).toBe(1);
     // The split bubble became one block (7 model blocks → 7 - 1).
     expect(rendered.page.blocks).toHaveLength(7);
     const merged = rendered.page.blocks.find((b) => b.translatedText.startsWith('Я не ожидал'))!;

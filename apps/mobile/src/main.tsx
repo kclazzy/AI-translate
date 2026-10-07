@@ -85,7 +85,7 @@ const platform: StudioPlatform = {
   loadSettings,
   saveSettings,
   saveFile,
-  version: '0.3.7',
+  version: '0.3.8',
   installUpdate,
 };
 

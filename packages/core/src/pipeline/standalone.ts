@@ -1,7 +1,7 @@
 import { AppError } from '../errors';
 import type { ImageBackend } from '../image/backend';
-import { cleanBlock, luminance, parseHex, type Lettering } from '../image/clean';
-import { boxToPolygon, clampBox, overlapRatio, TiledImage } from '../image/tiled';
+import { cleanBlock, findLeftoverText, luminance, parseHex, type Lettering, type LeftoverProbe } from '../image/clean';
+import { boxToPolygon, clampBox, expandBox, overlapRatio, TiledImage } from '../image/tiled';
 import { detectScript } from '../languages';
 import { assertPrivacy, isLocalProvider } from '../llm/privacy';
 import { createProvider } from '../llm/presets';
@@ -168,6 +168,14 @@ export function mergeSharedBubbles(blocks: TextBlock[], closed: Map<string, bool
   return out;
 }
 
+function intersectBox(a: Box, b: Box): Box | null {
+  const x = Math.max(a[0], b[0]);
+  const y = Math.max(a[1], b[1]);
+  const r = Math.min(a[0] + a[2], b[0] + b[2]);
+  const btm = Math.min(a[1] + a[3], b[1] + b[3]);
+  return r > x && btm > y ? [x, y, r - x, btm - y] : null;
+}
+
 function intersects(a: Box, b: Box): boolean {
   return a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
 }
@@ -201,6 +209,19 @@ export function separateAreas(blocks: TextBlock[]): void {
       }
     }
   }
+}
+
+/**
+ * Font size of the original lettering: from the measured letter height when there is one
+ * (capitals are about 0.72 of the font size, CJK glyphs about 0.9), never larger than the
+ * estimate from the box area.
+ */
+export function fontFromLettering(box: Box, text: string, l: Lettering | undefined): number {
+  const byArea = estimateFontSize(box, text);
+  if (!l || l.letterHeight < 6) return byArea;
+  const script = detectScript(text);
+  const ratio = script === 'latin' || script === 'cyrillic' ? (isAllCaps(text) ? 0.72 : 0.6) : 0.9;
+  return Math.max(8, Math.min(byArea, Math.round(l.letterHeight / ratio)));
 }
 
 /** Rough font size from box area and character count. */
@@ -310,17 +331,19 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   stage('cleaning');
   cleaned = original.clone();
   const closedBubble = new Map<string, boolean>();
-  for (const b of blocks) {
+  const letterHeight = new Map<string, number>();
+  const cleanOne = (b: TextBlock) => {
     const erase = b.translate && !(b.textType === 'SFX' && config.sfxStyle === 'original');
     if (req.generic) {
       // UI/screen text: no bubbles; paint a plate behind the text instead.
       const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase });
       b.bubble = r.bubble ? { ...r.bubble, shape: 'rect', safeArea: b.bbox } : null;
-      continue;
+      return;
     }
     const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, sfx: b.textType === 'SFX' });
     b.bubble = r.bubble;
     closedBubble.set(b.id, r.closed);
+    if (r.lettering) letterHeight.set(b.id, r.lettering.letterHeight);
     if (r.textBox && b.textType === 'SFX' && !b.textBox) {
       // Sound effects go where the original letters were, not in the middle of a loose model box.
       const [x, y, w, h] = r.textBox;
@@ -328,9 +351,43 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     }
     if (r.textBox && b.textType !== 'SFX') {
       // Use the measured text pixels to correct an imprecise model box (keep the larger safe area).
-      b.fontSizeEstimate = estimateFontSize(r.textBox, b.originalText);
+      b.fontSizeEstimate = fontFromLettering(r.textBox, b.originalText, r.lettering);
     }
     b.style = { ...matchLettering(b, r.lettering), ...(b.style ?? {}) };
+  };
+  for (const b of blocks) cleanOne(b);
+  if (!req.generic) {
+    // The model sometimes skips text: a second remark in the same bubble, a line of a long one.
+    // Lettering still standing on a bubble after cleaning is read again from just that part.
+    const probes: LeftoverProbe[] = blocks
+      .filter((b) => b.translate && b.textType !== 'SFX' && b.bubble && (letterHeight.get(b.id) ?? 0) >= 6)
+      .map((b) => ({ area: b.bubble!.box, fill: parseHex(b.bubble!.fill), letterHeight: letterHeight.get(b.id)! }));
+    const known = blocks.flatMap((b) => (b.textBox ? [b.bbox, b.textBox] : [b.bbox]));
+    for (const [k, box] of findLeftoverText(cleaned, probes, known).slice(0, 3).entries()) {
+      try {
+        const pad = Math.round(Math.max(box[2], box[3]) * 0.3) + 12;
+        const r = await recognizeRegion(original, expandBox(box, pad), config, deps, { context: req.context, signal, idPrefix: `x${k}` });
+        usage.push(...r.usage);
+        const near = expandBox(box, 6);
+        for (const nb of r.blocks) {
+          // We know where the left-over letters are; the model's box in a crop is only approximate.
+          const cut = r.blocks.length === 1 ? near : intersectBox(nb.bbox, near);
+          if (!cut) continue;
+          nb.bbox = clampBox(cut.map(Math.round) as Box, original.width, original.height);
+          nb.polygon = boxToPolygon(nb.bbox);
+          nb.fontSizeEstimate = estimateFontSize(nb.bbox, nb.originalText);
+          if (!nb.originalText.trim() || !nb.translatedText.trim() || blocks.some((o) => overlapRatio(o.bbox, nb.bbox) > 0.5)) continue;
+          nb.language = blocks[0]?.language ?? nb.language;
+          cleanOne(nb);
+          // Keep reading order: before the first block that starts below it.
+          const at = blocks.findIndex((o) => o.bbox[1] > nb.bbox[1]);
+          blocks.splice(at < 0 ? blocks.length : at, 0, nb);
+        }
+      } catch (e) {
+        if ((e as { code?: string }).code === 'CANCELLED') throw e;
+        // A failed extra read never fails the page.
+      }
+    }
   }
   blocks = mergeSharedBubbles(blocks, closedBubble);
   separateAreas(blocks);
