@@ -83,7 +83,9 @@ try {
     throw new Error(`translation did not finish: ${(await page.$eval('body', (b) => b.innerText)).slice(0, 400)}`);
   }
   const reads = calls.filter((c) => !String(c.messages?.[0]?.content ?? '').includes('editor-in-chief'));
-  check('picture translated on the phone without a PC engine', reads.length === 1, `model calls=${reads.length}`);
+  // The picture is read once (with the image), then the page is translated in a text step.
+  const withImage = reads.filter((c) => /image_url|"images"|base64/.test(JSON.stringify(c)));
+  check('picture translated on the phone without a PC engine', withImage.length === 1 && reads.length === 2, `model calls=${reads.length}, with the image=${withImage.length}`);
   check('translation checked on the phone too', calls.length - reads.length === 1, `reviews=${calls.length - reads.length}`);
   await page.screenshot({ path: join(OUT, 'mobile-result.png'), fullPage: true });
 
