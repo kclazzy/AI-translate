@@ -185,6 +185,19 @@ function Popup() {
           <option value="epub">EPUB</option>
           <option value="zip">ZIP</option>
         </select>
+        <select
+          className="ait-select"
+          style={{ flex: '0 0 112px' }}
+          value={s.exportPageLength ?? 'normal'}
+          disabled={fmt === 'zip'}
+          onChange={(e) => update({ exportPageLength: e.target.value as AppSettings['exportPageLength'] })}
+          aria-label="Длина страницы"
+          title="Как резать длинную ленту вебтуна на страницы"
+        >
+          <option value="normal">Обычные стр.</option>
+          <option value="long">Длинные стр.</option>
+          <option value="whole">Без нарезки</option>
+        </select>
       </div>
       <div className="pp-row">
         <button className="ait-btn" disabled={!canRun} onClick={() => void command('select-area')}>Перевести область</button>

@@ -428,6 +428,9 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
           <Field label="Хранить историю, дней" hint="Старые записи удаляются сами">
             <input className="ait-input" type="number" min={1} max={3650} value={s.historyDays ?? 30} onChange={(e) => update({ historyDays: Math.max(1, Number(e.target.value) || 30) })} />
           </Field>
+          <Field label="Длина страницы в PDF/CBZ/EPUB" hint="Как резать длинную ленту вебтуна при скачивании">
+            <Segmented label="Длина страницы" value={s.exportPageLength ?? 'normal'} onChange={(exportPageLength) => update({ exportPageLength })} options={[{ value: 'normal', label: 'Обычная' }, { value: 'long', label: 'Длинная' }, { value: 'whole', label: 'Без нарезки' }]} />
+          </Field>
           <Field label="Минимальный размер картинки, px">
             <input className="ait-input" type="number" min={50} max={2000} value={s.minImageSize} onChange={(e) => update({ minImageSize: Math.max(50, Number(e.target.value) || 200) })} />
           </Field>

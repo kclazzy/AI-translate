@@ -143,9 +143,9 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
     }
     const onP = (d: number, t: number) => setProgress({ done: d, total: t, label: `Экспорт ${d} / ${t}` });
     try {
-      if (exportFmt === 'pdf') await platform.saveFile(`${project.title}.pdf`, await exportPdf(platform.backend, pages, onP), 'application/pdf');
-      else if (exportFmt === 'cbz') await platform.saveFile(`${project.title}.cbz`, await exportCbz(platform.backend, pages, project.title, onP), 'application/vnd.comicbook+zip');
-      else if (exportFmt === 'epub') await platform.saveFile(`${project.title}.epub`, await exportEpub(platform.backend, pages, project.title, settings.targetLang, onP), 'application/epub+zip');
+      if (exportFmt === 'pdf') await platform.saveFile(`${project.title}.pdf`, await exportPdf(platform.backend, pages, onP, settings.exportPageLength), 'application/pdf');
+      else if (exportFmt === 'cbz') await platform.saveFile(`${project.title}.cbz`, await exportCbz(platform.backend, pages, project.title, onP, settings.exportPageLength), 'application/vnd.comicbook+zip');
+      else if (exportFmt === 'epub') await platform.saveFile(`${project.title}.epub`, await exportEpub(platform.backend, pages, project.title, settings.targetLang, onP, settings.exportPageLength), 'application/epub+zip');
       else {
         const mime: ImageMime = exportFmt === 'zip-jpg' ? 'image/jpeg' : exportFmt === 'zip-webp' ? 'image/webp' : 'image/png';
         await platform.saveFile(`${project.title}.zip`, await exportZip(platform.backend, pages, mime, onP), 'application/zip');

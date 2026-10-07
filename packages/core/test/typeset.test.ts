@@ -72,3 +72,20 @@ describe('hyphenate', () => {
     expect(hyphenate('кот', () => false)).toBeNull();
   });
 });
+
+describe('text stays inside the picture', () => {
+  it('a bubble cut by the top edge with a long translation keeps its first line visible', async () => {
+    const { layoutBlock } = await import('../src/render/render');
+    const b = {
+      id: 'b1', textType: 'DIALOGUE', originalText: "THE DAY'S WORK IS DONE, RIGHT?", translatedText: 'РАБОТА НА СЕГОДНЯ ЗАКОНЧЕНА, ВЕРНО?',
+      confidence: 0.9, language: 'en', bbox: [20, -30, 120, 70], polygon: [], orientation: 0, writingDirection: 'ltr', fontSizeEstimate: 22,
+      bubble: null, translate: true, style: { fontSize: 22 },
+    } as never;
+    const free = layoutBlock(measurer, b);
+    const kept = layoutBlock(measurer, b, undefined, { width: 400, height: 300 });
+    const top = (l: typeof free) => -30 + Math.min(...l.lines.map((x) => x.y)) - l.fontSize * 0.95;
+    expect(top(free)).toBeLessThan(0); // without the page limit the first line would be cut off
+    expect(top(kept)).toBeGreaterThanOrEqual(0);
+    expect(kept.lines.length).toBe(free.lines.length);
+  });
+});

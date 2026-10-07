@@ -158,11 +158,12 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       // Letters (any alphabet), digits and simple punctuation only: Chrome rejects some characters.
       const safe = (msg.title || 'Глава').replace(/[^\p{L}\p{N} ._,()\-]+/gu, ' ').replace(/\s+/g, ' ').replace(/^[ .]+|[ .]+$/g, '').slice(0, 100) || 'Глава';
       const backend = browserBackend;
+      const len = (await loadSettings()).exportPageLength;
       let bytes: Uint8Array;
       let mime: string;
-      if (msg.format === 'pdf') [bytes, mime] = [await exportPdf(backend, pages), 'application/pdf'];
-      else if (msg.format === 'cbz') [bytes, mime] = [await exportCbz(backend, pages, safe), 'application/vnd.comicbook+zip'];
-      else if (msg.format === 'epub') [bytes, mime] = [await exportEpub(backend, pages, safe, msg.lang), 'application/epub+zip'];
+      if (msg.format === 'pdf') [bytes, mime] = [await exportPdf(backend, pages, undefined, len), 'application/pdf'];
+      else if (msg.format === 'cbz') [bytes, mime] = [await exportCbz(backend, pages, safe, undefined, len), 'application/vnd.comicbook+zip'];
+      else if (msg.format === 'epub') [bytes, mime] = [await exportEpub(backend, pages, safe, msg.lang, undefined, len), 'application/epub+zip'];
       else [bytes, mime] = [await exportZip(backend, pages, 'image/png'), 'application/zip'];
       const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
       setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);

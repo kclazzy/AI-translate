@@ -32,7 +32,33 @@ export function displayText(block: TextBlock, d: StyleDefaults = DEFAULT_STYLE_D
   return style.uppercase ? block.translatedText.toLocaleUpperCase(d.targetLang) : block.translatedText;
 }
 
-export function layoutBlock(measurer: Measurer, block: TextBlock, d: StyleDefaults = DEFAULT_STYLE_DEFAULTS): LayoutResult {
+export function layoutBlock(measurer: Measurer, block: TextBlock, d: StyleDefaults = DEFAULT_STYLE_DEFAULTS, page?: { width: number; height: number }): LayoutResult {
+  const l = layoutBlockRaw(measurer, block, d);
+  return page ? keepInsidePage(l, l.box ?? targetBox(block, d), page) : l;
+}
+
+/**
+ * Text must never be drawn outside the picture: a bubble cut by the top edge with a long
+ * translation would otherwise push its first line above the image, where it is cut off.
+ */
+export function keepInsidePage(l: LayoutResult, box: Box, page: { width: number; height: number }, margin = 2): LayoutResult {
+  if (l.vertical || !l.lines.length) return l;
+  const top = box[1] + Math.min(...l.lines.map((x) => x.y)) - l.fontSize * 0.95;
+  const bottom = box[1] + Math.max(...l.lines.map((x) => x.y)) + l.fontSize * 0.3;
+  let dy = 0;
+  if (top < margin) dy = margin - top;
+  else if (bottom > page.height - margin) dy = Math.max(margin - top, page.height - margin - bottom);
+  const half = (w: number) => (l.alignment === 'center' ? w / 2 : 0);
+  const left = box[0] + Math.min(...l.lines.map((x) => x.x - (l.alignment === 'right' ? x.width : half(x.width))));
+  const right = box[0] + Math.max(...l.lines.map((x) => x.x + (l.alignment === 'left' ? x.width : half(x.width))));
+  let dx = 0;
+  if (left < margin) dx = margin - left;
+  else if (right > page.width - margin) dx = Math.max(margin - left, page.width - margin - right);
+  if (!dx && !dy) return l;
+  return { ...l, lines: l.lines.map((x) => ({ ...x, x: x.x + dx, y: x.y + dy })) };
+}
+
+function layoutBlockRaw(measurer: Measurer, block: TextBlock, d: StyleDefaults): LayoutResult {
   const first = layoutBlockIn(measurer, block, d, targetBox(block, d), block.textBox ? 'rect' : block.bubble?.shape ?? 'rect');
   if (!first.overflow || block.textBox || !block.bubble || block.style?.fontSize) return first;
   // Does not fit the safe area: use the whole bubble (as a box, a little inside its edge) and
@@ -112,7 +138,7 @@ export function renderTiles(backend: ImageBackend, cleaned: TiledImage, blocks: 
   const overflow = new Set<string>();
   for (const b of blocks) {
     if (!shouldDraw(b, d)) continue;
-    const l = layoutBlock(measurer, b, d);
+    const l = layoutBlock(measurer, b, d, { width: cleaned.width, height: cleaned.height });
     layouts.set(b.id, l);
     if (l.overflow) overflow.add(b.id);
   }

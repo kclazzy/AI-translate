@@ -43,6 +43,16 @@ describe('cutting long strips into book pages', () => {
     }
     expect(parts.reduce((a, p) => a + p.height, 0)).toBe(2900);
   });
+  it('longer pages on request: long ≈ 3× a book page, whole = one page while it fits', async () => {
+    const page = await strip(400, 2900, [560, 1150, 1720, 2300]);
+    const normal = await bookPages(napiBackend, page, 'image/png');
+    const long = await bookPages(napiBackend, page, 'image/png', 0.9, 'long');
+    const whole = await bookPages(napiBackend, page, 'image/png', 0.9, 'whole');
+    expect(long.length).toBeLessThan(normal.length);
+    expect(Math.max(...long.map((p) => p.height))).toBeGreaterThan(1500);
+    expect(whole.length).toBe(1);
+    expect(whole[0].height).toBe(2900);
+  });
   it('keeps ordinary pages whole', () => {
     expect(planSlices(new Float32Array(1100), 800)).toEqual([0]);
     const busy = new Float32Array(5000).fill(10);

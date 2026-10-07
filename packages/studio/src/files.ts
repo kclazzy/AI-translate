@@ -118,7 +118,17 @@ export async function exportZip(backend: ImageBackend, pages: ExportPage[], mime
  * A translated page as book pages: short pages stay whole, long webtoon strips are cut at calm
  * rows (gutters between panels) into pages about 1.45× as tall as wide.
  */
-export async function bookPages(backend: ImageBackend, page: ExportPage, mime: ImageMime, quality = 0.9): Promise<{ width: number; height: number; bytes: Uint8Array }[]> {
+export type PageLength = 'normal' | 'long' | 'whole';
+
+/** How tall one book page may be when a long strip is cut: normal ≈ a book page, long ≈ 3×, whole = as long as a PDF page allows. */
+export function sliceOptions(width: number, len: PageLength = 'normal'): { target: number; minFactor?: number; maxFactor?: number } {
+  if (len === 'long') return { target: Math.round(width * 4.3) };
+  // A PDF page is at most 14 400 units and a canvas about 16 000 px: stay under both.
+  if (len === 'whole') return { target: 12_000, minFactor: 0.4, maxFactor: 1.15 };
+  return { target: Math.round(width * 1.45) };
+}
+
+export async function bookPages(backend: ImageBackend, page: ExportPage, mime: ImageMime, quality = 0.9, len: PageLength = 'normal'): Promise<{ width: number; height: number; bytes: Uint8Array }[]> {
   const decoded = [];
   for (const t of page.tiles) decoded.push({ t, img: await backend.decode(t.bytes, sniffImageMime(t.bytes) ?? 'image/png') });
   try {
@@ -130,7 +140,7 @@ export async function bookPages(backend: ImageBackend, page: ExportPage, mime: I
       const rows = rowBusyness(ctx.getImageData(0, 0, page.width, t.h).data, page.width, t.h);
       busy.set(rows.subarray(0, Math.min(t.h, page.height - t.y)), t.y);
     }
-    const cuts = planSlices(busy, page.width);
+    const cuts = planSlices(busy, page.width, sliceOptions(page.width, len));
     const out: { width: number; height: number; bytes: Uint8Array }[] = [];
     for (const [i, y0] of cuts.entries()) {
       const y1 = cuts[i + 1] ?? page.height;
@@ -153,10 +163,10 @@ export async function bookPages(backend: ImageBackend, page: ExportPage, mime: I
 }
 
 /** PDF: one PDF page per book page; long strips are cut between panels. */
-export async function exportPdf(backend: ImageBackend, pages: ExportPage[], onProgress?: (d: number, t: number) => void): Promise<Uint8Array> {
+export async function exportPdf(backend: ImageBackend, pages: ExportPage[], onProgress?: (d: number, t: number) => void, len: PageLength = 'normal'): Promise<Uint8Array> {
   let doc: jsPDF | null = null;
   for (const [i, p] of pages.entries()) {
-    for (const part of await bookPages(backend, p, 'image/jpeg', 0.9)) {
+    for (const part of await bookPages(backend, p, 'image/jpeg', 0.9, len)) {
       // PDF pages are limited to 14 400 units; scale very large pages down to fit.
       const k = Math.min(1, 14_000 / Math.max(part.width, part.height));
       const w = part.width * k;
@@ -173,11 +183,11 @@ export async function exportPdf(backend: ImageBackend, pages: ExportPage[], onPr
 }
 
 /** CBZ: the comic-reader format — a ZIP of numbered page images plus ComicInfo.xml. */
-export async function exportCbz(backend: ImageBackend, pages: ExportPage[], title: string, onProgress?: (d: number, t: number) => void): Promise<Uint8Array> {
+export async function exportCbz(backend: ImageBackend, pages: ExportPage[], title: string, onProgress?: (d: number, t: number) => void, len: PageLength = 'normal'): Promise<Uint8Array> {
   const zip = new JSZip();
   let n = 0;
   for (const [i, p] of pages.entries()) {
-    for (const part of await bookPages(backend, p, 'image/jpeg', 0.92)) zip.file(`${String(++n).padStart(4, '0')}.jpg`, part.bytes);
+    for (const part of await bookPages(backend, p, 'image/jpeg', 0.92, len)) zip.file(`${String(++n).padStart(4, '0')}.jpg`, part.bytes);
     onProgress?.(i + 1, pages.length);
   }
   const esc = (v: string) => v.replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]!);
@@ -186,7 +196,7 @@ export async function exportCbz(backend: ImageBackend, pages: ExportPage[], titl
 }
 
 /** EPUB 3 with fixed layout: one image per page, readable in book apps on phones and e-readers. */
-export async function exportEpub(backend: ImageBackend, pages: ExportPage[], title: string, lang = 'ru', onProgress?: (d: number, t: number) => void): Promise<Uint8Array> {
+export async function exportEpub(backend: ImageBackend, pages: ExportPage[], title: string, lang = 'ru', onProgress?: (d: number, t: number) => void, len: PageLength = 'normal'): Promise<Uint8Array> {
   const zip = new JSZip();
   zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
   zip.file('META-INF/container.xml', '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>');
@@ -196,7 +206,7 @@ export async function exportEpub(backend: ImageBackend, pages: ExportPage[], tit
   let n = 0;
   let first: { width: number; height: number } | null = null;
   for (const [i, p] of pages.entries()) {
-    for (const part of await bookPages(backend, p, 'image/jpeg', 0.9)) {
+    for (const part of await bookPages(backend, p, 'image/jpeg', 0.9, len)) {
       const id = String(++n).padStart(4, '0');
       first ??= part;
       zip.file(`OEBPS/img/${id}.jpg`, part.bytes);

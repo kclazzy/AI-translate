@@ -64,6 +64,8 @@ export interface AppSettings {
   qaMode?: import('./translate/qa').QaMode;
   /** Fast mode for local models: smaller picture for the model, translation check without a model call. */
   fastLocal?: boolean;
+  /** Page length when a long strip is saved as PDF/CBZ/EPUB: normal ≈ a book page, long ≈ 3×, whole = as long as possible. */
+  exportPageLength?: 'normal' | 'long' | 'whole';
 }
 
 export function defaultSettings(): AppSettings {

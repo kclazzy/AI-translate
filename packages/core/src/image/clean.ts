@@ -552,6 +552,21 @@ export function snapToLettering(candidates: Uint8Array, width: number, search: B
   return { mask, box: union };
 }
 
+/**
+ * Drop candidate components that are not surrounded by the background flood: a letter's
+ * pixels are all within a few pixels of the bubble colour, artwork beyond an outline is not.
+ */
+export function onBackground(cand: Uint8Array, width: number, height: number, rect: Box, floodMask: Uint8Array, reach = 5): Uint8Array {
+  const near = dilate(floodMask, width, height, reach);
+  const out = new Uint8Array(cand.length);
+  for (const c of components(cand, width, rect)) {
+    let n = 0;
+    for (const p of c.pixels) if (near[p]) n++;
+    if (n >= c.pixels.length * 0.85) for (const p of c.pixels) out[p] = 1;
+  }
+  return out;
+}
+
 /** Pixels still standing out from `bg` inside `rect` (what the reader could still see). */
 function residual(img: PixelData, rect: Box, bg: RGB, threshold: number): number {
   const m = textMask(img, rect, bg, threshold);
@@ -644,7 +659,10 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       for (let i = 0; i < mask.length; i++) if (mask[i] && !interior[i] && !holes[i]) mask[i] = 0;
     } else {
       // Open flat space (white gutter, narration box): erase the letters around the box.
-      const cand = textMask(img, search, bg, 60);
+      // Letters sit in the bubble's white: keep only components lying (almost) entirely next to
+      // the flooded background. Panel art behind an outline, or past where a bubble breaks out of
+      // its panel into the gutter, is not lettering even if it is letter-sized and nearby.
+      const cand = flood ? onBackground(textMask(img, search, bg, 60), img.width, img.height, search, flood.mask) : textMask(img, search, bg, 60);
       const snap = snapToLettering(cand, img.width, search, local, img);
       tb = snap.box;
       letterMask = snap.mask;
@@ -656,7 +674,16 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     // Verify: nothing that stands out from the bubble colour may remain where the text was.
     const textArea = clampBox(expandBox(tb ? unionBox(tb, local) : local, 2), img.width, img.height);
     if (!opts.analyzeOnly && residual(img, textArea, bg, 70) > 0.004) {
-      paintPlate(img, clampBox(expandBox(textArea, 3), img.width, img.height), bg, closed ? dilate(flood!.mask, img.width, img.height, 1) : undefined);
+      // The plate only covers the bubble's own background and the letters, never the art or the
+      // outline next to it (a rectangle would spill over the panel where the bubble is round).
+      let limit: Uint8Array | undefined;
+      if (closed) limit = dilate(flood!.mask, img.width, img.height, 1);
+      else if (flood) {
+        limit = dilate(flood.mask, img.width, img.height, 1);
+        const near = dilate(letterMask, img.width, img.height, 3);
+        for (let i = 0; i < limit.length; i++) if (near[i]) limit[i] = 1;
+      }
+      paintPlate(img, clampBox(expandBox(textArea, 3), img.width, img.height), bg, limit);
       method = 'plate';
     }
     const textBox: Box | null = tb ? [tb[0] + region[0], tb[1] + region[1], tb[2], tb[3]] : null;
