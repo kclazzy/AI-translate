@@ -63,8 +63,18 @@ function sendToTab(tabId: number, msg: BackgroundToContent): void {
 
 function setBadge(tabId: number) {
   const n = running.get(tabId)?.size ?? 0;
-  void chrome.action.setBadgeBackgroundColor({ tabId, color: '#c8205f' }).catch(() => undefined);
-  void chrome.action.setBadgeText({ tabId, text: n ? String(n) : '' }).catch(() => undefined);
+  if (n) {
+    void chrome.action.setBadgeBackgroundColor({ tabId, color: '#c8205f' }).catch(() => undefined);
+    void chrome.action.setBadgeText({ tabId, text: String(n) }).catch(() => undefined);
+    return;
+  }
+  // null (not '') hands the tab back to the global badge, so "OFF" shows on every tab. Older
+  // browsers reject null (synchronously): then clear the tab's own text instead.
+  try {
+    void chrome.action.setBadgeText({ tabId, text: null as unknown as string }).catch(() => undefined);
+  } catch {
+    void chrome.action.setBadgeText({ tabId, text: '' }).catch(() => undefined);
+  }
 }
 
 function track(tabId: number, jobId: string, on: boolean) {
@@ -251,11 +261,14 @@ function uiStrings(): UiStrings {
 }
 
 /** Follow the language from the settings; the context menu is re-labelled when it changes. */
+let menusLang = '';
 function applyLang(pref: string | undefined): void {
-  if (setUiLang(pref, false)) createMenus();
+  setUiLang(pref, false);
+  if (menusLang !== uiLang()) createMenus();
 }
 
 function createMenus(): void {
+  menusLang = uiLang();
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({ id: 'ait-translate-image', title: tr('Перевести изображение'), contexts: ['image'] });
     chrome.contextMenus.create({ id: 'ait-translate-page', title: tr('Перевести все картинки на странице'), contexts: ['page'] });
@@ -287,7 +300,9 @@ async function setEnabled(enabled: boolean): Promise<{ unloaded: string[] }> {
   await saveSettings({ ...s, enabled });
   let unloaded: string[] = [];
   if (!enabled) {
+    const busyTabs = [...running.keys()];
     running.clear();
+    for (const t of busyTabs) setBadge(t);
     await toOffscreen({ target: 'offscreen', type: 'cancel-tab' }).catch(() => undefined);
     const urls = new Set(s.providers.filter((p) => isOllama(p)).map((p) => p.baseUrl));
     for (const url of urls) unloaded = unloaded.concat(await ollamaUnloadAll(url));
@@ -328,7 +343,7 @@ async function offerSetup(tabId: number | undefined, force = false) {
   await chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?view=settings&setup=1${tabId !== undefined ? `&resume=${tabId}&cmd=translate-page` : ''}`) });
 }
 
-const OFF_ERROR = () => new AppError('NOT_CONFIGURED', { retryable: false, detail: tr('AI Translate выключен. Включите его в окне расширения (значок на панели).') });
+const OFF_ERROR = () => new AppError('DISABLED', { retryable: false, detail: tr('AI Translate выключен. Включите его в окне расширения (значок на панели).') });
 
 async function handleUi(msg: UiToBackground): Promise<unknown> {
   switch (msg.type) {
@@ -446,7 +461,16 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (command === 'translate-page' || command === 'select-area' || command === 'toggle-original') sendToTab(tab.id, { type: 'command', command });
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => running.delete(tabId));
+// A closed tab or a new page in it: its pictures are no longer needed — free the queue for the new ones.
+const cancelTab = (tabId: number) => {
+  if (!running.get(tabId)?.size) return;
+  running.delete(tabId);
+  void toOffscreen({ target: 'offscreen', type: 'cancel-tab', tabId }).catch(() => undefined);
+};
+chrome.tabs.onRemoved.addListener((tabId) => cancelTab(tabId));
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === 'loading' && info.url) cancelTab(tabId);
+});
 
 // Show the on/off state on the icon after the browser or the extension starts.
 void loadSettings().then((s) => {

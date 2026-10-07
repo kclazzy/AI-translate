@@ -33,13 +33,12 @@ function VramLine({ settings }: { settings: AppSettings }) {
     <>
       {spill ? (
         <div className="ait-error" data-testid="vram-spill">
-          ⚠ {spill.name} {' '}{tr('не помещается в видеопамять: на видеокарте только')}{' '}{Math.round(gpuShare(spill) * 100)}{tr('%, остальное в обычной памяти — перевод идёт в разы медленнее. Выберите модель поменьше в настройках.')}
+          ⚠ {tr('{0} не помещается в видеопамять: на видеокарте только {1}%, остальное в обычной памяти — перевод идёт в разы медленнее. Выберите модель поменьше в настройках.', spill.name, Math.round(gpuShare(spill) * 100))}
         </div>
       ) : null}
       {speed && speed.pages ? (
         <p className="ait-hint" data-testid="speed-line" style={{ margin: 0 }}>
-          
-          {tr('Скорость: ~')}{Math.round(speed.avgMs / 1000)} {' '}{tr('с на страницу')}{slow ? tr(' — медленнее обычного для {0} (до {1} с). Попробуйте быстрый режим или модель полегче.', vision?.model, expected) : ''}
+          {tr('Скорость: ~{0} с на страницу', Math.round(speed.avgMs / 1000))}{slow ? tr(' — медленнее обычного для {0} (до {1} с). Попробуйте быстрый режим или модель полегче.', vision?.model, expected) : ''}
         </p>
       ) : null}
     <p className="ait-hint" data-testid="vram-line" style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', margin: 0 }}>
@@ -119,7 +118,7 @@ function Popup() {
       const ready = await checkReadiness(s);
       setPreflight(false);
       if (!ready.ok) {
-        void chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?view=settings&setup=1&resume=${tab.id}&cmd=${command}`) });
+        void chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?view=settings&setup=1&resume=${tab.id}&cmd=${command}${command === 'download-chapter' ? `&format=${fmt}` : ''}`) });
         window.close();
         return;
       }
@@ -151,7 +150,6 @@ function Popup() {
           {power}
         </header>
         <div className="ait-notice" data-testid="off-notice">
-          
           {tr('Расширение выключено: не переводит, не показывает кнопки на картинках и не держит модель в видеопамяти.')}
           {unloaded?.length ? tr(' Выгружено из памяти: {0}.', unloaded.join(', ')) : ''}
         </div>
@@ -177,7 +175,7 @@ function Popup() {
         <ModelCheckCard compact settings={s} update={update} getKey={(id) => secrets.get(`provider:${id}`)} onOpenSettings={(download) => open(download ? 'studio.html?view=settings&pull=1' : 'studio.html?view=settings')} />
       ) : null}
       {s.pipeline === 'standalone' ? <VramLine settings={s} /> : null}
-      {engine === 'down' ? <div className="ait-error">{tr('Движок не отвечает по адресу')}{' '}{s.engine.url}{tr('. Запустите его или переключитесь в режим без движка.')}</div> : null}
+      {engine === 'down' ? <div className="ait-error">{tr('Движок не отвечает по адресу {0}. Запустите его или переключитесь в режим без движка.', s.engine.url)}</div> : null}
       {engine === 'unpaired' ? <div className="ait-notice">{tr('Движок запущен, но код сопряжения не подходит. Введите его в настройках.')}</div> : null}
 
       <button className="ait-bubble-btn pp-main" disabled={!canRun || missing} onClick={() => void command('translate-page')}>
@@ -185,7 +183,6 @@ function Popup() {
       </button>
       <div className="pp-row" data-testid="download-row">
         <button className="ait-btn" disabled={!canRun || missing} onClick={() => void command('download-chapter')} title={tr('Перевести все картинки страницы и скачать главу одним файлом')}>
-          
           {tr('Перевести и скачать')}
         </button>
         <select className="ait-select" style={{ flex: '0 0 92px' }} value={fmt} onChange={(e) => setFmt(e.target.value as typeof fmt)} aria-label={tr('Формат файла')}>
@@ -231,8 +228,7 @@ function Popup() {
             setBusy(0);
           }}
         >
-          
-          {tr('Остановить перевод (')}{busy} {' '}{tr('в работе)')}
+          {tr('Остановить перевод ({0} в работе)', busy)}
         </button>
       ) : null}
       {!canRun ? <p className="ait-hint">{tr('На этой странице расширение не работает. Откройте сайт с мангой.')}</p> : null}

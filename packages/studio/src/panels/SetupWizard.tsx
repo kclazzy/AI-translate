@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { configFromPreset, EngineClient, listOpenAiModels, shortId, type AppSettings } from '@ait/core';
 import { usePlatform } from '../platform';
 import { ErrorBox, Field, useAction } from '../ui';
-import { tr } from '@ait/core/i18n';
+import { N_, tr } from '@ait/core/i18n';
 
 type Choice = 'cloud' | 'lan-model' | 'engine';
 
@@ -30,14 +30,14 @@ export function SetupWizard({ settings, update, onDone }: { settings: AppSetting
       const models = await listOpenAiModels(lanUrl.trim(), undefined).catch(() => {
         throw new Error(tr('Сервер моделей не отвечает. Проверьте адрес и что телефон в той же сети Wi-Fi.'));
       });
-      const cfg = { ...configFromPreset(lanUrl.includes(':1234') ? 'lmstudio' : 'ollama', shortId('lan-')), baseUrl: lanUrl.trim(), model: lanModel.trim() || models[0] || 'model', vision: true, label: tr('Модель на ПК') };
+      const cfg = { ...configFromPreset(lanUrl.includes(':1234') ? 'lmstudio' : 'ollama', shortId('lan-')), baseUrl: lanUrl.trim(), model: lanModel.trim() || models[0] || 'model', vision: true, label: N_('Модель на ПК') };
       update({ providers: [...settings.providers, cfg], visionProviderId: cfg.id, translationProviderId: null, privacy: 'local', pipeline: 'standalone', onboarded: true });
     } else {
       const health = await new EngineClient(engineUrl.trim(), code.trim()).health().catch(() => {
         throw new Error(tr('Движок не отвечает. Запустите его на ПК с флагом --lan и проверьте адрес.'));
       });
       if ((health as { paired?: boolean }).paired === false) throw new Error(tr('Код сопряжения не подошёл'));
-      const cfg = { ...configFromPreset('ollama', shortId('lan-')), baseUrl: lanUrl.trim(), model: lanModel.trim(), vision: true, label: tr('Модель на ПК') };
+      const cfg = { ...configFromPreset('ollama', shortId('lan-')), baseUrl: lanUrl.trim(), model: lanModel.trim(), vision: true, label: N_('Модель на ПК') };
       update({ providers: [...settings.providers, cfg], visionProviderId: cfg.id, pipeline: 'engine', privacy: 'local', engine: { ...settings.engine, url: engineUrl.trim(), token: code.trim() }, onboarded: true });
     }
     onDone();
@@ -103,7 +103,6 @@ export function SetupWizard({ settings, update, onDone }: { settings: AppSetting
             {finish.busy ? tr('Проверяю…') : tr('Готово')}
           </button>
           <button className="ait-btn ghost" style={{ flex: '0 0 auto' }} onClick={() => { update({ onboarded: true }); onDone(); }}>
-            
             {tr('Настрою позже')}
           </button>
         </div>

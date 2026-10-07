@@ -50,7 +50,7 @@ function DropZone({ onFiles, label }: { onFiles: (f: File[]) => void; label: str
   );
 }
 
-export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings; initialFiles?: File[] }) {
+export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settings: AppSettings; initialFiles?: File[]; onInitialUsed?: () => void }) {
   const platform = usePlatform();
   const store = useMemo(() => new ProjectStore(platform.db), [platform]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -59,6 +59,8 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
   const [tab, setTab] = useState<'pages' | 'glossary' | 'context' | 'replace'>('pages');
   const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
+  // Ticks belong to one chapter: start clean when another one opens.
+  useEffect(() => setSelection(new Set()), [project?.id]);
   const [exportFmt, setExportFmt] = useState<'zip-png' | 'zip-jpg' | 'zip-webp' | 'pdf' | 'cbz' | 'epub'>('pdf');
   const abort = useRef<AbortController | null>(null);
   const scanlator = settings.uiMode === 'scanlator';
@@ -81,7 +83,9 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
   });
 
   useEffect(() => {
-    if (initialFiles?.length) void create.run(initialFiles);
+    if (!initialFiles?.length) return;
+    void create.run(initialFiles);
+    onInitialUsed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialFiles]);
 
@@ -176,7 +180,6 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
           <ErrorBox error={create.error} />
           <div style={{ marginTop: 12 }}>
             <label className="ait-btn">
-              
               {tr('Открыть файл проекта (.aitproj)')}
               <input type="file" hidden accept=".aitproj,.zip" onChange={(e) => e.target.files?.[0] && void importProject.run(e.target.files[0])} />
             </label>
@@ -191,7 +194,7 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
               {projects.map((p) => (
                 <tr key={p.id}>
                   <td><button className="ait-btn ghost" onClick={() => setProject(p)}>{p.title}</button></td>
-                  <td className="ait-muted">{p.pages.filter((x) => x.status === 'done').length} / {p.pages.length} {' '}{tr('стр.')}</td>
+                  <td className="ait-muted">{p.pages.filter((x) => x.status === 'done').length} / {p.pages.length}{' '}{tr('стр.')}</td>
                   <td className="ait-muted">{new Date(p.updatedAt).toLocaleString(uiLocale())}</td>
                   <td style={{ width: 1 }}>
                     <button className="ait-btn small ghost danger" onClick={async () => { if (confirm(tr('Удалить проект «{0}»?', p.title))) { await store.remove(p); reload(); } }}>{tr('Удалить')}</button>
@@ -214,7 +217,7 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
         <div className="ait-row" style={{ alignItems: 'center' }}>
           <button className="ait-btn small ghost" style={{ flex: '0 0 auto' }} onClick={() => { setProject(null); reload(); }}>{tr('← Проекты')}</button>
           <input className="ait-input" style={{ flex: '1 1 240px', fontWeight: 600 }} value={project.title} onChange={(e) => setProject({ ...project, title: e.target.value })} onBlur={() => void store.save(project)} aria-label={tr('Название проекта')} />
-          <span className="ait-muted" style={{ flex: '0 0 auto' }}>{done} {' '}{tr('из')}{' '}{project.pages.length} {' '}{tr('готово')}</span>
+          <span className="ait-muted" style={{ flex: '0 0 auto' }}>{tr('{0} из {1} готово', done, project.pages.length)}</span>
         </div>
         <div className="ait-row" style={{ marginTop: 14, alignItems: 'center' }}>
           {translateAll.busy ? (
@@ -252,7 +255,15 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
         <>
           <div className="ait-pages">
             {project.pages.map((p) => (
-              <div key={p.id} className={`ait-page ${selection.has(p.id) ? 'selected' : ''}`} onClick={() => (p.status === 'done' ? setEditing(p) : undefined)} title={p.error ? errorMessage(p.error) : p.name}>
+              <div
+                key={p.id}
+                className={`ait-page ${selection.has(p.id) ? 'selected' : ''}`}
+                role={p.status === 'done' ? 'button' : undefined}
+                tabIndex={p.status === 'done' ? 0 : undefined}
+                onClick={() => (p.status === 'done' ? setEditing(p) : undefined)}
+                onKeyDown={(e) => p.status === 'done' && (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setEditing(p))}
+                title={p.error ? errorMessage(p.error) : p.name}
+              >
                 {scanlator ? (
                   <input type="checkbox" aria-label={tr('Выбрать {0}', p.name)} checked={selection.has(p.id)} onClick={(e) => e.stopPropagation()} onChange={(e) => { const s = new Set(selection); if (e.target.checked) s.add(p.id); else s.delete(p.id); setSelection(s); }} />
                 ) : null}

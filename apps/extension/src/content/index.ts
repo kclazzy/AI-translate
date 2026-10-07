@@ -13,6 +13,8 @@ import { registerDictionary, setUiLang, tr } from '@ait/core/i18n';
 
 interface Item {
   id: string;
+  /** This request's job id (id~n): a late message from an earlier request for the same picture is ignored. */
+  req?: string;
   cand: Candidate;
   src?: string;
   status: 'queued' | 'working' | 'done' | 'error';
@@ -57,6 +59,15 @@ function main() {
     relabelHover();
   };
 
+  /** Pictures the user stopped: automatic modes leave them alone until the user asks again. */
+  let dismissed = new WeakSet<Element>();
+  let reqSeq = 0;
+  /** The item a worker message is about, if it is still the current request for that picture. */
+  const itemFor = (jobId: string) => {
+    const it = items.get(jobId.split('~')[0]);
+    return it && (it.req ?? it.id) === jobId ? it : undefined;
+  };
+
   const idFor = (el: Element) => {
     let id = byElement.get(el);
     if (!id) {
@@ -68,6 +79,7 @@ function main() {
 
   // ---- translate one candidate -------------------------------------------------------------
   async function translate(c: Candidate, opts: { priority?: number; force?: boolean } = {}) {
+    dismissed.delete(c.el);
     const id = idFor(c.el);
     const existing = items.get(id);
     if (existing && !opts.force && existing.src === (c.src ?? existing.src) && existing.status !== 'error') return;
@@ -83,16 +95,19 @@ function main() {
       },
       onRetry: () => void translate(c, { priority: 50, force: true }),
       onCancel: () => {
-        void send({ type: 'cancel', id });
-        items.get(id)?.overlay.destroy();
+        const it = items.get(id);
+        void send({ type: 'cancel', id: it?.req ?? id });
+        dismissed.add(c.el);
+        it?.overlay.destroy();
         items.delete(id);
       },
     });
-    const item: Item = { id, cand: c, src: c.src, status: 'queued', overlay };
+    const req = `${id}~${(reqSeq++).toString(36)}`;
+    const item: Item = { id, req, cand: c, src: c.src, status: 'queued', overlay };
     items.set(id, item);
     overlay.stage({ stage: 'queued' });
     try {
-      const image: ImageRef = { id, kind: c.kind, src: c.src, dataUrl: await inlineData(c), rect: viewportRect(c.el), dpr: devicePixelRatio };
+      const image: ImageRef = { id: req, kind: c.kind, src: c.src, dataUrl: await inlineData(c), rect: viewportRect(c.el), dpr: devicePixelRatio };
       if (image.dataUrl) image.src = undefined;
       await send({ type: 'translate', image, pageUrl: location.href, title: document.title, priority: opts.priority ?? priorityOf(c.el), force: opts.force });
       item.sentAt = Date.now();
@@ -125,13 +140,13 @@ function main() {
     }
     let res: Record<string, JobStatus>;
     try {
-      res = await send<Record<string, JobStatus>>({ type: 'status', ids: active.map((it) => it.id) });
+      res = await send<Record<string, JobStatus>>({ type: 'status', ids: active.map((it) => it.req ?? it.id) });
     } catch {
       return; // the service worker is restarting; try again on the next tick
     }
     for (const it of active) {
       if (items.get(it.id) !== it || it.status === 'done' || it.status === 'error') continue;
-      const st = res?.[it.id] ?? { state: 'unknown' };
+      const st = res?.[it.req ?? it.id] ?? { state: 'unknown' };
       if (st.state === 'pending') {
         it.lost = 0;
         it.overlay.note(st.ahead ? tr('перед ней {0}', st.ahead) : tr('следующая'), st.ahead > 1 ? tr('Локальная модель переводит по одной картинке за раз') : undefined);
@@ -145,7 +160,7 @@ function main() {
         const tries = (resent.get(it.id) ?? 0) + 1;
         resent.set(it.id, tries);
         it.status = 'error';
-        if (tries <= 2) void translate(it.cand, { priority: 40 });
+        if (tries <= 2 && !it.docRect) void translate(it.cand, { priority: 40 });
         else it.overlay.error(tr('Задача потерялась'), tr('Расширение несколько раз перезапускалось. Нажмите «Повторить».'));
       }
     }
@@ -185,7 +200,7 @@ function main() {
         return false;
       }
       case 'job-stage': {
-        const it = items.get(msg.id);
+        const it = itemFor(msg.id);
         if (it && it.status !== 'done') {
           it.status = 'working';
           it.overlay.stage(msg.event);
@@ -193,11 +208,13 @@ function main() {
         break;
       }
       case 'job-done': {
-        const it = items.get(msg.id);
+        const it = itemFor(msg.id);
         if (!it) break;
         it.status = 'done';
-        it.result = msg.result;
         it.overlay.setTiles(msg.result.tiles, langsOf(msg.result));
+        // The overlay keeps its own copies of the pictures; holding the base64 tiles too would
+        // double the memory on long webtoon pages.
+        it.result = { ...msg.result, tiles: [] };
         it.overlay.setOriginal(originalsShown);
         {
           const qa = msg.result.page.blocks.flatMap((b) => (b.qa?.issues ?? []).map((q) => `• ${q.note}${b.qa?.before !== undefined ? tr(' (исправлено)') : ''}`));
@@ -207,11 +224,14 @@ function main() {
         break;
       }
       case 'job-error': {
-        const it = items.get(msg.id);
+        const it = itemFor(msg.id);
         if (!it) break;
         if (msg.error.code === 'CANCELLED') {
+          // Stopped from the popup or by switching off: do not start it again by itself.
+          if (!it.docRect) dismissed.add(it.cand.el);
+          pageMode = false;
           it.overlay.destroy();
-          items.delete(msg.id);
+          items.delete(it.id);
           break;
         }
         it.status = 'error';
@@ -219,7 +239,8 @@ function main() {
           it.overlay.error(errorMessage(msg.error), msg.error.detail, [tr('Установить и запустить'), () => void send({ type: 'open-setup' })]);
           break;
         }
-        it.overlay.error(errorMessage(msg.error), msg.error.detail);
+        // An unexpected error has no explanation of its own: show what actually happened.
+        it.overlay.error(errorMessage(msg.error), msg.error.detail ?? (msg.error.code === 'UNKNOWN' ? msg.error.message : undefined));
         break;
       }
       case 'command':
@@ -270,7 +291,7 @@ function main() {
   let pageMode = false;
 
   // ---- «Перевести и скачать»: the whole chapter as one file --------------------------------
-  let chapter: { format: ChapterFormat; timer: ReturnType<typeof setInterval>; panel: HTMLElement; text: HTMLElement; lastChange: number; lastDone: number } | null = null;
+  let chapter: { format: ChapterFormat; timer: ReturnType<typeof setInterval>; panel: HTMLElement; text: HTMLElement; lastChange: number; lastDone: number; seen: number } | null = null;
 
   function downloadChapter(format: ChapterFormat) {
     if (chapter) return;
@@ -288,11 +309,16 @@ function main() {
       if (!chapter) return host.remove();
       clearInterval(chapter.timer);
       chapter = null;
-      for (const it of pageItemsInOrder()) if (it.status === 'queued' || it.status === 'working') void send({ type: 'cancel', id: it.id }).catch(() => undefined);
+      pageMode = false;
+      for (const it of pageItemsInOrder()) {
+        if (it.status !== 'queued' && it.status !== 'working') continue;
+        dismissed.add(it.cand.el);
+        void send({ type: 'cancel', id: it.req ?? it.id }).catch(() => undefined);
+      }
       host.remove();
     });
     document.documentElement.appendChild(host);
-    chapter = { format, timer: setInterval(() => void tickChapter(), 1000), panel: host, text, lastChange: Date.now(), lastDone: -1 };
+    chapter = { format, timer: setInterval(() => void tickChapter(), 1000), panel: host, text, lastChange: Date.now(), lastDone: -1, seen: 0 };
     void tickChapter();
   }
 
@@ -307,6 +333,15 @@ function main() {
     const c = chapter;
     if (!c) return;
     const list = pageItemsInOrder();
+    c.seen = Math.max(c.seen, list.length);
+    if (!list.length && c.seen) {
+      // Everything was stopped (switched off, cancelled from the popup): end instead of waiting forever.
+      clearInterval(c.timer);
+      c.text.textContent = tr('Ни одна картинка не переведена — файл не создан.');
+      chapter = null;
+      setTimeout(() => c.panel.remove(), 8000);
+      return;
+    }
     const done = list.filter((it) => it.status === 'done').length;
     const failed = list.filter((it) => it.status === 'error').length;
     const pending = list.length - done - failed;
@@ -342,6 +377,7 @@ function main() {
 
   function translatePage() {
     pageMode = true;
+    dismissed = new WeakSet();
     const cands = scanPage(minSize);
     if (!cands.length) toastOnce(tr('На странице не найдено подходящих изображений'));
     // Pictures on screen first, then the rest of the chapter in reading order.
@@ -355,7 +391,7 @@ function main() {
       for (const e of entries) {
         if (!e.isIntersecting) continue;
         const c = asCandidate(e.target, minSize);
-        if (c) void translate(c);
+        if (c && !dismissed.has(c.el)) void translate(c);
       }
     },
     { rootMargin: '150% 0px 150% 0px' },
@@ -387,6 +423,7 @@ function main() {
       if (!autoTranslate && !pageMode) return;
       if (!enabled) return;
       for (const c of scanPage(minSize)) {
+        if (dismissed.has(c.el)) continue;
         if (pageMode) {
           const known = byElement.get(c.el);
           if (!known || !items.has(known)) void translate(c);
@@ -549,9 +586,18 @@ function main() {
         items.delete(id);
       },
     });
-    items.set(id, { id, cand: { el: pseudo, kind: 'canvas' }, status: 'queued', overlay, docRect: doc });
+    const item: Item = { id, cand: { el: pseudo, kind: 'canvas' }, status: 'queued', overlay, docRect: doc };
+    items.set(id, item);
     overlay.stage({ stage: 'queued' });
-    await send({ type: 'capture-area', image: { id, kind: 'area', rect, dpr: devicePixelRatio }, pageUrl: location.href, title: document.title });
+    try {
+      await send({ type: 'capture-area', image: { id, kind: 'area', rect, dpr: devicePixelRatio }, pageUrl: location.href, title: document.title });
+      item.sentAt = Date.now();
+      startWatch();
+    } catch (e) {
+      if (items.get(id) !== item) return;
+      item.status = 'error';
+      overlay.error(tr('Не удалось отправить картинку на перевод'), e instanceof Error ? e.message : String(e));
+    }
   }
 
   function toastOnce(text: string) {

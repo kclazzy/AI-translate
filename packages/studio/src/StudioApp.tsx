@@ -62,7 +62,6 @@ function SeriesContexts() {
       ) : null}
       {ctx ? (
         <button className="ait-btn small danger" onClick={async () => { await db.put('contexts', key, emptyContext(key, key)); setItems(items.map(([k, v]) => [k, k === key ? emptyContext(key, key) : v])); }}>
-          
           {tr('Сбросить контекст серии')}
         </button>
       ) : null}
@@ -75,6 +74,9 @@ export function StudioApp({ platform, initialView, resultKey, sharedFiles }: Stu
   const [view, setView] = useState<View>(initialView ?? (resultKey ? 'editor' : 'quick'));
   const [editKey, setEditKey] = useState<string | undefined>(resultKey);
   const saveChain = useRef<Promise<void>>(Promise.resolve());
+  // Files shared into the app are handled once: coming back to the tab must not translate them again.
+  const [shared, setShared] = useState(sharedFiles);
+  useEffect(() => setShared(sharedFiles), [sharedFiles]);
 
   useEffect(() => {
     void loadBundledFonts();
@@ -167,8 +169,8 @@ export function StudioApp({ platform, initialView, resultKey, sharedFiles }: Stu
             <span className="ait-badge">{settings.pipeline === 'engine' ? tr('Движок') : tr('Без движка')}</span>
           </header>
           <div className="ait-content" style={view === 'editor' ? { maxWidth: 'none' } : undefined}>
-            {view === 'quick' ? <QuickPanel sharedFile={sharedFiles?.length === 1 && sharedFiles[0].type.startsWith('image/') ? sharedFiles[0] : null} onEdit={(k) => { setEditKey(k); setView('editor'); }} /> : null}
-            {view === 'projects' ? <ProjectPanel settings={settings} initialFiles={sharedFiles && sharedFiles.length > 1 ? sharedFiles : undefined} /> : null}
+            {view === 'quick' ? <QuickPanel sharedFile={shared?.length === 1 && shared[0].type.startsWith('image/') ? shared[0] : null} onSharedUsed={() => setShared(undefined)} onEdit={(k) => { setEditKey(k); setView('editor'); }} /> : null}
+            {view === 'projects' ? <ProjectPanel settings={settings} initialFiles={shared && shared.length > 1 ? shared : undefined} onInitialUsed={() => setShared(undefined)} /> : null}
             {view === 'glossary' ? (
               <>
                 <GlossaryEditor title={tr('Общий глоссарий')} entries={settings.glossary} onChange={(glossary) => update({ glossary })} />

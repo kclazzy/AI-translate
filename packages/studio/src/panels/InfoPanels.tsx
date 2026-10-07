@@ -11,14 +11,13 @@ export function PrivacyPanel({ settings: s }: { settings: AppSettings }) {
   return (
     <div className="ait-panel">
       <h2>
-        
         {tr('Приватность')}{' '}{s.privacy === 'local' ? <span className="ait-badge local">{tr('🔒 Локальный режим')}</span> : null}
       </h2>
       <ul>
         {lines.map((l) => <li key={l}>{l}</li>)}
         <li>{tr('История переводов:')}{' '}{s.saveHistory ? tr('сохраняется только на этом устройстве') : tr('не сохраняется')}.</li>
         <li>{tr('Ключи API хранятся на этом устройстве в зашифрованном виде и отправляются только выбранному провайдеру.')}</li>
-        <li>{tr('Кэш переводов хранится')}{' '}{s.cacheDays} {' '}{tr('дн. на этом устройстве.')}</li>
+        <li>{tr('Кэш переводов хранится {0} дн. на этом устройстве.', s.cacheDays)}</li>
       </ul>
       {s.privacy === 'local' ? (
         <p className="ait-hint">{tr('В локальном режиме приложение откажется отправлять что-либо провайдеру вне этого устройства или локальной сети, даже если он выбран.')}</p>
@@ -42,8 +41,7 @@ export function HistoryPanel({ onOpen }: { onOpen: (key: string) => void }) {
         <div className="ait-panel">
           <h2>{tr('Расход')}</h2>
           <p style={{ margin: 0 }}>
-            
-            {tr('Страниц переведено:')}{' '}<strong>{usage.pages}</strong> {' '}{tr('· Токенов:')}{' '}{usage.inputTokens.toLocaleString(uiLocale())} {' '}{tr('вход /')}{' '}{usage.outputTokens.toLocaleString(uiLocale())} {' '}{tr('выход · Оценка стоимости: $')}{usage.costUsd.toFixed(3)}
+            {tr('Страниц переведено: {0} · Токенов: {1} вход / {2} выход · Оценка стоимости: {3}', usage.pages, usage.inputTokens.toLocaleString(uiLocale()), usage.outputTokens.toLocaleString(uiLocale()), new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'USD', maximumFractionDigits: 3 }).format(usage.costUsd))}
           </p>
         </div>
       ) : null}
@@ -59,7 +57,6 @@ export function HistoryPanel({ onOpen }: { onOpen: (key: string) => void }) {
                 toast(tr('История очищена'));
               }}
             >
-              
               {tr('Очистить')}
             </button>
           </div>

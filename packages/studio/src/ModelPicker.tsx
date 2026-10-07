@@ -41,27 +41,34 @@ export function ModelPicker({ cfg, getKey, onPick, compact, hasKey }: { cfg: Pro
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const reqSeq = useRef(0);
   const refresh = useCallback(async () => {
+    // Only the newest request may update the list (the address may change while one is running).
+    const seq = ++reqSeq.current;
     setBusy(true);
     setError(null);
     try {
       const list = await discoverModels({ ...cfg, apiKey: cfg.apiKey ?? (await getKey()) });
+      if (seq !== reqSeq.current) return;
       setModels(list);
       if (!list.length) setError(tr('Сервер работает, но моделей нет. Загрузите модель в LM Studio или выполните ollama pull.'));
     } catch (e) {
+      if (seq !== reqSeq.current) return;
       setModels(null);
       setError(`${errorMessage(e)} ${(e as { detail?: string }).detail ?? ''}`.trim());
     } finally {
-      setBusy(false);
+      if (seq === reqSeq.current) setBusy(false);
     }
-  }, [cfg.baseUrl, cfg.kind, cfg.label, cfg.apiKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cfg.baseUrl, cfg.kind, cfg.apiKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (hasKey === false) {
       setError(null);
       return;
     }
-    void refresh();
+    // Wait until the user stops typing the address.
+    const t = setTimeout(() => void refresh(), 500);
+    return () => clearTimeout(t);
   }, [refresh, hasKey]);
 
   const current = models?.find((m) => m.id === cfg.model);
@@ -94,7 +101,6 @@ export function ModelPicker({ cfg, getKey, onPick, compact, hasKey }: { cfg: Pro
       {error ? <small style={{ color: 'var(--err)' }}>{error}</small> : null}
       {!compact && models?.length ? (
         <small className="ait-muted">
-          
           {tr('👁 читает изображения, ✎ только текст.')}{current?.vision === false ? tr(' Эта модель не читает картинки: выберите её для перевода текста, а для чтения — модель с 👁.') : ''}
           {isThinkingModel(cfg.model) ? tr(' Модель с размышлениями: режим размышлений отключается автоматически.') : ''}
         </small>
@@ -172,7 +178,7 @@ function CheckResult({ check }: { check?: ModelCheck }) {
   return (
     <small className="ait-muted" data-testid="model-check-result">
       {check.message}
-      {check.read ? tr(' Прочитала: «{0}»{1}.', check.read, check.translation ? ` → «${check.translation}»` : '') : ''} {' '}{tr('Проверено')}{' '}{ago(check.at)}.
+      {check.read ? tr(' Прочитала: «{0}»{1}.', check.read, check.translation ? ` → «${check.translation}»` : '') : ''}{' '}{tr('Проверено')}{' '}{ago(check.at)}.
     </small>
   );
 }
@@ -371,7 +377,7 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
   if (status.state === 'offline') {
     return box(
       <>
-        <span>{tr('Ollama не запущена или не установлена (')}{cfg.baseUrl.replace(/\/v1$/, '')}{tr('). Она нужна, чтобы переводить на своей видеокарте, без интернета.')}</span>
+        <span>{tr('Ollama не запущена или не установлена ({0}). Она нужна, чтобы переводить на своей видеокарте, без интернета.', cfg.baseUrl.replace(/\/v1$/, ''))}</span>
         <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <a className="ait-btn small" href="https://ollama.com/download" target="_blank" rel="noreferrer">{tr('Скачать Ollama')}</a>
           <button className="ait-btn small" onClick={() => void refresh()}>{tr('Проверить снова')}</button>
@@ -423,7 +429,6 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
       <label className="ait-switch" data-testid="fast-local">
         <input type="checkbox" role="switch" checked={!!settings.fastLocal} onChange={(e) => update({ fastLocal: e.target.checked })} />
         <span>
-          
           {tr('Быстрый режим: картинка для модели поменьше, проверка перевода без дополнительного запроса к модели')}
           <small className="ait-muted" style={{ display: 'block' }}>{tr('Обычно на треть быстрее; мелкий текст может читаться хуже.')}</small>
         </span>
@@ -454,14 +459,13 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
                 <b>{t.model}</b> {rec ? <span className="ait-badge ok">{tr('рекомендуем')}</span> : null} {isCurrent(t.model) ? <span className="ait-badge ok">{tr('✓ выбрана')}</span> : null}
                 <br />
                 <small className="ait-muted">
-                  {t.vramGb === 16 ? tr('16+ ГБ') : tr('от {0} ГБ', t.vramGb)} · {t.sizeGb} {' '}{tr('ГБ · качество:')}{' '}{t.quality} · ~{t.secondsPerPage} {' '}{tr('с/стр.')}{tooBig ? tr(' · не поместится в вашу видеокарту, будет медленно') : ''}
+                  {t.vramGb === 16 ? tr('16+ ГБ') : tr('от {0} ГБ', t.vramGb)} · {t.sizeGb}{' '}{tr('ГБ · качество:')}{' '}{t.quality} · ~{t.secondsPerPage}{' '}{tr('с/стр.')}{tooBig ? tr(' · не поместится в вашу видеокарту, будет медленно') : ''}
                 </small>
               </div>
               {inst ? (
                 isCurrent(t.model) ? null : <button className="ait-btn small" style={{ flex: 'none', width: 'auto' }} onClick={() => use(t.model)}>{tr('Использовать')}</button>
               ) : (
                 <button className={rec ? 'ait-bubble-btn' : 'ait-btn small'} style={{ flex: 'none', width: 'auto', ...(rec ? { fontSize: 14, minHeight: 32, padding: '3px 14px' } : {}) }} disabled={!!pull} onClick={() => void download(t.model)}>
-                  
                   {tr('Скачать')}
                 </button>
               )}
@@ -544,7 +548,7 @@ function ModelsFolder({ settings, update, needGb, onRecheck }: { settings: AppSe
         <b>{tr('Где хранить модели')}</b> <span className="ait-muted">{saved ? `— ${saved}` : tr('— стандартная папка Ollama')}</span>
       </summary>
       <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-        <small className="ait-muted">{tr('По умолчанию Ollama хранит модели в C:\\Users\\&lt;имя&gt;\\.ollama\\models (диск C). Если там мало места, выберите папку на другом диске — рекомендуемая модель займёт')}{' '}{needGb} {' '}{tr('ГБ.')}</small>
+        <small className="ait-muted">{tr('По умолчанию Ollama хранит модели в C:\\Users\\<имя>\\.ollama\\models (диск C). Если там мало места, выберите папку на другом диске — рекомендуемая модель займёт')}{' '}{needGb}{' '}{tr('ГБ.')}</small>
         <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <input className="ait-input" style={{ flex: 1, minWidth: 220 }} placeholder="D:\AI\ollama-models" value={dir} onChange={(e) => setDir(e.target.value)} aria-label={tr('Папка для моделей')} />
           <button className="ait-btn small" disabled={!ok || clean === saved} onClick={() => update({ ollamaModelsDir: clean })}>{tr('Сохранить')}</button>
@@ -553,9 +557,8 @@ function ModelsFolder({ settings, update, needGb, onRecheck }: { settings: AppSe
         {dir && !ok ? <small style={{ color: 'var(--err)' }}>{tr('Укажите полный путь, например D:\\AI\\ollama-models (без кавычек).')}</small> : null}
         {ok ? (
           <ol style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 6 }}>
-            <li>{tr('Проще всего: значок Ollama в трее →')}{' '}<b>Settings</b> → <b>Model location</b> {' '}{tr('→ выберите')}{' '}<code>{clean}</code>.</li>
+            <li>{tr('Проще всего: значок Ollama в трее →')}{' '}<b>Settings</b> → <b>Model location</b>{' '}{tr('→ выберите')}{' '}<code>{clean}</code>.</li>
             <li>
-              
               {tr('Или выполните в командной строке (Win+R → cmd):')}{' '}
               <code style={{ userSelect: 'all', wordBreak: 'break-all' }}>{command}</code>{' '}
               <button
@@ -573,7 +576,7 @@ function ModelsFolder({ settings, update, needGb, onRecheck }: { settings: AppSe
             <li>{tr('Закройте Ollama (значок в трее → Quit) и запустите снова.')}</li>
             <li>{tr('Уже скачанные модели перенесите: скопируйте содержимое старой папки models в новую — иначе их придётся скачать заново.')}</li>
             <li>
-              <button className="ait-btn small" onClick={onRecheck}>{tr('Проверить')}</button> {' '}{tr('— список «Установлено» покажет модели из новой папки.')}
+              <button className="ait-btn small" onClick={onRecheck}>{tr('Проверить')}</button>{' '}{tr('— список «Установлено» покажет модели из новой папки.')}
             </li>
           </ol>
         ) : null}
@@ -622,12 +625,10 @@ export function UpdateCheck({ current, compact, install, autoCheck }: { current:
             <span>{tr('Есть версия')}{' '}{i.latest}</span>
             {install ? (
               <button type="button" className={compact ? 'pp-link' : 'ait-bubble-btn'} style={compact ? undefined : { fontSize: 14, minHeight: 30, padding: '2px 14px' }} disabled={!!inst} onClick={() => void doInstall()}>
-                
                 {tr('Обновить сейчас')}
               </button>
             ) : null}
             <a href={i.url} target="_blank" rel="noreferrer">
-              
               {tr('что нового')}
             </a>
           </>
@@ -767,7 +768,6 @@ export function LocalSetup({ settings, update, getKey, onReady }: { settings: Ap
             <>
               <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <a className="ait-bubble-btn" style={{ fontSize: 14, minHeight: 32, padding: '3px 14px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }} href={win ? SETUP_LINKS.ollamaWindows : SETUP_LINKS.ollamaPage} target="_blank" rel="noreferrer">
-                  
                   {tr('Скачать Ollama')}{win ? tr(' для Windows') : ''}
                 </a>
                 {win ? <a className="ait-btn small" href={SETUP_LINKS.ollamaPage} target="_blank" rel="noreferrer">macOS / Linux</a> : null}
@@ -785,7 +785,6 @@ export function LocalSetup({ settings, update, getKey, onReady }: { settings: Ap
             ) : (
               <>
                 <button className="ait-bubble-btn" style={{ justifySelf: 'start', fontSize: 14, minHeight: 32, padding: '3px 14px' }} onClick={() => void download(suggested, (state as { baseUrl: string }).baseUrl)}>
-                  
                   {tr('Скачать')}{' '}{suggested}
                 </button>
                 <small className="ait-muted">

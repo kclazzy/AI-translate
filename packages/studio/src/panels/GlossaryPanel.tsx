@@ -11,7 +11,6 @@ export function GlossaryEditor({ entries, onChange, title = tr('Глоссари
     <div className="ait-panel">
       <h2>{title}</h2>
       <p className="ait-hint" style={{ marginTop: -6, marginBottom: 12 }}>
-        
         {tr('Термины, которые модель обязана переводить именно так. «Запрещено» — варианты, которых быть не должно (например, «Танака-сан»).')}
       </p>
       <div style={{ overflowX: 'auto' }}>
@@ -50,7 +49,6 @@ export function GlossaryEditor({ entries, onChange, title = tr('Глоссари
       <div className="ait-row" style={{ marginTop: 12 }}>
         <div style={{ flex: '0 0 auto' }}>
           <button className="ait-btn" onClick={() => onChange([...entries, { id: shortId('g'), source: '', target: '', matchMode: 'exact', caseSensitive: false, forbidden: [], enabled: true }])}>
-            
             {tr('Добавить термин')}
           </button>
         </div>
@@ -79,7 +77,6 @@ export function ContextEditor({ context, onChange }: { context: TranslationConte
     <div className="ait-panel">
       <h2>{tr('Контекст серии')}</h2>
       <p className="ait-hint" style={{ marginTop: -6, marginBottom: 12 }}>
-        
         {tr('Имена и термины, найденные моделью на прошлых страницах. Закреплённые (🔒) модель никогда не меняет. Страниц учтено:')}{' '}{context.pagesSeen}.
       </p>
       <div style={{ overflowX: 'auto' }}>
@@ -89,7 +86,7 @@ export function ContextEditor({ context, onChange }: { context: TranslationConte
           </thead>
           <tbody>
             {context.entities.map((e, i) => (
-              <tr key={`${e.source}-${i}`}>
+              <tr key={i}>
                 <td><input className="ait-input" value={e.source} onChange={(ev) => set(i, { source: ev.target.value })} /></td>
                 <td><input className="ait-input" value={e.target} onChange={(ev) => set(i, { target: ev.target.value })} /></td>
                 <td>
@@ -116,7 +113,6 @@ export function ContextEditor({ context, onChange }: { context: TranslationConte
       <div className="ait-row" style={{ marginTop: 12 }}>
         <div style={{ flex: '0 0 auto' }}>
           <button className="ait-btn" onClick={() => onChange({ ...context, entities: [...context.entities, { source: '', target: '', kind: 'character', locked: true }] })}>
-            
             {tr('Добавить имя')}
           </button>
         </div>

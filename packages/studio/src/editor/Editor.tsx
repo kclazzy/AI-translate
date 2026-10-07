@@ -378,7 +378,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   return (
     <div>
       <div className="ait-toolbar">
-        {onClose ? <button className="ait-btn small ghost" onClick={onClose}>{tr('← Назад')}</button> : null}
+        {onClose ? <button className="ait-btn small ghost" onClick={() => (!dirty || confirm(tr('Есть несохранённые правки. Закрыть без сохранения?'))) && onClose()}>{tr('← Назад')}</button> : null}
         {title ? <strong style={{ marginRight: 8 }}>{title}</strong> : null}
         {toolBtn('select', tr('Выбор'), 'V')}
         {toolBtn('brush', tr('Кисть'), 'B')}
@@ -410,7 +410,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       </div>
       <ErrorBox error={save.error || ocr.error} />
       <div className="ait-editor">
-        <div ref={stageRef} className="ait-stage" onPointerDown={onStagePointerDown} style={{ cursor: tool === 'select' ? 'default' : 'crosshair' }}>
+        <div ref={stageRef} className={`ait-stage ${tool === 'select' ? '' : 'drawing'}`} onPointerDown={onStagePointerDown} style={{ cursor: tool === 'select' ? 'default' : 'crosshair' }}>
           <div ref={innerRef} className="ait-stage-inner" style={{ width: page.width * zoom, height: page.height * zoom }}>
             <div style={{ position: 'absolute', left: 0, top: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: '0 0' }}>
               {cleaned.tiles.map((t, i) => (
@@ -498,10 +498,8 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                   ))}
                   {sel.qa.before !== undefined ? (
                     <small>
-                      
                       {tr('Исправлено автоматически. Было: «{0}»', sel.qa.before)}{' '}
-                      <button className="pp-link" onClick={() => setBlocks(blocks.map((b) => (b.id === sel.id ? { ...b, translatedText: sel.qa!.before!, qa: { ...sel.qa!, before: undefined }, edited: true } : b)))}>
-                        
+                      <button className="pp-link" onClick={() => commitBlocks(blocks.map((b) => (b.id === sel.id ? { ...b, translatedText: sel.qa!.before!, qa: { ...sel.qa!, before: undefined }, edited: true } : b)))}>
                         {tr('Вернуть')}
                       </button>
                     </small>
@@ -539,7 +537,6 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                     </select>
                   </Field>
                   <label className="ait-hint" style={{ display: 'block' }}>
-                    
                     {tr('Свой шрифт (TTF/OTF/WOFF2):')}{' '}<input type="file" accept=".ttf,.otf,.woff,.woff2" onChange={(e) => e.target.files?.[0] && void addFont(e.target.files[0])} />
                   </label>
                 </div>
@@ -575,7 +572,6 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                 <Switch checked={sel.translate} onChange={(v) => updateBlock(sel.id, { translate: v })} label={tr('Показывать перевод')} />
               </div>
               <button className="ait-btn small danger" style={{ marginTop: 12 }} onClick={() => { commitBlocks(blocks.filter((b) => b.id !== sel.id)); setSelected(null); }}>
-                
                 {tr('Удалить блок')}
               </button>
             </div>
@@ -601,12 +597,12 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
               <div className="ait-debug">
                 <span>{tr('Размер')}</span><span>{page.width}×{page.height}</span>
                 <span>{tr('Блоков')}</span><span>{page.blocks.length}</span>
-                <span>{tr('Детекция')}</span><span>{page.timings.detectMs ?? 0} {' '}{tr('мс')}</span>
-                <span>OCR</span><span>{page.timings.ocrMs ?? 0} {' '}{tr('мс')}</span>
-                <span>{tr('Перевод')}</span><span>{page.timings.translateMs ?? 0} {' '}{tr('мс')}</span>
-                <span>{tr('Очистка')}</span><span>{page.timings.cleanMs ?? 0} {' '}{tr('мс')}</span>
-                <span>{tr('Рендер')}</span><span>{page.timings.renderMs ?? 0} {' '}{tr('мс')}</span>
-                <span>{tr('Всего')}</span><span>{page.timings.totalMs ?? 0} {' '}{tr('мс')}</span>
+                <span>{tr('Детекция')}</span><span>{page.timings.detectMs ?? 0}{' '}{tr('мс')}</span>
+                <span>OCR</span><span>{page.timings.ocrMs ?? 0}{' '}{tr('мс')}</span>
+                <span>{tr('Перевод')}</span><span>{page.timings.translateMs ?? 0}{' '}{tr('мс')}</span>
+                <span>{tr('Очистка')}</span><span>{page.timings.cleanMs ?? 0}{' '}{tr('мс')}</span>
+                <span>{tr('Рендер')}</span><span>{page.timings.renderMs ?? 0}{' '}{tr('мс')}</span>
+                <span>{tr('Всего')}</span><span>{page.timings.totalMs ?? 0}{' '}{tr('мс')}</span>
                 <span>{tr('Модель')}</span><span>{[...new Set(page.usage.map((u) => u.model))].join(', ') || page.source.detectedBy}</span>
                 <span>{tr('Токены')}</span><span>{usage.input} / {usage.output}</span>
                 <span>{tr('Стоимость')}</span><span>${usage.cost.toFixed(4)}</span>

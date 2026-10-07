@@ -36,6 +36,8 @@
     --rule: #2c323e;
     --magenta: #ff5c94;
     --magenta-soft: #3a1f2b;
+    --err: #ff7a6b;
+    --ok: #4cc38a;
     --tone: radial-gradient(circle, rgba(232, 234, 240, 0.09) 1px, transparent 1.4px) 0 0 / 6px 6px;
     color-scheme: dark;
   }
@@ -49,6 +51,8 @@
   --rule: #2c323e;
   --magenta: #ff5c94;
   --magenta-soft: #3a1f2b;
+  --err: #ff7a6b;
+  --ok: #4cc38a;
   --tone: radial-gradient(circle, rgba(232, 234, 240, 0.09) 1px, transparent 1.4px) 0 0 / 6px 6px;
   color-scheme: dark;
 }
@@ -243,8 +247,10 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ait-toolbar .sep { width: 1px; height: 24px; background: var(--rule); margin: 0 4px; }
 .ait-stage {
   position: relative; overflow: auto; border: 1px solid var(--rule); border-radius: var(--r-panel);
-  background: var(--tone), var(--paper); height: calc(100vh - 210px); min-height: 380px; touch-action: none;
+  background: var(--tone), var(--paper); height: calc(100vh - 210px); min-height: 380px; touch-action: pan-x pan-y pinch-zoom;
 }
+/* Painting / OCR tools draw with the finger; with «select» a finger scrolls the page. */
+.ait-stage.drawing { touch-action: none; }
 .ait-stage-inner { position: relative; transform-origin: 0 0; margin: 24px; }
 .ait-stage canvas { display: block; }
 .ait-box {

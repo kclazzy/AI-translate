@@ -22,6 +22,7 @@ export type ErrorCode =
   | 'NOT_CONFIGURED'
   | 'NO_TEXT_FOUND'
   | 'SETUP_NEEDED'
+  | 'DISABLED'
   | 'UNKNOWN';
 
 export class AppError extends Error {
@@ -89,6 +90,7 @@ const MESSAGES: Record<ErrorCode, Record<Lang, string>> = {
   NOT_CONFIGURED: { ru: 'Не выбран провайдер перевода. Откройте настройки.', en: 'No translation provider is set up. Open Settings.' },
   NO_TEXT_FOUND: { ru: 'Текст на изображении не найден.', en: 'No text was found in the image.' },
   SETUP_NEEDED: { ru: 'Для перевода на этом компьютере не хватает программы.', en: 'A program needed for local translation is missing.' },
+  DISABLED: { ru: 'AI Translate выключен.', en: 'AI Translate is switched off.' },
   UNKNOWN: { ru: 'Что-то пошло не так. Попробовать ещё раз?', en: 'Something went wrong. Try again?' },
 };
 

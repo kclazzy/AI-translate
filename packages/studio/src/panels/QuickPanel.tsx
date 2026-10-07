@@ -20,7 +20,7 @@ function TileImg({ bytes }: { bytes: Uint8Array }) {
 }
 
 /** Translate a single image (screenshot, saved page, shared picture). Main flow on phones. */
-export function QuickPanel({ onEdit, sharedFile }: { onEdit: (key: string) => void; sharedFile?: File | null }) {
+export function QuickPanel({ onEdit, sharedFile, onSharedUsed }: { onEdit: (key: string) => void; sharedFile?: File | null; onSharedUsed?: () => void }) {
   const platform = usePlatform();
   const [result, setResult] = useState<StoredResult | null>(null);
   const [stage, setStage] = useState<StageEvent | null>(null);
@@ -28,8 +28,11 @@ export function QuickPanel({ onEdit, sharedFile }: { onEdit: (key: string) => vo
   const [name, setName] = useState('');
   const input = useRef<HTMLInputElement>(null);
   const ctrl = useRef<AbortController | null>(null);
+  /** The picture of the last attempt (chosen, pasted or shared), for «Повторить». */
+  const lastFile = useRef<File | null>(null);
 
   const translate = useAction(async (file: File) => {
+    lastFile.current = file;
     const bytes = new Uint8Array(await file.arrayBuffer());
     const mime = sniffImageMime(bytes) ?? file.type;
     setName(file.name || 'image.png');
@@ -41,7 +44,9 @@ export function QuickPanel({ onEdit, sharedFile }: { onEdit: (key: string) => vo
   });
 
   useEffect(() => {
-    if (sharedFile) void translate.run(sharedFile);
+    if (!sharedFile) return;
+    void translate.run(sharedFile);
+    onSharedUsed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sharedFile]);
 
@@ -57,7 +62,7 @@ export function QuickPanel({ onEdit, sharedFile }: { onEdit: (key: string) => vo
   const save = useAction(async () => {
     if (!result) return;
     const files = await flattenTiles(platform.backend, { name, width: result.page.width, height: result.page.height, tiles: result.rendered }, 'image/png');
-    for (const f of files) await platform.saveFile(f.name.replace(/(\.\w+)$/, '-ru$1'), f.bytes, 'image/png');
+    for (const f of files) await platform.saveFile(f.name.replace(/(\.\w+)$/, `-${result.page.targetLang}$1`), f.bytes, 'image/png');
   });
 
   const busy = translate.busy;
@@ -70,11 +75,18 @@ export function QuickPanel({ onEdit, sharedFile }: { onEdit: (key: string) => vo
           <button className="ait-bubble-btn" style={{ flex: '0 0 auto' }} disabled={busy} onClick={() => input.current?.click()}>
             {busy ? tr('Перевожу…') : tr('Выбрать картинку')}
           </button>
-          <input ref={input} type="file" accept="image/*" hidden onChange={(e) => e.target.files?.[0] && void translate.run(e.target.files[0])} />
+          <input ref={input} type="file" accept="image/*" hidden onChange={(e) => {
+            const f = e.target.files?.[0];
+            // Clear the input so that choosing the same picture again works.
+            e.target.value = '';
+            if (f) void translate.run(f);
+          }} />
           {busy ? <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => ctrl.current?.abort()}>{tr('Отмена')}</button> : null}
         </div>
         {busy && stage ? <div style={{ marginTop: 14 }}><Progress value={stage.progress ?? 0.3} label={STAGE_LABEL[stage.stage] ?? tr('Работаю')} /></div> : null}
-        <ErrorBox error={translate.error} onRetry={translate.error && input.current?.files?.[0] ? () => void translate.run(input.current!.files![0]) : undefined} />
+        {(translate.error as { code?: string } | null)?.code === 'CANCELLED' ? null : (
+          <ErrorBox error={translate.error} onRetry={translate.error && lastFile.current ? () => void translate.run(lastFile.current!) : undefined} />
+        )}
       </div>
       {result ? (
         <div className="ait-panel">
@@ -85,8 +97,7 @@ export function QuickPanel({ onEdit, sharedFile }: { onEdit: (key: string) => vo
             <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => onEdit(result.key)}>{tr('Править')}</button>
             <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void save.run()}>{tr('Сохранить картинку')}</button>
             <span className="ait-muted" style={{ flex: '1 1 auto', textAlign: 'right', fontSize: 13 }}>
-              
-              {tr('Блоков:')}{' '}{result.page.blocks.length} · {((result.page.timings.totalMs ?? 0) / 1000).toFixed(1)} {' '}{tr('с')}
+              {tr('Блоков:')}{' '}{result.page.blocks.length} · {((result.page.timings.totalMs ?? 0) / 1000).toFixed(1)}{' '}{tr('с')}
             </span>
           </div>
           <ErrorBox error={save.error} />

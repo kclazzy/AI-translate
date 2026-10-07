@@ -109,7 +109,7 @@ export async function installExtensionUpdate(info: UpdateInfo, progress: (text: 
 
   // 2. Download and check the archive before touching anything.
   progress(tr('Скачиваю {0}…', info.latest), 0);
-  const bytes = await downloadWithProgress(asset.url, (done, total) => progress(tr('Скачиваю {0}: {1}{2} МБ', info.latest, (done / 1048576).toFixed(1), total ? tr(' из {0}', (total / 1048576).toFixed(1)) : ''), total ? Math.round((done / total) * 80) : undefined));
+  const bytes = await downloadWithProgress(asset.url, (done, total) => progress(total ? tr('Скачиваю {0}: {1} из {2} МБ', info.latest, (done / 1048576).toFixed(1), (total / 1048576).toFixed(1)) : tr('Скачиваю {0}: {1} МБ', info.latest, (done / 1048576).toFixed(1)), total ? Math.round((done / total) * 80) : undefined));
   progress(tr('Проверяю архив…'), 82);
   const zip = await JSZip.loadAsync(bytes);
   const files = Object.values(zip.files).filter((f) => !f.dir && f.name.startsWith(`${ZIP_FOLDER}/`));

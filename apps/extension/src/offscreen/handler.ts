@@ -4,7 +4,7 @@ import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@a
 import type { StageEvent } from '@ait/core';
 import type { FromOffscreen, JobStatus, RenderedTiles, SpeedStats, ToOffscreen } from '../shared/messages';
 import { db, loadSettings, secrets } from '../shared/store';
-import { tr } from '@ait/core/i18n';
+import { setUiLang, tr } from '@ait/core/i18n';
 
 /**
  * The pipeline runs here (offscreen document in Chrome, the background page in Firefox):
@@ -79,6 +79,8 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
     case 'run':
     case 'crop-run': {
       const settings = await loadSettings();
+      // This document can live for days: follow a language changed since it opened.
+      setUiLang(settings.interfaceLang, false);
       // Local servers (Ollama, LM Studio) answer one request at a time: running two pages at once
       // makes both twice as slow and can push a single page past the timeout.
       const vision = settings.providers.find((p) => p.id === settings.visionProviderId);
@@ -159,7 +161,9 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       // Letters (any alphabet), digits and simple punctuation only: Chrome rejects some characters.
       const safe = (msg.title || tr('Глава')).replace(/[^\p{L}\p{N} ._,()\-]+/gu, ' ').replace(/\s+/g, ' ').replace(/^[ .]+|[ .]+$/g, '').slice(0, 100) || tr('Глава');
       const backend = browserBackend;
-      const len = (await loadSettings()).exportPageLength;
+      const exportSettings = await loadSettings();
+      setUiLang(exportSettings.interfaceLang, false);
+      const len = exportSettings.exportPageLength;
       let bytes: Uint8Array;
       let mime: string;
       if (msg.format === 'pdf') [bytes, mime] = [await exportPdf(backend, pages, undefined, len), 'application/pdf'];

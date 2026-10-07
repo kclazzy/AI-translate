@@ -54,7 +54,6 @@ export function ErrorBox({ error, onRetry }: { error: unknown; onRetry?: () => v
       {detail ? <div className="ait-muted" style={{ fontSize: 12, marginTop: 4 }}>{detail}</div> : null}
       {onRetry ? (
         <button className="ait-btn small" style={{ marginTop: 8 }} onClick={onRetry}>
-          
           {tr('Повторить')}
         </button>
       ) : null}
@@ -142,5 +141,34 @@ export function FoldPanel({ title, summary, defaultOpen, children, testId }: { t
       </summary>
       <div className="ait-fold-body">{children}</div>
     </details>
+  );
+}
+
+/**
+ * A whole-number field that can be cleared and retyped: the value is checked and clamped when
+ * the user leaves the field (or presses Enter), not on every keystroke.
+ */
+export function NumberInput({ value, min, max, fallback, onChange, ...rest }: { value: number; min: number; max: number; fallback: number; onChange: (n: number) => void } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'min' | 'max'>) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const commit = () => {
+    const n = Number.parseInt(text, 10);
+    const next = Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
+    setText(String(next));
+    if (next !== value) onChange(next);
+  };
+  return (
+    <input
+      {...rest}
+      className={rest.className ?? 'ait-input'}
+      type="number"
+      inputMode="numeric"
+      min={min}
+      max={max}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === 'Enter' && commit()}
+    />
   );
 }

@@ -20,8 +20,8 @@ export function extensionPlatform(): StudioPlatform {
       // Continue the translation the user started before the helper opened.
       const tabId = Number(params.get('resume'));
       const command = params.get('cmd');
-      if (!tabId || (command !== 'translate-page' && command !== 'select-area')) return;
-      void chrome.runtime.sendMessage({ type: 'popup-command', command, tabId });
+      if (!tabId || (command !== 'translate-page' && command !== 'select-area' && command !== 'download-chapter')) return;
+      void chrome.runtime.sendMessage({ type: 'popup-command', command, tabId, ...(command === 'download-chapter' ? { format: params.get('format') ?? 'pdf' } : {}) });
       setTimeout(() => {
         void chrome.tabs.update(tabId, { active: true }).catch(() => undefined);
         window.close();

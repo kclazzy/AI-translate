@@ -15,7 +15,7 @@ import {
 } from '@ait/core';
 import { LocalModels, LocalSetup, ModelCheckCard, ModelPicker, UpdateCheck } from '../ModelPicker';
 import { usePlatform } from '../platform';
-import { ErrorBox, Field, FoldPanel, Segmented, Switch, toast, useAction } from '../ui';
+import { ErrorBox, Field, FoldPanel, NumberInput, Segmented, Switch, toast, useAction } from '../ui';
 import { resolveUiLang, tr, UI_LANGS } from '@ait/core/i18n';
 
 export interface SettingsProps {
@@ -92,7 +92,6 @@ function ProviderEditor({ cfg, onChange, onRemove, onUse, inUse }: { cfg: Provid
           {isLocalProvider(cfg) ? tr('на устройстве / в сети') : tr('облако')}
         </span>
         <button className="ait-btn small danger" style={{ flex: '0 0 auto' }} onClick={onRemove}>
-          
           {tr('Удалить')}
         </button>
       </div>
@@ -195,7 +194,7 @@ function StorageLine() {
     setBusy(true);
     await platform.db.clear(store);
     setBusy(false);
-    toast(tr('{0}{1} удалены', what[0].toUpperCase(), what.slice(1)));
+    toast(store === 'results' ? tr('Кэш очищен') : tr('История очищена'));
     measure();
   };
   return (
@@ -245,7 +244,6 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
         </Field>
         <div style={{ flex: '0 0 auto' }}>
           <button className="ait-btn" onClick={() => update({ providers: [...s.providers, configFromPreset(value, shortId(value + '-'))] })}>
-            
             {tr('Добавить')}
           </button>
         </div>
@@ -357,7 +355,6 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
             </Field>
             <div style={{ alignSelf: 'end' }}>
               <button className="ait-btn" onClick={() => void engineTest.run()} disabled={engineTest.busy}>
-                
                 {tr('Проверить движок')}
               </button>
             </div>
@@ -389,7 +386,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
             </select>
           </Field>
           <Field label={tr('Параллельных страниц')}>
-            <input className="ait-input" type="number" min={1} max={8} value={s.concurrency} onChange={(e) => update({ concurrency: Math.max(1, Math.min(8, Number(e.target.value) || 1)) })} />
+            <NumberInput min={1} max={8} fallback={1} value={s.concurrency} onChange={(concurrency) => update({ concurrency })} />
           </Field>
         </div>
       </div>
@@ -429,7 +426,6 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
                 setProfileId(id);
               }}
             >
-              
               {tr('Копировать')}
             </button>
           </div>
@@ -452,7 +448,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               {Object.entries(s.seriesProfiles).map(([k, v]) => (
                 <tr key={k}>
                   <td>{k}</td>
-                  <td>{s.profiles.find((p) => p.id === v)?.name ?? v}</td>
+                  <td>{tr(s.profiles.find((p) => p.id === v)?.name ?? v)}</td>
                   <td style={{ width: 1 }}>
                     <button className="ait-btn small ghost" onClick={() => { const next = { ...s.seriesProfiles }; delete next[k]; update({ seriesProfiles: next }); }}>{tr('Убрать')}</button>
                   </td>
@@ -483,16 +479,16 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
             <Segmented label={tr('Режим')} value={s.uiMode} onChange={(uiMode) => update({ uiMode })} options={[{ value: 'reader', label: tr('Читатель') }, { value: 'advanced', label: tr('Продвинутый') }, { value: 'scanlator', label: tr('Сканлейтер') }]} />
           </Field>
           <Field label={tr('Хранить кэш, дней')}>
-            <input className="ait-input" type="number" min={1} max={365} value={s.cacheDays} onChange={(e) => update({ cacheDays: Math.max(1, Number(e.target.value) || 14) })} />
+            <NumberInput min={1} max={365} fallback={14} value={s.cacheDays} onChange={(cacheDays) => update({ cacheDays })} />
           </Field>
           <Field label={tr('Хранить историю, дней')} hint={tr('Старые записи удаляются сами')}>
-            <input className="ait-input" type="number" min={1} max={3650} value={s.historyDays ?? 30} onChange={(e) => update({ historyDays: Math.max(1, Number(e.target.value) || 30) })} />
+            <NumberInput min={1} max={3650} fallback={30} value={s.historyDays ?? 30} onChange={(historyDays) => update({ historyDays })} />
           </Field>
           <Field label={tr('Длина страницы в PDF/CBZ/EPUB')} hint={tr('Как резать длинную ленту вебтуна при скачивании')}>
             <Segmented label={tr('Длина страницы')} value={s.exportPageLength ?? 'normal'} onChange={(exportPageLength) => update({ exportPageLength })} options={[{ value: 'normal', label: tr('Обычная') }, { value: 'long', label: tr('Длинная') }, { value: 'whole', label: tr('Без нарезки') }]} />
           </Field>
           <Field label={tr('Минимальный размер картинки, px')}>
-            <input className="ait-input" type="number" min={50} max={2000} value={s.minImageSize} onChange={(e) => update({ minImageSize: Math.max(50, Number(e.target.value) || 200) })} />
+            <NumberInput min={50} max={2000} fallback={200} value={s.minImageSize} onChange={(minImageSize) => update({ minImageSize })} />
           </Field>
         </div>
         <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
