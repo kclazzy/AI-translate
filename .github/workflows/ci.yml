@@ -23,6 +23,8 @@ jobs:
         with: { python-version: '3.12' }
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r run typecheck
+      - name: Interface dictionaries are complete
+        run: node packages/core/scripts/i18n-extract.mjs --check
       - name: Unit and pipeline tests (core)
         run: pnpm --filter @ait/core test
       - run: pnpm --filter @ait/extension build
@@ -53,6 +55,7 @@ jobs:
           xvfb-run -a node e2e/update.e2e.mjs 2>&1 | tee .test-output/e2e-update.log
           xvfb-run -a node e2e/setup.e2e.mjs 2>&1 | tee .test-output/e2e-setup.log
           xvfb-run -a node e2e/chapter.e2e.mjs 2>&1 | tee .test-output/e2e-chapter.log
+          xvfb-run -a node e2e/lang.e2e.mjs 2>&1 | tee .test-output/e2e-lang.log
           pnpm --filter @ait/studio test
       - name: Package release files
         run: node scripts/package-release.mjs
