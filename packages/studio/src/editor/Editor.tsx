@@ -23,6 +23,7 @@ import {
 import { registerUserFont } from '../fonts';
 import { usePlatform } from '../platform';
 import { ErrorBox, Field, Switch, toast, useAction } from '../ui';
+import { tr } from '@ait/core/i18n';
 
 type Tool = 'select' | 'brush' | 'eraser' | 'inpaint' | 'ocr';
 
@@ -227,7 +228,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     const { config } = await platform.service.config();
     const res = await recognizeRegion(original, rect, { ...config, sourceLang: settings.sourceLang, targetLang: page.targetLang }, { backend: platform.backend });
     if (!res.blocks.length) {
-      toast('В выделенной области текст не найден');
+      toast(tr('В выделенной области текст не найден'));
       return;
     }
     const region = clampBox([rect[0] - 40, rect[1] - 40, rect[2] + 80, rect[3] + 80], cleaned.width, cleaned.height);
@@ -243,7 +244,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     setSelected(added[0].id);
     setVersion((v) => v + 1);
     setPixelsChanged(true);
-    toast(`Добавлено блоков: ${added.length}`);
+    toast(tr('Добавлено блоков: {0}', added.length));
   });
 
   const onStagePointerDown = (e: RPointerEvent) => {
@@ -343,7 +344,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   const save = useAction(async () => {
     await onSave({ ...page, blocks }, cleaned, pixelsChanged);
     setDirty(false);
-    toast('Сохранено');
+    toast(tr('Сохранено'));
   });
 
   const endTextEdit = () => {
@@ -363,7 +364,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     await registerUserFont(name, await file.arrayBuffer());
     setFonts((f) => [...f, `"${name}"`]);
     if (sel) updateStyle(sel.id, { fontFamily: `"${name}", sans-serif` });
-    toast(`Шрифт «${name}» добавлен`);
+    toast(tr('Шрифт «{0}» добавлен', name));
   };
 
   const usage = page.usage.reduce((a, u) => ({ input: a.input + u.inputTokens, output: a.output + u.outputTokens, cost: a.cost + u.costUsd }), { input: 0, output: 0, cost: 0 });
@@ -377,34 +378,34 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   return (
     <div>
       <div className="ait-toolbar">
-        {onClose ? <button className="ait-btn small ghost" onClick={onClose}>← Назад</button> : null}
+        {onClose ? <button className="ait-btn small ghost" onClick={onClose}>{tr('← Назад')}</button> : null}
         {title ? <strong style={{ marginRight: 8 }}>{title}</strong> : null}
-        {toolBtn('select', 'Выбор', 'V')}
-        {toolBtn('brush', 'Кисть', 'B')}
-        {toolBtn('eraser', 'Ластик', 'E')}
-        {toolBtn('inpaint', 'Заливка фона')}
-        {toolBtn('ocr', 'Ручной OCR')}
+        {toolBtn('select', tr('Выбор'), 'V')}
+        {toolBtn('brush', tr('Кисть'), 'B')}
+        {toolBtn('eraser', tr('Ластик'), 'E')}
+        {toolBtn('inpaint', tr('Заливка фона'))}
+        {toolBtn('ocr', tr('Ручной OCR'))}
         {tool !== 'select' && tool !== 'ocr' ? (
           <>
             <label className="ait-muted" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
               {brush}px
-              <input type="range" min={1} max={100} value={brush} onChange={(e) => setBrush(Number(e.target.value))} aria-label="Размер кисти" />
+              <input type="range" min={1} max={100} value={brush} onChange={(e) => setBrush(Number(e.target.value))} aria-label={tr('Размер кисти')} />
             </label>
-            {tool === 'brush' ? <input type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} aria-label="Цвет кисти" /> : null}
+            {tool === 'brush' ? <input type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} aria-label={tr('Цвет кисти')} /> : null}
           </>
         ) : null}
         <span className="sep" />
-        <button className="ait-btn small" onClick={undo} disabled={!undoStack.current.length} title="Ctrl+Z">Отменить</button>
-        <button className="ait-btn small" onClick={redo} disabled={!redoStack.current.length} title="Ctrl+Shift+Z">Повторить</button>
+        <button className="ait-btn small" onClick={undo} disabled={!undoStack.current.length} title="Ctrl+Z">{tr('Отменить')}</button>
+        <button className="ait-btn small" onClick={redo} disabled={!redoStack.current.length} title="Ctrl+Shift+Z">{tr('Повторить')}</button>
         <span className="sep" />
-        <button className="ait-btn small" onClick={() => setZoom((z) => Math.max(0.1, +(z / 1.25).toFixed(3)))} aria-label="Уменьшить">−</button>
+        <button className="ait-btn small" onClick={() => setZoom((z) => Math.max(0.1, +(z / 1.25).toFixed(3)))} aria-label={tr('Уменьшить')}>−</button>
         <span className="ait-muted" style={{ fontSize: 13, minWidth: 44, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
-        <button className="ait-btn small" onClick={() => setZoom((z) => Math.min(6, +(z * 1.25).toFixed(3)))} aria-label="Увеличить">+</button>
-        <button className="ait-btn small" onClick={() => setZoom(fitZoom())}>По ширине</button>
-        <button className={`ait-btn small ${compare ? 'active' : ''}`} onClick={() => setCompare((c) => !c)} aria-pressed={compare}>Сравнить</button>
+        <button className="ait-btn small" onClick={() => setZoom((z) => Math.min(6, +(z * 1.25).toFixed(3)))} aria-label={tr('Увеличить')}>+</button>
+        <button className="ait-btn small" onClick={() => setZoom(fitZoom())}>{tr('По ширине')}</button>
+        <button className={`ait-btn small ${compare ? 'active' : ''}`} onClick={() => setCompare((c) => !c)} aria-pressed={compare}>{tr('Сравнить')}</button>
         <span style={{ flex: 1 }} />
         <button className="ait-bubble-btn" style={{ fontSize: 16, minHeight: 36, padding: '4px 18px' }} onClick={() => void save.run()} disabled={save.busy || !dirty}>
-          {save.busy ? 'Сохраняю…' : dirty ? 'Сохранить' : 'Сохранено'}
+          {save.busy ? tr('Сохраняю…') : dirty ? tr('Сохранить') : tr('Сохранено')}
         </button>
       </div>
       <ErrorBox error={save.error || ocr.error} />
@@ -475,7 +476,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                       window.addEventListener('pointerup', up);
                     }}
                     role="slider"
-                    aria-label="Оригинал / перевод"
+                    aria-label={tr('Оригинал / перевод')}
                     aria-valuenow={Math.round(split * 100)}
                   />
                 </div>
@@ -489,7 +490,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
             <div className="ait-panel">
               {sel.qa && (sel.qa.issues.length || sel.qa.before !== undefined) ? (
                 <div className="ait-notice" data-testid="qa-report" style={{ display: 'grid', gap: 4, marginBottom: 8 }}>
-                  <b>Проверка перевода</b>
+                  <b>{tr('Проверка перевода')}</b>
                   {sel.qa.issues.map((q, i) => (
                     <small key={i}>
                       {q.severity === 'major' ? '⚠' : '•'} {QA_LABELS[q.kind]}: {q.note}
@@ -497,93 +498,97 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                   ))}
                   {sel.qa.before !== undefined ? (
                     <small>
-                      Исправлено автоматически. Было: «{sel.qa.before}»{' '}
+                      
+                      {tr('Исправлено автоматически. Было: «{0}»', sel.qa.before)}{' '}
                       <button className="pp-link" onClick={() => setBlocks(blocks.map((b) => (b.id === sel.id ? { ...b, translatedText: sel.qa!.before!, qa: { ...sel.qa!, before: undefined }, edited: true } : b)))}>
-                        Вернуть
+                        
+                        {tr('Вернуть')}
                       </button>
                     </small>
                   ) : null}
                 </div>
               ) : null}
-              <Field label="Перевод">
+              <Field label={tr('Перевод')}>
                 <textarea className="ait-textarea" value={sel.translatedText} onFocus={() => (editStart.current = blocks)} onChange={(e) => setBlocks(blocks.map((b) => (b.id === sel.id ? { ...b, translatedText: e.target.value, edited: true } : b)))} onBlur={endTextEdit} />
               </Field>
               <div style={{ marginTop: 8 }}>
-                <Field label="Оригинал">
+                <Field label={tr('Оригинал')}>
                   <input className="ait-input" value={sel.originalText} onFocus={() => (editStart.current = blocks)} onChange={(e) => setBlocks(blocks.map((b) => (b.id === sel.id ? { ...b, originalText: e.target.value } : b)))} onBlur={endTextEdit} />
                 </Field>
               </div>
               <div className="ait-row" style={{ marginTop: 8 }}>
-                <button className="ait-btn small" onClick={() => void retr.run()} disabled={retr.busy}>{retr.busy ? 'Перевожу…' : 'Перевести заново'}</button>
-                <button className="ait-btn small" onClick={() => fitText(sel)} title="Подобрать размер текста под бабл">Вписать текст</button>
+                <button className="ait-btn small" onClick={() => void retr.run()} disabled={retr.busy}>{retr.busy ? tr('Перевожу…') : tr('Перевести заново')}</button>
+                <button className="ait-btn small" onClick={() => fitText(sel)} title={tr('Подобрать размер текста под бабл')}>{tr('Вписать текст')}</button>
               </div>
               <ErrorBox error={retr.error} />
-              {overflow.has(sel.id) ? <p className="ait-notice" style={{ marginTop: 8 }}>Текст не помещается: уменьшите кегль, сократите перевод или растяните рамку.</p> : null}
+              {overflow.has(sel.id) ? <p className="ait-notice" style={{ marginTop: 8 }}>{tr('Текст не помещается: уменьшите кегль, сократите перевод или растяните рамку.')}</p> : null}
               <div className="ait-grid2" style={{ marginTop: 10, gridTemplateColumns: '1fr 1fr' }}>
-                <Field label="Тип">
+                <Field label={tr('Тип')}>
                   <select className="ait-select" value={sel.textType} onChange={(e) => updateBlock(sel.id, { textType: e.target.value as TextBlock['textType'] })}>
                     {TEXT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </Field>
-                <Field label="Кегль">
-                  <input className="ait-input" type="number" min={6} max={200} placeholder="авто" value={sel.style?.fontSize ?? ''} onChange={(e) => updateStyle(sel.id, { fontSize: e.target.value ? Number(e.target.value) : null })} />
+                <Field label={tr('Кегль')}>
+                  <input className="ait-input" type="number" min={6} max={200} placeholder={tr('авто')} value={sel.style?.fontSize ?? ''} onChange={(e) => updateStyle(sel.id, { fontSize: e.target.value ? Number(e.target.value) : null })} />
                 </Field>
                 <div style={{ gridColumn: '1 / -1' }}>
-                  <Field label="Шрифт">
+                  <Field label={tr('Шрифт')}>
                     <select className="ait-select" value={sel.style?.fontFamily ?? ''} onChange={(e) => updateStyle(sel.id, { fontFamily: e.target.value || undefined })}>
-                      <option value="">По типу текста</option>
+                      <option value="">{tr('По типу текста')}</option>
                       {fonts.map((f) => <option key={f} value={`${f}, sans-serif`}>{f.replace(/"/g, '')}</option>)}
                     </select>
                   </Field>
                   <label className="ait-hint" style={{ display: 'block' }}>
-                    Свой шрифт (TTF/OTF/WOFF2): <input type="file" accept=".ttf,.otf,.woff,.woff2" onChange={(e) => e.target.files?.[0] && void addFont(e.target.files[0])} />
+                    
+                    {tr('Свой шрифт (TTF/OTF/WOFF2):')}{' '}<input type="file" accept=".ttf,.otf,.woff,.woff2" onChange={(e) => e.target.files?.[0] && void addFont(e.target.files[0])} />
                   </label>
                 </div>
-                <Field label="Цвет">
+                <Field label={tr('Цвет')}>
                   <input type="color" value={st.color} onChange={(e) => updateStyle(sel.id, { color: e.target.value })} />
                 </Field>
-                <Field label="Обводка">
+                <Field label={tr('Обводка')}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input type="color" value={st.strokeColor ?? '#ffffff'} onChange={(e) => updateStyle(sel.id, { strokeColor: e.target.value, strokeWidth: st.strokeWidth || 3 })} />
                     <input className="ait-input" type="number" min={0} max={20} value={st.strokeWidth} onChange={(e) => updateStyle(sel.id, { strokeWidth: Number(e.target.value), strokeColor: st.strokeColor ?? '#ffffff' })} />
                   </div>
                 </Field>
-                <Field label="Выравнивание">
+                <Field label={tr('Выравнивание')}>
                   <select className="ait-select" value={st.alignment} onChange={(e) => updateStyle(sel.id, { alignment: e.target.value as TextStyle['alignment'] })}>
-                    <option value="center">По центру</option>
-                    <option value="left">Влево</option>
-                    <option value="right">Вправо</option>
+                    <option value="center">{tr('По центру')}</option>
+                    <option value="left">{tr('Влево')}</option>
+                    <option value="right">{tr('Вправо')}</option>
                   </select>
                 </Field>
-                <Field label="Поворот, °">
+                <Field label={tr('Поворот, °')}>
                   <input className="ait-input" type="number" min={-180} max={180} value={st.rotation} onChange={(e) => updateStyle(sel.id, { rotation: Number(e.target.value) })} />
                 </Field>
                 <div style={{ gridColumn: '1 / -1' }}>
-                  <Field label={`Прозрачность: ${Math.round(st.opacity * 100)}%`}>
+                  <Field label={tr('Прозрачность: {0}%', Math.round(st.opacity * 100))}>
                     <input type="range" min={0.1} max={1} step={0.05} value={st.opacity} onChange={(e) => updateStyle(sel.id, { opacity: Number(e.target.value) })} />
                   </Field>
                 </div>
               </div>
               <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
-                <Switch checked={st.vertical} onChange={(v) => updateStyle(sel.id, { vertical: v })} label="Вертикальный текст" />
-                <Switch checked={st.bold} onChange={(v) => updateStyle(sel.id, { bold: v })} label="Жирный" />
-                <Switch checked={st.shadow} onChange={(v) => updateStyle(sel.id, { shadow: v })} label="Тень" />
-                <Switch checked={sel.translate} onChange={(v) => updateBlock(sel.id, { translate: v })} label="Показывать перевод" />
+                <Switch checked={st.vertical} onChange={(v) => updateStyle(sel.id, { vertical: v })} label={tr('Вертикальный текст')} />
+                <Switch checked={st.bold} onChange={(v) => updateStyle(sel.id, { bold: v })} label={tr('Жирный')} />
+                <Switch checked={st.shadow} onChange={(v) => updateStyle(sel.id, { shadow: v })} label={tr('Тень')} />
+                <Switch checked={sel.translate} onChange={(v) => updateBlock(sel.id, { translate: v })} label={tr('Показывать перевод')} />
               </div>
               <button className="ait-btn small danger" style={{ marginTop: 12 }} onClick={() => { commitBlocks(blocks.filter((b) => b.id !== sel.id)); setSelected(null); }}>
-                Удалить блок
+                
+                {tr('Удалить блок')}
               </button>
             </div>
           ) : (
-            <div className="ait-panel ait-muted">Выберите блок текста на странице или в списке ниже. Инструмент «Ручной OCR» добавляет пропущенный текст: обведите его рамкой.</div>
+            <div className="ait-panel ait-muted">{tr('Выберите блок текста на странице или в списке ниже. Инструмент «Ручной OCR» добавляет пропущенный текст: обведите его рамкой.')}</div>
           )}
 
           <div className="ait-panel">
-            <h2 style={{ fontSize: 14 }}>Блоки ({blocks.length})</h2>
+            <h2 style={{ fontSize: 14 }}>{tr('Блоки (')}{blocks.length})</h2>
             <div className="ait-blocklist">
               {blocks.map((b, i) => (
                 <button key={b.id} aria-pressed={b.id === selected} onClick={() => { setSelected(b.id); setTool('select'); }}>
-                  {i + 1}. {b.translatedText.slice(0, 40) || <em className="ait-muted">пусто</em>} {overflow.has(b.id) ? '⚠' : ''}
+                  {i + 1}. {b.translatedText.slice(0, 40) || <em className="ait-muted">{tr('пусто')}</em>} {overflow.has(b.id) ? '⚠' : ''}
                   {b.qa?.issues.length ? <span title={b.qa.issues.map((q) => `${QA_LABELS[q.kind]}: ${q.note}`).join('\n')}> 🔍{b.qa.issues.length}</span> : null}
                 </button>
               ))}
@@ -592,20 +597,20 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
 
           {settings.debug ? (
             <div className="ait-panel">
-              <h2 style={{ fontSize: 14 }}>Отладка</h2>
+              <h2 style={{ fontSize: 14 }}>{tr('Отладка')}</h2>
               <div className="ait-debug">
-                <span>Размер</span><span>{page.width}×{page.height}</span>
-                <span>Блоков</span><span>{page.blocks.length}</span>
-                <span>Детекция</span><span>{page.timings.detectMs ?? 0} мс</span>
-                <span>OCR</span><span>{page.timings.ocrMs ?? 0} мс</span>
-                <span>Перевод</span><span>{page.timings.translateMs ?? 0} мс</span>
-                <span>Очистка</span><span>{page.timings.cleanMs ?? 0} мс</span>
-                <span>Рендер</span><span>{page.timings.renderMs ?? 0} мс</span>
-                <span>Всего</span><span>{page.timings.totalMs ?? 0} мс</span>
-                <span>Модель</span><span>{[...new Set(page.usage.map((u) => u.model))].join(', ') || page.source.detectedBy}</span>
-                <span>Токены</span><span>{usage.input} / {usage.output}</span>
-                <span>Стоимость</span><span>${usage.cost.toFixed(4)}</span>
-                <span>Режим</span><span>{page.pipeline.mode}</span>
+                <span>{tr('Размер')}</span><span>{page.width}×{page.height}</span>
+                <span>{tr('Блоков')}</span><span>{page.blocks.length}</span>
+                <span>{tr('Детекция')}</span><span>{page.timings.detectMs ?? 0} {' '}{tr('мс')}</span>
+                <span>OCR</span><span>{page.timings.ocrMs ?? 0} {' '}{tr('мс')}</span>
+                <span>{tr('Перевод')}</span><span>{page.timings.translateMs ?? 0} {' '}{tr('мс')}</span>
+                <span>{tr('Очистка')}</span><span>{page.timings.cleanMs ?? 0} {' '}{tr('мс')}</span>
+                <span>{tr('Рендер')}</span><span>{page.timings.renderMs ?? 0} {' '}{tr('мс')}</span>
+                <span>{tr('Всего')}</span><span>{page.timings.totalMs ?? 0} {' '}{tr('мс')}</span>
+                <span>{tr('Модель')}</span><span>{[...new Set(page.usage.map((u) => u.model))].join(', ') || page.source.detectedBy}</span>
+                <span>{tr('Токены')}</span><span>{usage.input} / {usage.output}</span>
+                <span>{tr('Стоимость')}</span><span>${usage.cost.toFixed(4)}</span>
+                <span>{tr('Режим')}</span><span>{page.pipeline.mode}</span>
               </div>
             </div>
           ) : null}

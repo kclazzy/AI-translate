@@ -5,6 +5,7 @@ import { ollamaStatus } from './discover';
 import { isOllama } from './openai';
 import { isLocalUrl } from './privacy';
 import type { FetchLike, ProviderConfig } from './types';
+import { tr } from '../i18n';
 
 /**
  * What is missing before a local translation can start, so the app can offer to install or
@@ -75,17 +76,17 @@ export const SETUP_LINKS = {
 
 /** One sentence for the user about what is missing. */
 export function readinessText(r: Readiness): string {
-  if (r.ok) return 'Всё готово к переводу.';
+  if (r.ok) return tr('Всё готово к переводу.');
   switch (r.need) {
     case 'ollama':
-      return 'Для перевода на этом компьютере нужна программа Ollama — она не установлена или не запущена.';
+      return tr('Для перевода на этом компьютере нужна программа Ollama — она не установлена или не запущена.');
     case 'ollama-model':
-      return `В Ollama нет модели ${r.model} — её нужно скачать.`;
+      return tr('В Ollama нет модели {0} — её нужно скачать.', r.model);
     case 'lmstudio':
-      return 'LM Studio не запущена или её сервер выключен.';
+      return tr('LM Studio не запущена или её сервер выключен.');
     case 'server':
-      return `${r.label} не отвечает по адресу ${r.baseUrl}.`;
+      return tr('{0} не отвечает по адресу {1}.', r.label, r.baseUrl);
     case 'engine':
-      return 'Локальный движок AI Translate не запущен.';
+      return tr('Локальный движок AI Translate не запущен.');
   }
 }

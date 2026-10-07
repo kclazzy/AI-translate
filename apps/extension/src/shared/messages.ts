@@ -56,7 +56,13 @@ export type BackgroundToContent =
   | { type: 'translate-src'; src: string }
   | { type: 'result-changed'; key: string }
   | { type: 'get-langs' }
-  | { type: 'state'; autoTranslate: boolean; minImageSize: number; enabled: boolean; targetLang: string };
+  | { type: 'state'; autoTranslate: boolean; minImageSize: number; enabled: boolean; targetLang: string; ui?: UiStrings };
+
+/** Interface language for the page overlays: the content script has no dictionaries of its own. */
+export interface UiStrings {
+  lang: string;
+  dict: Record<string, string>;
+}
 
 /** Popup → content: languages for the "original ⇄ translation" button. */
 export interface PageLangs {

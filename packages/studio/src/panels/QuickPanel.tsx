@@ -3,14 +3,15 @@ import { sniffImageMime, type StageEvent, type StoredResult } from '@ait/core';
 import { flattenTiles } from '../files';
 import { usePlatform } from '../platform';
 import { ErrorBox, Progress, useAction, useObjectUrl } from '../ui';
+import { tr } from '@ait/core/i18n';
 
 const STAGE_LABEL: Partial<Record<StageEvent['stage'], string>> = {
-  decoding: 'Открываю изображение',
-  detecting: 'Ищу текст',
-  ocr: 'Распознаю текст',
-  translating: 'Перевожу',
-  cleaning: 'Убираю оригинальный текст',
-  rendering: 'Вписываю перевод',
+  decoding: tr('Открываю изображение'),
+  detecting: tr('Ищу текст'),
+  ocr: tr('Распознаю текст'),
+  translating: tr('Перевожу'),
+  cleaning: tr('Убираю оригинальный текст'),
+  rendering: tr('Вписываю перевод'),
 };
 
 function TileImg({ bytes }: { bytes: Uint8Array }) {
@@ -63,35 +64,36 @@ export function QuickPanel({ onEdit, sharedFile }: { onEdit: (key: string) => vo
   return (
     <div>
       <div className="ait-panel">
-        <h2>Перевести изображение</h2>
-        <p className="ait-hint" style={{ marginTop: -6 }}>Скриншот, страница манги или фото. Можно вставить из буфера обмена (Ctrl+V).</p>
+        <h2>{tr('Перевести изображение')}</h2>
+        <p className="ait-hint" style={{ marginTop: -6 }}>{tr('Скриншот, страница манги или фото. Можно вставить из буфера обмена (Ctrl+V).')}</p>
         <div className="ait-row" style={{ marginTop: 12, alignItems: 'center' }}>
           <button className="ait-bubble-btn" style={{ flex: '0 0 auto' }} disabled={busy} onClick={() => input.current?.click()}>
-            {busy ? 'Перевожу…' : 'Выбрать картинку'}
+            {busy ? tr('Перевожу…') : tr('Выбрать картинку')}
           </button>
           <input ref={input} type="file" accept="image/*" hidden onChange={(e) => e.target.files?.[0] && void translate.run(e.target.files[0])} />
-          {busy ? <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => ctrl.current?.abort()}>Отмена</button> : null}
+          {busy ? <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => ctrl.current?.abort()}>{tr('Отмена')}</button> : null}
         </div>
-        {busy && stage ? <div style={{ marginTop: 14 }}><Progress value={stage.progress ?? 0.3} label={STAGE_LABEL[stage.stage] ?? 'Работаю'} /></div> : null}
+        {busy && stage ? <div style={{ marginTop: 14 }}><Progress value={stage.progress ?? 0.3} label={STAGE_LABEL[stage.stage] ?? tr('Работаю')} /></div> : null}
         <ErrorBox error={translate.error} onRetry={translate.error && input.current?.files?.[0] ? () => void translate.run(input.current!.files![0]) : undefined} />
       </div>
       {result ? (
         <div className="ait-panel">
           <div className="ait-row" style={{ alignItems: 'center', marginBottom: 12 }}>
             <button className={`ait-btn ${showOriginal ? 'active' : ''}`} style={{ flex: '0 0 auto' }} onClick={() => setShowOriginal((v) => !v)}>
-              {showOriginal ? 'Показан оригинал' : 'Показать оригинал'}
+              {showOriginal ? tr('Показан оригинал') : tr('Показать оригинал')}
             </button>
-            <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => onEdit(result.key)}>Править</button>
-            <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void save.run()}>Сохранить картинку</button>
+            <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => onEdit(result.key)}>{tr('Править')}</button>
+            <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void save.run()}>{tr('Сохранить картинку')}</button>
             <span className="ait-muted" style={{ flex: '1 1 auto', textAlign: 'right', fontSize: 13 }}>
-              Блоков: {result.page.blocks.length} · {((result.page.timings.totalMs ?? 0) / 1000).toFixed(1)} с
+              
+              {tr('Блоков:')}{' '}{result.page.blocks.length} · {((result.page.timings.totalMs ?? 0) / 1000).toFixed(1)} {' '}{tr('с')}
             </span>
           </div>
           <ErrorBox error={save.error} />
           <div style={{ border: '1px solid var(--rule)', borderRadius: 8, overflow: 'hidden' }}>
             {showOriginal ? <TileImg bytes={result.original.bytes} /> : result.rendered.map((t) => <TileImg key={t.y} bytes={t.bytes} />)}
           </div>
-          {result.page.blocks.length === 0 ? <p className="ait-hint">Текст не найден. Попробуйте качество «Максимум» или инструмент «Ручной OCR» в редакторе.</p> : null}
+          {result.page.blocks.length === 0 ? <p className="ait-hint">{tr('Текст не найден. Попробуйте качество «Максимум» или инструмент «Ручной OCR» в редакторе.')}</p> : null}
         </div>
       ) : null}
     </div>

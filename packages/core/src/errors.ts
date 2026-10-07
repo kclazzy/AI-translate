@@ -1,3 +1,4 @@
+import { tr } from './i18n';
 /**
  * Errors carry a stable code so every client can show a human message
  * instead of "Internal server error".
@@ -91,8 +92,8 @@ const MESSAGES: Record<ErrorCode, Record<Lang, string>> = {
   UNKNOWN: { ru: 'Что-то пошло не так. Попробовать ещё раз?', en: 'Something went wrong. Try again?' },
 };
 
-export function errorMessage(err: unknown, lang: string = 'ru'): string {
+export function errorMessage(err: unknown, lang?: string): string {
   const e = toAppError(err);
-  const l: Lang = lang === 'ru' ? 'ru' : 'en';
-  return MESSAGES[e.code][l];
+  // Russian is the source text; tr() gives the current interface language.
+  return lang === 'en' ? MESSAGES[e.code].en : tr(MESSAGES[e.code].ru);
 }

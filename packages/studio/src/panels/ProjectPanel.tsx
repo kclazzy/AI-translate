@@ -6,6 +6,7 @@ import { usePlatform } from '../platform';
 import { rerenderProjectPage, translateProjectPage, ProjectStore } from '../projects';
 import { ErrorBox, Field, Progress, Switch, toast, useAction, useObjectUrl } from '../ui';
 import { ContextEditor, GlossaryEditor } from './GlossaryPanel';
+import { tr, uiLocale } from '@ait/core/i18n';
 
 function Thumb({ store, project, page }: { store: ProjectStore; project: Project; page: ProjectPage }) {
   const [bytes, setBytes] = useState<Uint8Array>();
@@ -22,7 +23,7 @@ function Thumb({ store, project, page }: { store: ProjectStore; project: Project
   return url ? <img src={url} alt={page.name} loading="lazy" /> : <img alt="" />;
 }
 
-const STATUS: Record<ProjectPage['status'], string> = { new: 'не переведена', queued: 'в очереди', working: 'перевод…', done: 'готово', error: 'ошибка' };
+const STATUS: Record<ProjectPage['status'], string> = { new: tr('не переведена'), queued: tr('в очереди'), working: tr('перевод…'), done: tr('готово'), error: tr('ошибка') };
 
 function DropZone({ onFiles, label }: { onFiles: (f: File[]) => void; label: string }) {
   const [over, setOver] = useState(false);
@@ -42,9 +43,9 @@ function DropZone({ onFiles, label }: { onFiles: (f: File[]) => void; label: str
       }}
     >
       <p style={{ margin: '0 0 10px' }}>{label}</p>
-      <button className="ait-btn" onClick={() => input.current?.click()}>Выбрать файлы</button>
+      <button className="ait-btn" onClick={() => input.current?.click()}>{tr('Выбрать файлы')}</button>
       <input ref={input} type="file" multiple hidden accept="image/*,.zip,.cbz,.epub,.pdf,.cbr,.rar" onChange={(e) => e.target.files && onFiles([...e.target.files])} />
-      <p className="ait-hint">PNG, JPG, WEBP, AVIF, GIF, BMP; глава целиком — PDF, ZIP, CBZ, EPUB</p>
+      <p className="ait-hint">{tr('PNG, JPG, WEBP, AVIF, GIF, BMP; глава целиком — PDF, ZIP, CBZ, EPUB')}</p>
     </div>
   );
 }
@@ -66,11 +67,11 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
   useEffect(reload, [store]);
 
   const create = useAction(async (files: File[]) => {
-    setProgress({ done: 0, total: 1, label: 'Чтение файлов…' });
+    setProgress({ done: 0, total: 1, label: tr('Чтение файлов…') });
     try {
       const images = await importFiles(files, (m) => setProgress({ done: 0, total: 1, label: m }));
-      if (!images.length) throw toAppError(new Error('В файлах нет изображений'));
-      const title = files.length === 1 ? files[0].name.replace(/\.[^.]+$/, '') : `Глава от ${new Date().toLocaleDateString('ru')}`;
+      if (!images.length) throw toAppError(new Error(tr('В файлах нет изображений')));
+      const title = files.length === 1 ? files[0].name.replace(/\.[^.]+$/, '') : tr('Глава от {0}', new Date().toLocaleDateString(uiLocale()));
       const p = await store.create(title, settings, images, platform.backend);
       setProject(p);
       reload();
@@ -108,7 +109,7 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
     try {
       for (const [i, page] of todo.entries()) {
         if (ctrl.signal.aborted) break;
-        setProgress({ done: i, total: todo.length, label: `Страница ${i + 1} / ${todo.length}` });
+        setProgress({ done: i, total: todo.length, label: tr('Страница {0} / {1}', i + 1, todo.length) });
         current = { ...current, pages: current.pages.map((p) => (p.id === page.id ? { ...p, status: 'working' as const } : p)) };
         setProject(current);
         try {
@@ -129,7 +130,7 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
       setProject(current.pages.some((p) => p.status === 'working') ? await store.save({ ...current, pages: current.pages.map((p) => (p.status === 'working' ? { ...p, status: 'new' as const } : p)) }) : current);
       reload();
     }
-    toast(errors ? `Готово, с ошибками: ${errors}` : 'Глава переведена');
+    toast(errors ? tr('Готово, с ошибками: {0}', errors) : tr('Глава переведена'));
   });
 
   const doExport = useAction(async () => {
@@ -141,7 +142,7 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
       const tiles = a.rendered ?? [{ y: 0, h: p.height ?? 0, bytes: a.original.bytes }];
       pages.push({ name: p.name, width: p.width ?? p.result?.width ?? 0, height: p.height ?? p.result?.height ?? 0, tiles });
     }
-    const onP = (d: number, t: number) => setProgress({ done: d, total: t, label: `Экспорт ${d} / ${t}` });
+    const onP = (d: number, t: number) => setProgress({ done: d, total: t, label: tr('Экспорт {0} / {1}', d, t) });
     try {
       if (exportFmt === 'pdf') await platform.saveFile(`${project.title}.pdf`, await exportPdf(platform.backend, pages, onP, settings.exportPageLength), 'application/pdf');
       else if (exportFmt === 'cbz') await platform.saveFile(`${project.title}.cbz`, await exportCbz(platform.backend, pages, project.title, onP, settings.exportPageLength), 'application/vnd.comicbook+zip');
@@ -169,30 +170,31 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
     return (
       <div>
         <div className="ait-panel">
-          <h2>Новый проект</h2>
-          <DropZone onFiles={(f) => void create.run(f)} label="Перетащите страницы главы сюда" />
+          <h2>{tr('Новый проект')}</h2>
+          <DropZone onFiles={(f) => void create.run(f)} label={tr('Перетащите страницы главы сюда')} />
           {progress ? <div style={{ marginTop: 12 }}><Progress value={progress.done / Math.max(1, progress.total)} label={progress.label} /></div> : null}
           <ErrorBox error={create.error} />
           <div style={{ marginTop: 12 }}>
             <label className="ait-btn">
-              Открыть файл проекта (.aitproj)
+              
+              {tr('Открыть файл проекта (.aitproj)')}
               <input type="file" hidden accept=".aitproj,.zip" onChange={(e) => e.target.files?.[0] && void importProject.run(e.target.files[0])} />
             </label>
           </div>
           <ErrorBox error={importProject.error} />
         </div>
         <div className="ait-panel">
-          <h2>Проекты</h2>
-          {projects.length === 0 ? <p className="ait-muted">Пока нет проектов. Добавьте страницы, чтобы начать.</p> : null}
+          <h2>{tr('Проекты')}</h2>
+          {projects.length === 0 ? <p className="ait-muted">{tr('Пока нет проектов. Добавьте страницы, чтобы начать.')}</p> : null}
           <table className="ait-table">
             <tbody>
               {projects.map((p) => (
                 <tr key={p.id}>
                   <td><button className="ait-btn ghost" onClick={() => setProject(p)}>{p.title}</button></td>
-                  <td className="ait-muted">{p.pages.filter((x) => x.status === 'done').length} / {p.pages.length} стр.</td>
-                  <td className="ait-muted">{new Date(p.updatedAt).toLocaleString('ru')}</td>
+                  <td className="ait-muted">{p.pages.filter((x) => x.status === 'done').length} / {p.pages.length} {' '}{tr('стр.')}</td>
+                  <td className="ait-muted">{new Date(p.updatedAt).toLocaleString(uiLocale())}</td>
                   <td style={{ width: 1 }}>
-                    <button className="ait-btn small ghost danger" onClick={async () => { if (confirm(`Удалить проект «${p.title}»?`)) { await store.remove(p); reload(); } }}>Удалить</button>
+                    <button className="ait-btn small ghost danger" onClick={async () => { if (confirm(tr('Удалить проект «{0}»?', p.title))) { await store.remove(p); reload(); } }}>{tr('Удалить')}</button>
                   </td>
                 </tr>
               ))}
@@ -210,40 +212,40 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
     <div>
       <div className="ait-panel">
         <div className="ait-row" style={{ alignItems: 'center' }}>
-          <button className="ait-btn small ghost" style={{ flex: '0 0 auto' }} onClick={() => { setProject(null); reload(); }}>← Проекты</button>
-          <input className="ait-input" style={{ flex: '1 1 240px', fontWeight: 600 }} value={project.title} onChange={(e) => setProject({ ...project, title: e.target.value })} onBlur={() => void store.save(project)} aria-label="Название проекта" />
-          <span className="ait-muted" style={{ flex: '0 0 auto' }}>{done} из {project.pages.length} готово</span>
+          <button className="ait-btn small ghost" style={{ flex: '0 0 auto' }} onClick={() => { setProject(null); reload(); }}>{tr('← Проекты')}</button>
+          <input className="ait-input" style={{ flex: '1 1 240px', fontWeight: 600 }} value={project.title} onChange={(e) => setProject({ ...project, title: e.target.value })} onBlur={() => void store.save(project)} aria-label={tr('Название проекта')} />
+          <span className="ait-muted" style={{ flex: '0 0 auto' }}>{done} {' '}{tr('из')}{' '}{project.pages.length} {' '}{tr('готово')}</span>
         </div>
         <div className="ait-row" style={{ marginTop: 14, alignItems: 'center' }}>
           {translateAll.busy ? (
-            <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => abort.current?.abort()}>Остановить</button>
+            <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => abort.current?.abort()}>{tr('Остановить')}</button>
           ) : (
             <button className="ait-bubble-btn" style={{ flex: '0 0 auto' }} onClick={() => void translateAll.run(true)} disabled={busy || !project.pages.length}>
-              {done ? 'Перевести оставшиеся' : 'Перевести всё'}
+              {done ? tr('Перевести оставшиеся') : tr('Перевести всё')}
             </button>
           )}
-          {done && !busy ? <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void translateAll.run(false)}>Перевести заново</button> : null}
+          {done && !busy ? <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void translateAll.run(false)}>{tr('Перевести заново')}</button> : null}
           <span style={{ flex: 1 }} />
-          <select className="ait-select" style={{ flex: '0 0 170px' }} value={exportFmt} onChange={(e) => setExportFmt(e.target.value as typeof exportFmt)} aria-label="Формат экспорта">
-            <option value="zip-png">ZIP с PNG</option>
-            <option value="zip-jpg">ZIP с JPG</option>
-            <option value="zip-webp">ZIP с WEBP</option>
+          <select className="ait-select" style={{ flex: '0 0 170px' }} value={exportFmt} onChange={(e) => setExportFmt(e.target.value as typeof exportFmt)} aria-label={tr('Формат экспорта')}>
+            <option value="zip-png">{tr('ZIP с PNG')}</option>
+            <option value="zip-jpg">{tr('ZIP с JPG')}</option>
+            <option value="zip-webp">{tr('ZIP с WEBP')}</option>
             <option value="pdf">PDF</option>
-            <option value="cbz">CBZ (читалки комиксов)</option>
-            <option value="epub">EPUB (книжные приложения)</option>
+            <option value="cbz">{tr('CBZ (читалки комиксов)')}</option>
+            <option value="epub">{tr('EPUB (книжные приложения)')}</option>
           </select>
-          <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void doExport.run()} disabled={busy || !done}>Скачать</button>
-          <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void saveProjectFile.run()} disabled={busy}>Сохранить проект</button>
+          <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void doExport.run()} disabled={busy || !done}>{tr('Скачать')}</button>
+          <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void saveProjectFile.run()} disabled={busy}>{tr('Сохранить проект')}</button>
         </div>
         {progress ? <div style={{ marginTop: 14 }}><Progress value={progress.done / Math.max(1, progress.total)} label={progress.label} /></div> : null}
         <ErrorBox error={translateAll.error || doExport.error || saveProjectFile.error || addPages.error} />
       </div>
 
       <div className="ait-seg" role="tablist" style={{ margin: '4px 0 12px' }}>
-        <button aria-pressed={tab === 'pages'} onClick={() => setTab('pages')}>Страницы</button>
-        <button aria-pressed={tab === 'glossary'} onClick={() => setTab('glossary')}>Глоссарий</button>
-        <button aria-pressed={tab === 'context'} onClick={() => setTab('context')}>Контекст</button>
-        {scanlator ? <button aria-pressed={tab === 'replace'} onClick={() => setTab('replace')}>Замена и стиль</button> : null}
+        <button aria-pressed={tab === 'pages'} onClick={() => setTab('pages')}>{tr('Страницы')}</button>
+        <button aria-pressed={tab === 'glossary'} onClick={() => setTab('glossary')}>{tr('Глоссарий')}</button>
+        <button aria-pressed={tab === 'context'} onClick={() => setTab('context')}>{tr('Контекст')}</button>
+        {scanlator ? <button aria-pressed={tab === 'replace'} onClick={() => setTab('replace')}>{tr('Замена и стиль')}</button> : null}
       </div>
 
       {tab === 'pages' ? (
@@ -252,7 +254,7 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
             {project.pages.map((p) => (
               <div key={p.id} className={`ait-page ${selection.has(p.id) ? 'selected' : ''}`} onClick={() => (p.status === 'done' ? setEditing(p) : undefined)} title={p.error ? errorMessage(p.error) : p.name}>
                 {scanlator ? (
-                  <input type="checkbox" aria-label={`Выбрать ${p.name}`} checked={selection.has(p.id)} onClick={(e) => e.stopPropagation()} onChange={(e) => { const s = new Set(selection); if (e.target.checked) s.add(p.id); else s.delete(p.id); setSelection(s); }} />
+                  <input type="checkbox" aria-label={tr('Выбрать {0}', p.name)} checked={selection.has(p.id)} onClick={(e) => e.stopPropagation()} onChange={(e) => { const s = new Set(selection); if (e.target.checked) s.add(p.id); else s.delete(p.id); setSelection(s); }} />
                 ) : null}
                 <Thumb store={store} project={project} page={p} />
                 <div className="meta">
@@ -263,11 +265,11 @@ export function ProjectPanel({ settings, initialFiles }: { settings: AppSettings
             ))}
           </div>
           <div style={{ marginTop: 16 }}>
-            <DropZone onFiles={(f) => void addPages.run(f)} label="Добавить страницы в проект" />
+            <DropZone onFiles={(f) => void addPages.run(f)} label={tr('Добавить страницы в проект')} />
           </div>
         </>
       ) : null}
-      {tab === 'glossary' ? <GlossaryEditor title="Глоссарий проекта" entries={project.glossary} onChange={(glossary) => { const p = { ...project, glossary }; setProject(p); void store.save(p); }} /> : null}
+      {tab === 'glossary' ? <GlossaryEditor title={tr('Глоссарий проекта')} entries={project.glossary} onChange={(glossary) => { const p = { ...project, glossary }; setProject(p); void store.save(p); }} /> : null}
       {tab === 'context' ? <ContextEditor context={project.context} onChange={(context) => { const p = { ...project, context }; setProject(p); void store.save(p); }} /> : null}
       {tab === 'replace' ? <ReplaceAndStyle store={store} project={project} settings={settings} selection={selection} onChange={setProject} /> : null}
     </div>
@@ -299,7 +301,7 @@ function ReplaceAndStyle({ store, project, settings, selection, onChange }: { st
       }
     }
     onChange(current);
-    toast(`Заменено: ${total}`);
+    toast(tr('Заменено: {0}', total));
   });
 
   const applyStyle = useAction(async () => {
@@ -310,30 +312,30 @@ function ReplaceAndStyle({ store, project, settings, selection, onChange }: { st
       current = await rerenderProjectPage(store, platform.backend, settings, current, page, { ...page.result!, blocks });
     }
     onChange(current);
-    toast(`Стиль применён к страницам: ${targets.length}`);
+    toast(tr('Стиль применён к страницам: {0}', targets.length));
   });
 
   return (
     <div>
       <div className="ait-panel">
-        <h2>Найти и заменить во всех страницах</h2>
+        <h2>{tr('Найти и заменить во всех страницах')}</h2>
         <div className="ait-row">
-          <Field label="Найти"><input className="ait-input" value={find} onChange={(e) => setFind(e.target.value)} placeholder="Tanaka" /></Field>
-          <Field label="Заменить на"><input className="ait-input" value={repl} onChange={(e) => setRepl(e.target.value)} placeholder="Танака" /></Field>
+          <Field label={tr('Найти')}><input className="ait-input" value={find} onChange={(e) => setFind(e.target.value)} placeholder="Tanaka" /></Field>
+          <Field label={tr('Заменить на')}><input className="ait-input" value={repl} onChange={(e) => setRepl(e.target.value)} placeholder={tr('Танака')} /></Field>
         </div>
         <div className="ait-row" style={{ marginTop: 10, alignItems: 'center' }}>
-          <Switch checked={whole} onChange={setWhole} label="Слово целиком" />
-          <Switch checked={cs} onChange={setCs} label="С учётом регистра" />
-          <button className="ait-btn" style={{ flex: '0 0 auto' }} disabled={!find || replace.busy} onClick={() => void replace.run()}>Заменить везде</button>
+          <Switch checked={whole} onChange={setWhole} label={tr('Слово целиком')} />
+          <Switch checked={cs} onChange={setCs} label={tr('С учётом регистра')} />
+          <button className="ait-btn" style={{ flex: '0 0 auto' }} disabled={!find || replace.busy} onClick={() => void replace.run()}>{tr('Заменить везде')}</button>
         </div>
         <ErrorBox error={replace.error} />
       </div>
       <div className="ait-panel">
-        <h2>Стиль для {selection.size ? `выбранных страниц (${selection.size})` : 'всех страниц'}</h2>
+        <h2>{tr('Стиль для')}{' '}{selection.size ? tr('выбранных страниц ({0})', selection.size) : tr('всех страниц')}</h2>
         <div className="ait-grid2">
-          <Field label="Шрифт">
+          <Field label={tr('Шрифт')}>
             <select className="ait-select" value={style.fontFamily ?? ''} onChange={(e) => setStyle({ ...style, fontFamily: e.target.value || undefined })}>
-              <option value="">Не менять</option>
+              <option value="">{tr('Не менять')}</option>
               <option value='"AIT Lettering", sans-serif'>AIT Lettering</option>
               <option value='"AIT Comic", sans-serif'>AIT Comic</option>
               <option value='"AIT Narration", sans-serif'>AIT Narration</option>
@@ -341,19 +343,19 @@ function ReplaceAndStyle({ store, project, settings, selection, onChange }: { st
               <option value="Arial, sans-serif">Arial</option>
             </select>
           </Field>
-          <Field label="Кегль (пусто — авто)"><input className="ait-input" type="number" min={6} max={120} value={style.fontSize ?? ''} onChange={(e) => setStyle({ ...style, fontSize: e.target.value ? Number(e.target.value) : undefined })} /></Field>
-          <Field label="Цвет"><input type="color" value={style.color ?? '#111111'} onChange={(e) => setStyle({ ...style, color: e.target.value })} /></Field>
-          <Field label="Обводка, px"><input className="ait-input" type="number" min={0} max={20} value={style.strokeWidth ?? ''} onChange={(e) => setStyle({ ...style, strokeWidth: e.target.value === '' ? undefined : Number(e.target.value), strokeColor: style.strokeColor ?? '#ffffff' })} /></Field>
-          <Field label="Выравнивание">
+          <Field label={tr('Кегль (пусто — авто)')}><input className="ait-input" type="number" min={6} max={120} value={style.fontSize ?? ''} onChange={(e) => setStyle({ ...style, fontSize: e.target.value ? Number(e.target.value) : undefined })} /></Field>
+          <Field label={tr('Цвет')}><input type="color" value={style.color ?? '#111111'} onChange={(e) => setStyle({ ...style, color: e.target.value })} /></Field>
+          <Field label={tr('Обводка, px')}><input className="ait-input" type="number" min={0} max={20} value={style.strokeWidth ?? ''} onChange={(e) => setStyle({ ...style, strokeWidth: e.target.value === '' ? undefined : Number(e.target.value), strokeColor: style.strokeColor ?? '#ffffff' })} /></Field>
+          <Field label={tr('Выравнивание')}>
             <select className="ait-select" value={style.alignment ?? ''} onChange={(e) => setStyle({ ...style, alignment: (e.target.value || undefined) as TextStyle['alignment'] | undefined })}>
-              <option value="">Не менять</option>
-              <option value="center">По центру</option>
-              <option value="left">Влево</option>
-              <option value="right">Вправо</option>
+              <option value="">{tr('Не менять')}</option>
+              <option value="center">{tr('По центру')}</option>
+              <option value="left">{tr('Влево')}</option>
+              <option value="right">{tr('Вправо')}</option>
             </select>
           </Field>
         </div>
-        <button className="ait-btn" style={{ marginTop: 12 }} disabled={applyStyle.busy || !Object.keys(style).length} onClick={() => void applyStyle.run()}>Применить</button>
+        <button className="ait-btn" style={{ marginTop: 12 }} disabled={applyStyle.busy || !Object.keys(style).length} onClick={() => void applyStyle.run()}>{tr('Применить')}</button>
         <ErrorBox error={applyStyle.error} />
       </div>
     </div>

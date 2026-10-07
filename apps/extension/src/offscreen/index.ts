@@ -1,3 +1,4 @@
+import '@ait/core/i18n/all';
 import type { FromOffscreen, ToOffscreen } from '../shared/messages';
 import { handleOffscreen } from './handler';
 

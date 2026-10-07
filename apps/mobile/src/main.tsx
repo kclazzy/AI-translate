@@ -1,9 +1,11 @@
+import '@ait/core/i18n/all';
 import { Capacitor } from '@capacitor/core';
 import { createRoot } from 'react-dom/client';
 import { browserBackend, bytesToBase64, IdbStore, migrateSettings, pickAsset, releaseAssets, SecretStore, TranslateService, type AppSettings, type UpdateInfo } from '@ait/core';
 import { downloadFile, StudioApp, type StudioPlatform } from '@ait/studio';
 import '@ait/studio/styles.css';
 import './mobile.css';
+import { tr } from '@ait/core/i18n';
 
 const db = new IdbStore('ai-translate', 1);
 const secrets = new SecretStore(db);
@@ -61,16 +63,16 @@ async function installUpdate(info: UpdateInfo, progress: (text: string, pct?: nu
   };
   if (Capacitor.getPlatform() === 'android') {
     const apk = pickAsset(info, 'android') ?? pickAsset({ assets: releaseAssets(info.latest) }, 'android');
-    progress(apk ? 'Скачивание APK началось в браузере. Когда закончится, откройте файл и нажмите «Обновить».' : 'Открываю страницу релиза…');
+    progress(apk ? tr('Скачивание APK началось в браузере. Когда закончится, откройте файл и нажмите «Обновить».') : tr('Открываю страницу релиза…'));
     open(apk?.url ?? info.url);
     return;
   }
   if (Capacitor.getPlatform() === 'ios') {
-    progress('Скачайте новый .ipa и установите его так же, как в первый раз (AltStore / Sideloadly) — данные приложения сохранятся.');
+    progress(tr('Скачайте новый .ipa и установите его так же, как в первый раз (AltStore / Sideloadly) — данные приложения сохранятся.'));
     open(info.url);
     return;
   }
-  progress('Загружаю новую версию…');
+  progress(tr('Загружаю новую версию…'));
   const reg = await navigator.serviceWorker?.getRegistration();
   await reg?.update();
   setTimeout(() => location.reload(), 500);

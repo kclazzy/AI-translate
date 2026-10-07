@@ -21,6 +21,7 @@ import {
   type TranslateService,
 } from '@ait/core';
 import type { ImportedImage } from './files';
+import { tr } from '@ait/core/i18n';
 
 export interface StoredAssets extends PageAssets {
   rendered?: { y: number; h: number; bytes: Uint8Array }[];
@@ -90,7 +91,7 @@ export class ProjectStore {
   async importProject(bytes: Uint8Array): Promise<Project> {
     const { project, assets } = await importProjectZip(bytes);
     const existing = await this.get(project.id);
-    const p = existing ? { ...project, id: shortId('p'), title: `${project.title} (копия)` } : project;
+    const p = existing ? { ...project, id: shortId('p'), title: tr('{0} (копия)', project.title) } : project;
     for (const [pageId, a] of assets) await this.putAssets(p.id, pageId, a);
     return this.save(p);
   }

@@ -1,3 +1,4 @@
+import '@ait/core/i18n/all';
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, MODEL_TIERS, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
@@ -7,6 +8,7 @@ import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-pick
 import './popup.css';
 import type { PageLangs, SpeedStats } from '../shared/messages';
 import { db, hostOf, loadSettings, saveSettings, secrets } from '../shared/store';
+import { applyUiLangFromSettings, tr } from '@ait/core/i18n';
 
 /** What Ollama holds in video memory right now, with a button to free it. */
 function VramLine({ settings }: { settings: AppSettings }) {
@@ -31,16 +33,17 @@ function VramLine({ settings }: { settings: AppSettings }) {
     <>
       {spill ? (
         <div className="ait-error" data-testid="vram-spill">
-          ⚠ {spill.name} не помещается в видеопамять: на видеокарте только {Math.round(gpuShare(spill) * 100)}%, остальное в обычной памяти — перевод идёт в разы медленнее. Выберите модель поменьше в настройках.
+          ⚠ {spill.name} {' '}{tr('не помещается в видеопамять: на видеокарте только')}{' '}{Math.round(gpuShare(spill) * 100)}{tr('%, остальное в обычной памяти — перевод идёт в разы медленнее. Выберите модель поменьше в настройках.')}
         </div>
       ) : null}
       {speed && speed.pages ? (
         <p className="ait-hint" data-testid="speed-line" style={{ margin: 0 }}>
-          Скорость: ~{Math.round(speed.avgMs / 1000)} с на страницу{slow ? ` — медленнее обычного для ${vision?.model} (до ${expected} с). Попробуйте быстрый режим или модель полегче.` : ''}
+          
+          {tr('Скорость: ~')}{Math.round(speed.avgMs / 1000)} {' '}{tr('с на страницу')}{slow ? tr(' — медленнее обычного для {0} (до {1} с). Попробуйте быстрый режим или модель полегче.', vision?.model, expected) : ''}
         </p>
       ) : null}
     <p className="ait-hint" data-testid="vram-line" style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', margin: 0 }}>
-      <span>{loaded.length ? `Видеопамять: занято ${gb.toFixed(1)} ГБ (${loaded.map((m) => m.name).join(', ')})` : 'Видеопамять свободна'}</span>
+      <span>{loaded.length ? tr('Видеопамять: занято {0} ГБ ({1})', gb.toFixed(1), loaded.map((m) => m.name).join(', ')) : tr('Видеопамять свободна')}</span>
       {loaded.length ? (
         <button
           className="pp-link"
@@ -53,7 +56,7 @@ function VramLine({ settings }: { settings: AppSettings }) {
             setBusy(false);
           }}
         >
-          {busy ? 'Освобождаю…' : 'Освободить'}
+          {busy ? tr('Освобождаю…') : tr('Освободить')}
         </button>
       ) : null}
     </p>
@@ -74,6 +77,10 @@ function Popup() {
 
   useEffect(() => {
     void loadSettings().then((x) => {
+      if (applyUiLangFromSettings(x.interfaceLang)) {
+        location.reload();
+        return;
+      }
       setS(x);
       if (x.theme !== 'system') document.documentElement.setAttribute('data-theme', x.theme);
       if (x.pipeline === 'engine')
@@ -131,9 +138,9 @@ function Popup() {
     setUnloaded(r?.unloaded ?? []);
   };
   const power = (
-    <label className="ait-switch" title={on ? 'Выключить AI Translate' : 'Включить AI Translate'} data-testid="power">
-      <input type="checkbox" role="switch" checked={on} onChange={() => void toggle()} aria-label="AI Translate включён" />
-      <span>{on ? 'Вкл' : 'Выкл'}</span>
+    <label className="ait-switch" title={on ? tr('Выключить AI Translate') : tr('Включить AI Translate')} data-testid="power">
+      <input type="checkbox" role="switch" checked={on} onChange={() => void toggle()} aria-label={tr('AI Translate включён')} />
+      <span>{on ? tr('Вкл') : tr('Выкл')}</span>
     </label>
   );
   if (!on) {
@@ -144,10 +151,11 @@ function Popup() {
           {power}
         </header>
         <div className="ait-notice" data-testid="off-notice">
-          Расширение выключено: не переводит, не показывает кнопки на картинках и не держит модель в видеопамяти.
-          {unloaded?.length ? ` Выгружено из памяти: ${unloaded.join(', ')}.` : ''}
+          
+          {tr('Расширение выключено: не переводит, не показывает кнопки на картинках и не держит модель в видеопамяти.')}
+          {unloaded?.length ? tr(' Выгружено из памяти: {0}.', unloaded.join(', ')) : ''}
         </div>
-        <button className="ait-bubble-btn pp-main" onClick={() => void toggle()}>Включить</button>
+        <button className="ait-bubble-btn pp-main" onClick={() => void toggle()}>{tr('Включить')}</button>
       </div>
     );
   }
@@ -157,29 +165,30 @@ function Popup() {
       <header className="pp-head">
         <span className="pp-mark">AI Translate</span>
         <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span className={`ait-badge ${s.privacy === 'local' ? 'local' : ''}`}>{s.privacy === 'local' ? '🔒 Локально' : s.privacy === 'hybrid' ? 'Гибрид' : 'Облако'}</span>
+          <span className={`ait-badge ${s.privacy === 'local' ? 'local' : ''}`}>{s.privacy === 'local' ? tr('🔒 Локально') : s.privacy === 'hybrid' ? tr('Гибрид') : tr('Облако')}</span>
           {power}
         </span>
       </header>
 
       {missing ? (
-        <div className="ait-notice">Выберите модель, которая читает изображения. <button className="pp-link" onClick={() => chrome.runtime.openOptionsPage()}>Открыть настройки</button></div>
+        <div className="ait-notice">{tr('Выберите модель, которая читает изображения.')}{' '}<button className="pp-link" onClick={() => chrome.runtime.openOptionsPage()}>{tr('Открыть настройки')}</button></div>
       ) : null}
       {s.pipeline === 'standalone' ? (
         <ModelCheckCard compact settings={s} update={update} getKey={(id) => secrets.get(`provider:${id}`)} onOpenSettings={(download) => open(download ? 'studio.html?view=settings&pull=1' : 'studio.html?view=settings')} />
       ) : null}
       {s.pipeline === 'standalone' ? <VramLine settings={s} /> : null}
-      {engine === 'down' ? <div className="ait-error">Движок не отвечает по адресу {s.engine.url}. Запустите его или переключитесь в режим без движка.</div> : null}
-      {engine === 'unpaired' ? <div className="ait-notice">Движок запущен, но код сопряжения не подходит. Введите его в настройках.</div> : null}
+      {engine === 'down' ? <div className="ait-error">{tr('Движок не отвечает по адресу')}{' '}{s.engine.url}{tr('. Запустите его или переключитесь в режим без движка.')}</div> : null}
+      {engine === 'unpaired' ? <div className="ait-notice">{tr('Движок запущен, но код сопряжения не подходит. Введите его в настройках.')}</div> : null}
 
       <button className="ait-bubble-btn pp-main" disabled={!canRun || missing} onClick={() => void command('translate-page')}>
-        {preflight ? 'Проверяю программы…' : 'Перевести страницу'}
+        {preflight ? tr('Проверяю программы…') : tr('Перевести страницу')}
       </button>
       <div className="pp-row" data-testid="download-row">
-        <button className="ait-btn" disabled={!canRun || missing} onClick={() => void command('download-chapter')} title="Перевести все картинки страницы и скачать главу одним файлом">
-          Перевести и скачать
+        <button className="ait-btn" disabled={!canRun || missing} onClick={() => void command('download-chapter')} title={tr('Перевести все картинки страницы и скачать главу одним файлом')}>
+          
+          {tr('Перевести и скачать')}
         </button>
-        <select className="ait-select" style={{ flex: '0 0 92px' }} value={fmt} onChange={(e) => setFmt(e.target.value as typeof fmt)} aria-label="Формат файла">
+        <select className="ait-select" style={{ flex: '0 0 92px' }} value={fmt} onChange={(e) => setFmt(e.target.value as typeof fmt)} aria-label={tr('Формат файла')}>
           <option value="pdf">PDF</option>
           <option value="cbz">CBZ</option>
           <option value="epub">EPUB</option>
@@ -191,27 +200,27 @@ function Popup() {
           value={s.exportPageLength ?? 'normal'}
           disabled={fmt === 'zip'}
           onChange={(e) => update({ exportPageLength: e.target.value as AppSettings['exportPageLength'] })}
-          aria-label="Длина страницы"
-          title="Как резать длинную ленту вебтуна на страницы"
+          aria-label={tr('Длина страницы')}
+          title={tr('Как резать длинную ленту вебтуна на страницы')}
         >
-          <option value="normal">Обычные стр.</option>
-          <option value="long">Длинные стр.</option>
-          <option value="whole">Без нарезки</option>
+          <option value="normal">{tr('Обычные стр.')}</option>
+          <option value="long">{tr('Длинные стр.')}</option>
+          <option value="whole">{tr('Без нарезки')}</option>
         </select>
       </div>
       <div className="pp-row">
-        <button className="ait-btn" disabled={!canRun} onClick={() => void command('select-area')}>Перевести область</button>
+        <button className="ait-btn" disabled={!canRun} onClick={() => void command('select-area')}>{tr('Перевести область')}</button>
         <button
           className="ait-btn"
           disabled={!canRun}
           data-testid="toggle-langs"
-          title={langs?.showingOriginal ? 'Показать перевод' : 'Показать оригинал'}
+          title={langs?.showingOriginal ? tr('Показать перевод') : tr('Показать оригинал')}
           onClick={() => {
             void command('toggle-original');
             if (langs) setLangs({ ...langs, showingOriginal: !langs.showingOriginal });
           }}
         >
-          {langs?.translated ? `⇄ ${langs.showingOriginal ? nativeName(langs.target) : nativeName(langs.source) || 'Оригинал'}` : `${nativeName(s.sourceLang === 'auto' ? undefined : s.sourceLang) || 'Оригинал'} ⇄ ${nativeName(s.targetLang)}`}
+          {langs?.translated ? `⇄ ${langs.showingOriginal ? nativeName(langs.target) : nativeName(langs.source) || tr('Оригинал')}` : `${nativeName(s.sourceLang === 'auto' ? undefined : s.sourceLang) || tr('Оригинал')} ⇄ ${nativeName(s.targetLang)}`}
         </button>
       </div>
       {busy && tab?.id !== undefined ? (
@@ -222,10 +231,11 @@ function Popup() {
             setBusy(0);
           }}
         >
-          Остановить перевод ({busy} в работе)
+          
+          {tr('Остановить перевод (')}{busy} {' '}{tr('в работе)')}
         </button>
       ) : null}
-      {!canRun ? <p className="ait-hint">На этой странице расширение не работает. Откройте сайт с мангой.</p> : null}
+      {!canRun ? <p className="ait-hint">{tr('На этой странице расширение не работает. Откройте сайт с мангой.')}</p> : null}
 
       <label className="ait-switch pp-auto">
         <input
@@ -242,47 +252,47 @@ function Popup() {
             void chrome.runtime.sendMessage({ type: 'set-auto', host, enabled: e.target.checked, tabId: tab.id });
           }}
         />
-        <span>Автоперевод на {host || 'этом сайте'}</span>
+        <span>{tr('Автоперевод на')}{' '}{host || tr('этом сайте')}</span>
       </label>
 
       <div className="pp-grid">
         <label className="ait-field">
-          <span>Язык перевода</span>
+          <span>{tr('Язык перевода')}</span>
           <select className="ait-select" value={s.targetLang} onChange={(e) => update({ targetLang: e.target.value })}>
             {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
           </select>
         </label>
         <label className="ait-field">
-          <span>Исходный</span>
+          <span>{tr('Исходный')}</span>
           <select className="ait-select" value={s.sourceLang} onChange={(e) => update({ sourceLang: e.target.value })}>
-            <option value="auto">Авто</option>
+            <option value="auto">{tr('Авто')}</option>
             {LANGUAGES.filter((l) => ['ja', 'ko', 'zh', 'zh-TW', 'en'].includes(l.code)).map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
           </select>
         </label>
         <label className="ait-field">
-          <span>Профиль</span>
+          <span>{tr('Профиль')}</span>
           <select className="ait-select" value={s.activeProfileId} onChange={(e) => update({ activeProfileId: e.target.value })}>
-            {s.profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {s.profiles.map((p) => <option key={p.id} value={p.id}>{tr(p.name)}</option>)}
           </select>
         </label>
         <label className="ait-field">
-          <span>Качество</span>
+          <span>{tr('Качество')}</span>
           <select className="ait-select" value={s.quality} onChange={(e) => update({ quality: e.target.value as AppSettings['quality'] })}>
-            <option value="fast">Быстро</option>
-            <option value="balanced">Баланс</option>
-            <option value="best">Максимум</option>
+            <option value="fast">{tr('Быстро')}</option>
+            <option value="balanced">{tr('Баланс')}</option>
+            <option value="best">{tr('Максимум')}</option>
           </select>
         </label>
         <label className="ait-field" style={{ gridColumn: '1 / -1' }}>
-          <span>Сервер модели</span>
+          <span>{tr('Сервер модели')}</span>
           <select className="ait-select" value={s.visionProviderId ?? ''} onChange={(e) => update({ visionProviderId: e.target.value || null })}>
-            <option value="">— не выбран —</option>
-            {s.providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            <option value="">{tr('— не выбран —')}</option>
+            {s.providers.map((p) => <option key={p.id} value={p.id}>{tr(p.label)}</option>)}
           </select>
         </label>
         {vision ? (
           <div className="ait-field" style={{ gridColumn: '1 / -1' }}>
-            <span>Модель</span>
+            <span>{tr('Модель')}</span>
             <ModelPicker
               compact
               cfg={vision}
@@ -291,20 +301,20 @@ function Popup() {
                 update({ providers: s.providers.map((p) => (p.id === vision.id ? { ...p, model, vision: canSee ?? p.vision } : p)) });
               }}
             />
-            {vision.vision === false ? <small className="ait-muted">Эта модель не читает картинки — выберите модель с 👁.</small> : null}
+            {vision.vision === false ? <small className="ait-muted">{tr('Эта модель не читает картинки — выберите модель с 👁.')}</small> : null}
           </div>
         ) : null}
       </div>
       <p className="ait-hint pp-route">
-        {s.pipeline === 'engine' ? `Движок: ${s.engine.url}` : `Читает: ${vision ? vision.model : '—'}`}
-        {translator && translator.id !== vision?.id ? `, переводит: ${translator.model}` : ''}
+        {s.pipeline === 'engine' ? tr('Движок: {0}', s.engine.url) : tr('Читает: {0}', vision ? vision.model : '—')}
+        {translator && translator.id !== vision?.id ? tr(', переводит: {0}', translator.model) : ''}
       </p>
 
       <footer className="pp-foot">
-        <button className="pp-link" onClick={() => open('studio.html')}>Студия</button>
-        <button className="pp-link" onClick={() => open('studio.html?view=history')}>История</button>
-        <button className="pp-link" onClick={() => chrome.runtime.openOptionsPage()}>Настройки</button>
-        <span className="ait-muted">{usage ? `${usage.pages} стр. · $${usage.costUsd.toFixed(2)}` : ''}</span>
+        <button className="pp-link" onClick={() => open('studio.html')}>{tr('Студия')}</button>
+        <button className="pp-link" onClick={() => open('studio.html?view=history')}>{tr('История')}</button>
+        <button className="pp-link" onClick={() => chrome.runtime.openOptionsPage()}>{tr('Настройки')}</button>
+        <span className="ait-muted">{usage ? tr('{0} стр. · ${1}', usage.pages, usage.costUsd.toFixed(2)) : ''}</span>
       </footer>
       <div className="pp-update">
         <UpdateCheck compact current={chrome.runtime.getManifest().version} install={async () => open('studio.html?view=settings&update=1')} />

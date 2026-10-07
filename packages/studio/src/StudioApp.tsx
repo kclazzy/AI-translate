@@ -10,6 +10,7 @@ import { QuickPanel } from './panels/QuickPanel';
 import { SettingsPanel } from './panels/SettingsPanel';
 import { SetupWizard } from './panels/SetupWizard';
 import { Icon, ToastHost } from './ui';
+import { applyUiLangFromSettings, tr } from '@ait/core/i18n';
 
 export type View = 'quick' | 'projects' | 'glossary' | 'settings' | 'privacy' | 'history' | 'editor';
 
@@ -39,12 +40,12 @@ function SeriesContexts() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db]);
   const ctx = items.find(([k]) => k === key)?.[1];
-  if (!items.length) return <div className="ait-panel ait-muted">Контексты серий появятся после перевода страниц на сайтах. Для проектов контекст хранится внутри проекта.</div>;
+  if (!items.length) return <div className="ait-panel ait-muted">{tr('Контексты серий появятся после перевода страниц на сайтах. Для проектов контекст хранится внутри проекта.')}</div>;
   return (
     <>
       <div className="ait-panel">
         <label className="ait-field">
-          <span>Серия (сайт)</span>
+          <span>{tr('Серия (сайт)')}</span>
           <select className="ait-select" value={key} onChange={(e) => setKey(e.target.value)}>
             {items.map(([k]) => <option key={k} value={k}>{k}</option>)}
           </select>
@@ -61,7 +62,8 @@ function SeriesContexts() {
       ) : null}
       {ctx ? (
         <button className="ait-btn small danger" onClick={async () => { await db.put('contexts', key, emptyContext(key, key)); setItems(items.map(([k, v]) => [k, k === key ? emptyContext(key, key) : v])); }}>
-          Сбросить контекст серии
+          
+          {tr('Сбросить контекст серии')}
         </button>
       ) : null}
     </>
@@ -77,6 +79,11 @@ export function StudioApp({ platform, initialView, resultKey, sharedFiles }: Stu
   useEffect(() => {
     void loadBundledFonts();
     void platform.loadSettings().then((s) => {
+      // Language chosen elsewhere (popup, another device profile): show the page in it.
+      if (applyUiLangFromSettings(s.interfaceLang)) {
+        location.reload();
+        return;
+      }
       setSettings(s);
       applyTheme(s.theme);
     });
@@ -90,13 +97,19 @@ export function StudioApp({ platform, initialView, resultKey, sharedFiles }: Stu
         if (patch.theme) applyTheme(patch.theme);
         // Save at once: the translation service reads settings from storage, not from React state.
         saveChain.current = saveChain.current.then(() => platform.saveSettings(next)).catch(() => undefined);
+        if ('interfaceLang' in patch) {
+          // Every text on the page follows the new language after a reload (once the setting is saved).
+          void saveChain.current.then(() => {
+            if (applyUiLangFromSettings(patch.interfaceLang)) location.reload();
+          });
+        }
         return next;
       });
     },
     [platform],
   );
 
-  if (!settings) return <div className="ait-content ait-muted">Загрузка…</div>;
+  if (!settings) return <div className="ait-content ait-muted">{tr('Загрузка…')}</div>;
   if (platform.kind === 'mobile' && !settings.onboarded) {
     return (
       <PlatformContext.Provider value={platform}>
@@ -107,29 +120,29 @@ export function StudioApp({ platform, initialView, resultKey, sharedFiles }: Stu
   }
 
   const nav: { id: View; label: string; long?: string; icon: ReactNode }[] = [
-    { id: 'quick', label: 'Картинка', long: 'Перевести картинку', icon: <Icon.Edit /> },
-    { id: 'projects', label: 'Главы', long: 'Главы и проекты', icon: <Icon.Book /> },
-    { id: 'glossary', label: 'Словарь', long: 'Глоссарий и контекст', icon: <Icon.Gloss /> },
-    { id: 'history', label: 'История', icon: <Icon.Clock /> },
-    { id: 'settings', label: 'Настройки', icon: <Icon.Gear /> },
+    { id: 'quick', label: tr('Картинка'), long: tr('Перевести картинку'), icon: <Icon.Edit /> },
+    { id: 'projects', label: tr('Главы'), long: tr('Главы и проекты'), icon: <Icon.Book /> },
+    { id: 'glossary', label: tr('Словарь'), long: tr('Глоссарий и контекст'), icon: <Icon.Gloss /> },
+    { id: 'history', label: tr('История'), icon: <Icon.Clock /> },
+    { id: 'settings', label: tr('Настройки'), icon: <Icon.Gear /> },
   ];
   const titles: Record<View, string> = {
-    quick: 'Перевести картинку',
-    projects: 'Главы и проекты',
-    glossary: 'Глоссарий и контекст',
-    settings: 'Настройки',
-    privacy: 'Приватность',
-    history: 'История',
-    editor: 'Редактор',
+    quick: tr('Перевести картинку'),
+    projects: tr('Главы и проекты'),
+    glossary: tr('Глоссарий и контекст'),
+    settings: tr('Настройки'),
+    privacy: tr('Приватность'),
+    history: tr('История'),
+    editor: tr('Редактор'),
   };
 
   return (
     <PlatformContext.Provider value={platform}>
       <div className="ait-app">
-        <nav className="ait-side" aria-label="Разделы">
+        <nav className="ait-side" aria-label={tr('Разделы')}>
           <div className="ait-mark">
             AI Translate
-            <small>переводчик манги и комиксов</small>
+            <small>{tr('переводчик манги и комиксов')}</small>
           </div>
           {nav.map((n) => (
             <button key={n.id} className="ait-nav-btn" aria-current={view === n.id ? 'page' : undefined} onClick={() => setView(n.id)}>
@@ -141,7 +154,7 @@ export function StudioApp({ platform, initialView, resultKey, sharedFiles }: Stu
           <div className="ait-side-foot">
             <button className="ait-nav-btn" aria-current={view === 'privacy' ? 'page' : undefined} onClick={() => setView('privacy')}>
               <Icon.Lock />
-              <span>{settings.privacy === 'local' ? 'Локальный режим' : 'Приватность'}</span>
+              <span>{settings.privacy === 'local' ? tr('Локальный режим') : tr('Приватность')}</span>
             </button>
             <span className="ait-muted" style={{ fontSize: 12, padding: '0 10px' }}>v{platform.version}</span>
           </div>
@@ -150,22 +163,22 @@ export function StudioApp({ platform, initialView, resultKey, sharedFiles }: Stu
           <header className="ait-topbar">
             <h1>{titles[view]}</h1>
             <span className="spacer" />
-            {settings.privacy === 'local' ? <span className="ait-badge local">🔒 Локально</span> : null}
-            <span className="ait-badge">{settings.pipeline === 'engine' ? 'Движок' : 'Без движка'}</span>
+            {settings.privacy === 'local' ? <span className="ait-badge local">{tr('🔒 Локально')}</span> : null}
+            <span className="ait-badge">{settings.pipeline === 'engine' ? tr('Движок') : tr('Без движка')}</span>
           </header>
           <div className="ait-content" style={view === 'editor' ? { maxWidth: 'none' } : undefined}>
             {view === 'quick' ? <QuickPanel sharedFile={sharedFiles?.length === 1 && sharedFiles[0].type.startsWith('image/') ? sharedFiles[0] : null} onEdit={(k) => { setEditKey(k); setView('editor'); }} /> : null}
             {view === 'projects' ? <ProjectPanel settings={settings} initialFiles={sharedFiles && sharedFiles.length > 1 ? sharedFiles : undefined} /> : null}
             {view === 'glossary' ? (
               <>
-                <GlossaryEditor title="Общий глоссарий" entries={settings.glossary} onChange={(glossary) => update({ glossary })} />
+                <GlossaryEditor title={tr('Общий глоссарий')} entries={settings.glossary} onChange={(glossary) => update({ glossary })} />
                 <SeriesContexts />
               </>
             ) : null}
             {view === 'settings' ? <SettingsPanel settings={settings} update={update} /> : null}
             {view === 'privacy' ? <PrivacyPanel settings={settings} /> : null}
             {view === 'history' ? <HistoryPanel onOpen={(k) => { setEditKey(k); setView('editor'); }} /> : null}
-            {view === 'editor' ? (editKey ? <CachedPageEditor resultKey={editKey} settings={settings} onClose={() => setView('quick')} /> : <p className="ait-muted">Откройте страницу из истории или переведите картинку.</p>) : null}
+            {view === 'editor' ? (editKey ? <CachedPageEditor resultKey={editKey} settings={settings} onClose={() => setView('quick')} /> : <p className="ait-muted">{tr('Откройте страницу из истории или переведите картинку.')}</p>) : null}
           </div>
         </main>
         <ToastHost />

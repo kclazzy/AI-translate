@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { errorMessage } from '@ait/core';
+import { tr } from '@ait/core/i18n';
 
 export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
@@ -53,7 +54,8 @@ export function ErrorBox({ error, onRetry }: { error: unknown; onRetry?: () => v
       {detail ? <div className="ait-muted" style={{ fontSize: 12, marginTop: 4 }}>{detail}</div> : null}
       {onRetry ? (
         <button className="ait-btn small" style={{ marginTop: 8 }} onClick={onRetry}>
-          Повторить
+          
+          {tr('Повторить')}
         </button>
       ) : null}
     </div>

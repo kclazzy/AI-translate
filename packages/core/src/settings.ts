@@ -1,3 +1,5 @@
+import { systemLanguage } from './i18n';
+import { LANGUAGES } from './languages';
 import type { ModelCheck } from './llm/selftest';
 import type { PrivacyMode } from './llm/privacy';
 import type { ProviderConfig } from './llm/types';
@@ -17,7 +19,8 @@ export interface EngineOptions {
 
 export interface AppSettings {
   version: 1;
-  uiLang: 'ru' | 'en';
+  /** @deprecated never used; the interface language is `interfaceLang`. */
+  uiLang?: 'ru' | 'en';
   theme: 'system' | 'light' | 'dark';
   uiMode: UiMode;
   pipeline: PipelineMode;
@@ -66,6 +69,8 @@ export interface AppSettings {
   fastLocal?: boolean;
   /** Page length when a long strip is saved as PDF/CBZ/EPUB: normal ≈ a book page, long ≈ 3×, whole = as long as possible. */
   exportPageLength?: 'normal' | 'long' | 'whole';
+  /** Interface language: "auto" (default) follows the browser / Windows language. */
+  interfaceLang?: string;
 }
 
 export function defaultSettings(): AppSettings {
@@ -73,7 +78,6 @@ export function defaultSettings(): AppSettings {
   const ollama = configFromPreset('ollama', 'ollama');
   return {
     version: 1,
-    uiLang: 'ru',
     theme: 'system',
     uiMode: 'reader',
     pipeline: 'standalone',
@@ -83,7 +87,8 @@ export function defaultSettings(): AppSettings {
     visionProviderId: 'ollama',
     translationProviderId: null,
     sourceLang: 'auto',
-    targetLang: 'ru',
+    // New users read in their own language: the browser / Windows language when we support it.
+    targetLang: defaultTargetLang(),
     quality: 'balanced',
     translateSfx: true,
     sfxStyle: 'translated',
@@ -127,4 +132,13 @@ export function activeProfile(s: AppSettings, seriesKey?: string): PromptProfile
 
 export function providerById(s: AppSettings, id: string | null | undefined): ProviderConfig | undefined {
   return id ? s.providers.find((p) => p.id === id) : undefined;
+}
+
+/** Translation language for a new user: the system language if it is in the list, else Russian. */
+export function defaultTargetLang(system = systemLanguage()): string {
+  const full = system.replace('_', '-');
+  const base = full.toLowerCase().split('-')[0];
+  if (LANGUAGES.some((l) => l.code === full)) return full;
+  if (base === 'zh') return /tw|hk|hant/i.test(full) ? (LANGUAGES.some((l) => l.code === 'zh-TW') ? 'zh-TW' : 'zh') : 'zh';
+  return LANGUAGES.some((l) => l.code === base) ? base : 'ru';
 }

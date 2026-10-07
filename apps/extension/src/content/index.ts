@@ -1,8 +1,9 @@
 import { errorMessage } from '@ait/core/errors';
 import { dominantLanguage, nativeName } from '@ait/core/languages';
-import type { BackgroundToContent, ChapterFormat, ContentToBackground, ImageRef, JobStatus, PageLangs, RenderedTiles } from '../shared/messages';
+import type { BackgroundToContent, ChapterFormat, ContentToBackground, ImageRef, JobStatus, PageLangs, RenderedTiles, UiStrings } from '../shared/messages';
 import { Overlay } from './overlay';
 import { asCandidate, candidateAt, imgSrc, inlineData, lazySrc, markUi, scanPage, viewportRect, type Candidate } from './scanner';
+import { registerDictionary, setUiLang, tr } from '@ait/core/i18n';
 
 /**
  * Content script: finds images, shows the hover button, runs auto-translate on
@@ -42,11 +43,19 @@ function main() {
   let autoTranslate = false;
   let enabled = true;
   let targetLang = 'ru';
-  const langsOf = (r: RenderedTiles) => ({ source: nativeName(dominantLanguage(r.page.blocks.map((b) => b.language)) ?? 'auto') || 'Оригинал', target: nativeName(targetLang) });
+  const langsOf = (r: RenderedTiles) => ({ source: nativeName(dominantLanguage(r.page.blocks.map((b) => b.language)) ?? 'auto') || tr('Оригинал'), target: nativeName(targetLang) });
   let originalsShown = false;
   let seq = 0;
 
   const send = <T = unknown>(msg: ContentToBackground): Promise<T> => chrome.runtime.sendMessage(msg) as Promise<T>;
+  /** Overlays speak the interface language chosen in the extension (not remembered in the site's storage). */
+  let relabelHover = () => {};
+  const applyUi = (ui: UiStrings | undefined) => {
+    if (!ui) return;
+    registerDictionary(ui.lang, ui.dict);
+    setUiLang(ui.lang, false);
+    relabelHover();
+  };
 
   const idFor = (el: Element) => {
     let id = byElement.get(el);
@@ -92,7 +101,7 @@ function main() {
       // Without this the overlay would say "В очереди" forever.
       if (items.get(id) !== item) return;
       item.status = 'error';
-      overlay.error('Не удалось отправить картинку на перевод', e instanceof Error ? e.message : String(e));
+      overlay.error(tr('Не удалось отправить картинку на перевод'), e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -125,11 +134,11 @@ function main() {
       const st = res?.[it.id] ?? { state: 'unknown' };
       if (st.state === 'pending') {
         it.lost = 0;
-        it.overlay.note(st.ahead ? `перед ней ${st.ahead}` : 'следующая', st.ahead > 1 ? 'Локальная модель переводит по одной картинке за раз' : undefined);
+        it.overlay.note(st.ahead ? tr('перед ней {0}', st.ahead) : tr('следующая'), st.ahead > 1 ? tr('Локальная модель переводит по одной картинке за раз') : undefined);
       } else if (st.state === 'running') {
         it.lost = 0;
         const slow = st.elapsedMs > 90_000;
-        it.overlay.note(fmt(st.elapsedMs), slow ? 'Модель отвечает долго: проверьте её в настройках или выберите модель полегче' : undefined);
+        it.overlay.note(fmt(st.elapsedMs), slow ? tr('Модель отвечает долго: проверьте её в настройках или выберите модель полегче') : undefined);
       } else if (Date.now() - (it.sentAt ?? 0) > 5000 && (it.lost = (it.lost ?? 0) + 1) >= 2) {
         // The worker restarted (the browser closed it to save memory, the extension updated)
         // and forgot the job: send the picture again by itself, twice at most.
@@ -137,7 +146,7 @@ function main() {
         resent.set(it.id, tries);
         it.status = 'error';
         if (tries <= 2) void translate(it.cand, { priority: 40 });
-        else it.overlay.error('Задача потерялась', 'Расширение несколько раз перезапускалось. Нажмите «Повторить».');
+        else it.overlay.error(tr('Задача потерялась'), tr('Расширение несколько раз перезапускалось. Нажмите «Повторить».'));
       }
     }
   }
@@ -191,7 +200,7 @@ function main() {
         it.overlay.setTiles(msg.result.tiles, langsOf(msg.result));
         it.overlay.setOriginal(originalsShown);
         {
-          const qa = msg.result.page.blocks.flatMap((b) => (b.qa?.issues ?? []).map((q) => `• ${q.note}${b.qa?.before !== undefined ? ' (исправлено)' : ''}`));
+          const qa = msg.result.page.blocks.flatMap((b) => (b.qa?.issues ?? []).map((q) => `• ${q.note}${b.qa?.before !== undefined ? tr(' (исправлено)') : ''}`));
           it.overlay.setQa(qa.length, qa.slice(0, 8).join('\n'));
         }
         it.overlay.position();
@@ -207,7 +216,7 @@ function main() {
         }
         it.status = 'error';
         if (msg.error.code === 'SETUP_NEEDED') {
-          it.overlay.error(errorMessage(msg.error), msg.error.detail, ['Установить и запустить', () => void send({ type: 'open-setup' })]);
+          it.overlay.error(errorMessage(msg.error), msg.error.detail, [tr('Установить и запустить'), () => void send({ type: 'open-setup' })]);
           break;
         }
         it.overlay.error(errorMessage(msg.error), msg.error.detail);
@@ -215,7 +224,7 @@ function main() {
       }
       case 'command':
         if (!enabled && msg.command !== 'toggle-original' && msg.command !== 'set-auto') {
-          toastOnce('AI Translate выключен — включите его в окне расширения');
+          toastOnce(tr('AI Translate выключен — включите его в окне расширения'));
           break;
         }
         if (msg.command === 'translate-page') translatePage();
@@ -246,6 +255,7 @@ function main() {
         }
         break;
       case 'state':
+        applyUi(msg.ui);
         minSize = msg.minImageSize;
         enabled = msg.enabled;
         targetLang = msg.targetLang;
@@ -272,7 +282,7 @@ function main() {
       .p { position: fixed; z-index: 2147483602; right: 16px; bottom: 16px; background: #1c2230; color: #fff; font: 14px/1.35 system-ui, sans-serif;
         padding: 10px 12px; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.3); display: flex; gap: 10px; align-items: center; max-width: 360px; }
       button { all: initial; cursor: pointer; color: #fff; font: inherit; border: 1px solid #fff6; border-radius: 6px; padding: 2px 8px; }
-    </style><div class="p" role="status"><span class="t"></span><button type="button">Отменить</button></div>`;
+    </style><div class="p" role="status"><span class="t"></span><button type="button">${tr('Отменить')}</button></div>`;
     const text = root.querySelector('.t') as HTMLElement;
     (root.querySelector('button') as HTMLButtonElement).addEventListener('click', () => {
       if (!chapter) return host.remove();
@@ -305,25 +315,25 @@ function main() {
       c.lastChange = Date.now();
     }
     const label = c.format.toUpperCase();
-    c.text.textContent = `Глава → ${label}: готово ${done} из ${list.length}${failed ? `, не удалось ${failed}` : ''}`;
+    c.text.textContent = tr('Глава → {0}: готово {1} из {2}{3}', label, done, list.length, failed ? tr(', не удалось {0}', failed) : '');
     // Everything finished (or nothing moved for 15 minutes): build the file from what is ready.
     const stalled = Date.now() - c.lastChange > 15 * 60_000;
     if (list.length && (pending === 0 || stalled)) {
       clearInterval(c.timer);
       const keys = list.filter((it) => it.status === 'done' && it.result).map((it) => it.result!.key);
       if (!keys.length) {
-        c.text.textContent = 'Ни одна картинка не переведена — файл не создан.';
+        c.text.textContent = tr('Ни одна картинка не переведена — файл не создан.');
         chapter = null;
         setTimeout(() => c.panel.remove(), 8000);
         return;
       }
-      c.text.textContent = `Собираю ${label}: ${keys.length} стр.…`;
+      c.text.textContent = tr('Собираю {0}: {1} стр.…', label, keys.length);
       try {
         const r = await send<{ ok: boolean; name: string; pages: number; error?: { detail?: string } }>({ type: 'build-download', keys, title: document.title, format: c.format });
-        if (!r?.ok) throw new Error(r?.error?.detail ?? 'не удалось собрать файл');
-        c.text.textContent = `Скачано: ${r.name}${failed ? ` (без ${failed} непереведённых картинок)` : ''}`;
+        if (!r?.ok) throw new Error(r?.error?.detail ?? tr('не удалось собрать файл'));
+        c.text.textContent = tr('Скачано: {0}{1}', r.name, failed ? tr(' (без {0} непереведённых картинок)', failed) : '');
       } catch (e) {
-        c.text.textContent = `Не удалось собрать файл: ${e instanceof Error ? e.message : String(e)}`;
+        c.text.textContent = tr('Не удалось собрать файл: {0}', e instanceof Error ? e.message : String(e));
       }
       chapter = null;
       setTimeout(() => c.panel.remove(), 12_000);
@@ -333,7 +343,7 @@ function main() {
   function translatePage() {
     pageMode = true;
     const cands = scanPage(minSize);
-    if (!cands.length) toastOnce('На странице не найдено подходящих изображений');
+    if (!cands.length) toastOnce(tr('На странице не найдено подходящих изображений'));
     // Pictures on screen first, then the rest of the chapter in reading order.
     for (const c of cands) void translate(c);
   }
@@ -427,8 +437,12 @@ function main() {
     button { all: initial; position: fixed; z-index: 2147483601; display: none; font: 600 14px/1 system-ui, sans-serif; background: #c8205f; color: #fff;
       border: 2px solid #1c2230; border-radius: 999px; padding: 7px 14px; cursor: pointer; box-shadow: 2px 2px 0 #1c2230; }
     button:hover { transform: translate(-1px,-1px); box-shadow: 3px 3px 0 #1c2230; }
-  </style><button type="button" aria-label="Перевести изображение">Перевести</button>`;
+  </style><button type="button" aria-label="${tr('Перевести изображение')}">${tr('Перевести')}</button>`;
   const hoverBtn = hroot.querySelector('button')!;
+  relabelHover = () => {
+    hoverBtn.textContent = tr('Перевести');
+    hoverBtn.setAttribute('aria-label', tr('Перевести изображение'));
+  };
   document.documentElement.appendChild(hoverHost);
   let hoverCand: Candidate | null = null;
   let lastMove = 0;
@@ -474,7 +488,7 @@ function main() {
       .veil { position: fixed; inset: 0; z-index: 2147483602; cursor: crosshair; background: rgba(28,34,48,.18); }
       .sel { position: fixed; border: 2px solid #c8205f; background: rgba(200,32,95,.08); box-shadow: 0 0 0 9999px rgba(28,34,48,.35); }
       .tip { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); background: #1c2230; color: #fff; font: 14px system-ui, sans-serif; padding: 8px 12px; border-radius: 8px; }
-    </style><div class="veil"><div class="tip">Выделите область для перевода. Esc — отмена</div></div>`;
+    </style><div class="veil"><div class="tip">${tr('Выделите область для перевода. Esc — отмена')}</div></div>`;
     document.documentElement.appendChild(host);
     const veil = root.querySelector('.veil') as HTMLDivElement;
     let start: [number, number] | null = null;
@@ -549,8 +563,9 @@ function main() {
     setTimeout(() => host.remove(), 3000);
   }
 
-  void send<{ autoTranslate: boolean; minImageSize: number; enabled: boolean; targetLang: string }>({ type: 'get-page-state', host: location.hostname }).then((s) => {
+  void send<{ autoTranslate: boolean; minImageSize: number; enabled: boolean; targetLang: string; ui?: UiStrings }>({ type: 'get-page-state', host: location.hostname }).then((s) => {
     if (!s) return;
+    applyUi(s.ui);
     minSize = s.minImageSize;
     enabled = s.enabled;
     targetLang = s.targetLang;

@@ -16,6 +16,7 @@ import {
 import { LocalModels, LocalSetup, ModelCheckCard, ModelPicker, UpdateCheck } from '../ModelPicker';
 import { usePlatform } from '../platform';
 import { ErrorBox, Field, FoldPanel, Segmented, Switch, toast, useAction } from '../ui';
+import { resolveUiLang, tr, UI_LANGS } from '@ait/core/i18n';
 
 export interface SettingsProps {
   settings: AppSettings;
@@ -28,22 +29,22 @@ export function ProviderGuideBox({ preset, open, title }: { preset: (typeof PROV
   if (!g) return null;
   return (
     <details className="ait-guide" open={open} data-testid={`guide-${preset!.preset}`}>
-      <summary>{title ?? 'Как подключить'}</summary>
+      <summary>{title ?? tr('Как подключить')}</summary>
       <ol>
         {g.steps.map((step, i) => (
-          <li key={i}>{step}</li>
+          <li key={i}>{tr(step)}</li>
         ))}
       </ol>
       {g.keyUrl ? (
         <p>
           <a href={g.keyUrl} target="_blank" rel="noreferrer noopener">
-            {preset!.needsKey ? 'Открыть страницу ключей' : 'Открыть страницу загрузки'} ↗
+            {preset!.needsKey ? tr('Открыть страницу ключей') : tr('Открыть страницу загрузки')} ↗
           </a>
         </p>
       ) : null}
-      {g.models ? <p><b>Модель:</b> {g.models}</p> : null}
-      {g.cost ? <p><b>Стоимость:</b> {g.cost}</p> : null}
-      {g.note ? <p className="ait-guide-note">{g.note}</p> : null}
+      {g.models ? <p><b>{tr('Модель:')}</b> {tr(g.models)}</p> : null}
+      {g.cost ? <p><b>{tr('Стоимость:')}</b> {tr(g.cost)}</p> : null}
+      {g.note ? <p className="ait-guide-note">{tr(g.note)}</p> : null}
     </details>
   );
 }
@@ -65,7 +66,7 @@ function ProviderEditor({ cfg, onChange, onRemove, onUse, inUse }: { cfg: Provid
       try {
         const list = await listOpenAiModels(cfg.baseUrl, apiKey);
         setModels(list.slice(0, 200));
-        toast(`Подключено: ${list.length} моделей`);
+        toast(tr('Подключено: {0} моделей', list.length));
         return;
       } catch {
         /* some endpoints have no /models; fall back to a tiny completion */
@@ -73,74 +74,75 @@ function ProviderEditor({ cfg, onChange, onRemove, onUse, inUse }: { cfg: Provid
     }
     const p = createProvider({ ...cfg, apiKey, maxOutputTokens: 16 });
     await p.complete({ system: 'Reply with OK.', messages: [{ role: 'user', content: 'ping' }] });
-    toast('Подключено');
+    toast(tr('Подключено'));
   });
 
   const saveKey = async () => {
     await platform.secrets.set(`provider:${cfg.id}`, key.trim());
     setStored(key.trim() || undefined);
     setKey('');
-    toast(key.trim() ? 'Ключ сохранён в зашифрованном виде' : 'Ключ удалён');
+    toast(key.trim() ? tr('Ключ сохранён в зашифрованном виде') : tr('Ключ удалён'));
   };
 
   return (
     <div className="ait-panel">
       <div className="ait-row" style={{ alignItems: 'center' }}>
-        <strong style={{ flex: '1 1 auto' }}>{cfg.label}</strong>
+        <strong style={{ flex: '1 1 auto' }}>{tr(cfg.label)}</strong>
         <span className={`ait-badge ${isLocalProvider(cfg) ? 'local' : ''}`} style={{ flex: '0 0 auto' }}>
-          {isLocalProvider(cfg) ? 'на устройстве / в сети' : 'облако'}
+          {isLocalProvider(cfg) ? tr('на устройстве / в сети') : tr('облако')}
         </span>
         <button className="ait-btn small danger" style={{ flex: '0 0 auto' }} onClick={onRemove}>
-          Удалить
+          
+          {tr('Удалить')}
         </button>
       </div>
-      {preset?.hint ? <p className="ait-hint">{preset.hint}</p> : null}
+      {preset?.hint ? <p className="ait-hint">{tr(preset.hint)}</p> : null}
       <ProviderGuideBox preset={preset} open={!!preset?.needsKey && !stored} />
       <div className="ait-grid2" style={{ marginTop: 12 }}>
-        <Field label="Название">
-          <input className="ait-input" value={cfg.label} onChange={(e) => onChange({ ...cfg, label: e.target.value })} />
+        <Field label={tr('Название')}>
+          <input className="ait-input" value={tr(cfg.label)} onChange={(e) => onChange({ ...cfg, label: e.target.value })} />
         </Field>
-        <Field label="Адрес API (base URL)">
+        <Field label={tr('Адрес API (base URL)')}>
           <input className="ait-input" value={cfg.baseUrl} onChange={(e) => onChange({ ...cfg, baseUrl: e.target.value.trim() })} />
         </Field>
-        <Field label="Модель" hint={preset?.needsKey && !stored ? 'Сохраните ключ — и список моделей загрузится сам' : '⟳ — получить список моделей с сервера'}>
+        <Field label={tr('Модель')} hint={preset?.needsKey && !stored ? tr('Сохраните ключ — и список моделей загрузится сам') : tr('⟳ — получить список моделей с сервера')}>
           <ModelPicker cfg={cfg} hasKey={preset?.needsKey ? !!stored : undefined} getKey={async () => key || stored} onPick={(model, vision) => onChange({ ...cfg, model, vision: vision ?? cfg.vision })} />
-          <input className="ait-input" value={cfg.model} onChange={(e) => onChange({ ...cfg, model: e.target.value.trim() })} aria-label="Имя модели вручную" placeholder="или введите имя вручную" />
+          <input className="ait-input" value={cfg.model} onChange={(e) => onChange({ ...cfg, model: e.target.value.trim() })} aria-label={tr('Имя модели вручную')} placeholder={tr('или введите имя вручную')} />
         </Field>
-        <Field label="Ключ API" hint={stored ? `Сохранён: ${maskKey(stored)}` : preset?.needsKey ? 'Нужен для этого сервиса' : 'Не нужен для локальных серверов'}>
+        <Field label={tr('Ключ API')} hint={stored ? tr('Сохранён: {0}', maskKey(stored)) : preset?.needsKey ? tr('Нужен для этого сервиса') : tr('Не нужен для локальных серверов')}>
           <div style={{ display: 'flex', gap: 6 }}>
             <input className="ait-input" type="password" autoComplete="off" placeholder={stored ? '••••••••' : 'sk-…'} value={key} onChange={(e) => setKey(e.target.value)} />
-            <button className="ait-btn" onClick={saveKey}>Сохранить</button>
+            <button className="ait-btn" onClick={saveKey}>{tr('Сохранить')}</button>
           </div>
         </Field>
       </div>
       <div className="ait-row" style={{ marginTop: 12, alignItems: 'center' }}>
-        <Switch checked={cfg.vision} onChange={(v) => onChange({ ...cfg, vision: v })} label="Модель понимает изображения (vision)" />
-        <Switch checked={cfg.jsonMode === 'json_object'} onChange={(v) => onChange({ ...cfg, jsonMode: v ? 'json_object' : 'none' })} label="JSON-режим" />
+        <Switch checked={cfg.vision} onChange={(v) => onChange({ ...cfg, vision: v })} label={tr('Модель понимает изображения (vision)')} />
+        <Switch checked={cfg.jsonMode === 'json_object'} onChange={(v) => onChange({ ...cfg, jsonMode: v ? 'json_object' : 'none' })} label={tr('JSON-режим')} />
         <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void test.run()} disabled={test.busy}>
-          {test.busy ? 'Проверка…' : 'Проверить подключение'}
+          {test.busy ? tr('Проверка…') : tr('Проверить подключение')}
         </button>
         {onUse ? (
           <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={onUse} disabled={inUse} data-testid="use-provider">
-            {inUse ? 'Используется' : 'Использовать для перевода'}
+            {inUse ? tr('Используется') : tr('Использовать для перевода')}
           </button>
         ) : null}
       </div>
       <div className="ait-grid2" style={{ marginTop: 10 }}>
-        <Field label="Цена ввода, $ за 1M токенов" hint="Для оценки стоимости в отладке">
+        <Field label={tr('Цена ввода, $ за 1M токенов')} hint={tr('Для оценки стоимости в отладке')}>
           <input className="ait-input" type="number" min={0} step="0.01" value={cfg.priceInput ?? ''} onChange={(e) => onChange({ ...cfg, priceInput: e.target.value === '' ? undefined : Number(e.target.value) })} />
         </Field>
-        <Field label="Ждать ответ, секунд" hint="Большим локальным моделям нужно больше времени">
+        <Field label={tr('Ждать ответ, секунд')} hint={tr('Большим локальным моделям нужно больше времени')}>
           <input className="ait-input" type="number" min={10} max={3600} placeholder={isLocalProvider(cfg) ? '600' : '120'} value={cfg.timeoutMs ? Math.round(cfg.timeoutMs / 1000) : ''} onChange={(e) => onChange({ ...cfg, timeoutMs: e.target.value ? Number(e.target.value) * 1000 : undefined })} />
         </Field>
-        <Field label="Режим размышлений">
+        <Field label={tr('Режим размышлений')}>
           <select className="ait-select" value={cfg.noThinking === undefined ? 'auto' : cfg.noThinking ? 'off' : 'on'} onChange={(e) => onChange({ ...cfg, noThinking: e.target.value === 'auto' ? undefined : e.target.value === 'off' })}>
-            <option value="auto">Авто (выключен для локальных)</option>
-            <option value="off">Выключить (быстрее)</option>
-            <option value="on">Оставить</option>
+            <option value="auto">{tr('Авто (выключен для локальных)')}</option>
+            <option value="off">{tr('Выключить (быстрее)')}</option>
+            <option value="on">{tr('Оставить')}</option>
           </select>
         </Field>
-        <Field label="Цена вывода, $ за 1M токенов">
+        <Field label={tr('Цена вывода, $ за 1M токенов')}>
           <input className="ait-input" type="number" min={0} step="0.01" value={cfg.priceOutput ?? ''} onChange={(e) => onChange({ ...cfg, priceOutput: e.target.value === '' ? undefined : Number(e.target.value) })} />
         </Field>
       </div>
@@ -152,28 +154,28 @@ function ProviderEditor({ cfg, onChange, onRemove, onUse, inUse }: { cfg: Provid
 function ProfileEditor({ p, onChange }: { p: PromptProfile; onChange: (p: PromptProfile) => void }) {
   return (
     <div className="ait-grid2">
-      <Field label="Название профиля">
-        <input className="ait-input" value={p.name} onChange={(e) => onChange({ ...p, name: e.target.value })} />
+      <Field label={tr('Название профиля')}>
+        <input className="ait-input" value={tr(p.name)} onChange={(e) => onChange({ ...p, name: e.target.value })} />
       </Field>
-      <Field label="Honorifics (-сан, -кун)">
+      <Field label={tr('Honorifics (-сан, -кун)')}>
         <select className="ait-select" value={p.honorifics} onChange={(e) => onChange({ ...p, honorifics: e.target.value as PromptProfile['honorifics'] })}>
-          <option value="keep">Сохранять</option>
-          <option value="adapt">Адаптировать</option>
-          <option value="drop">Убирать</option>
+          <option value="keep">{tr('Сохранять')}</option>
+          <option value="adapt">{tr('Адаптировать')}</option>
+          <option value="drop">{tr('Убирать')}</option>
         </select>
       </Field>
-      <Field label="Имена">
+      <Field label={tr('Имена')}>
         <select className="ait-select" value={p.names} onChange={(e) => onChange({ ...p, names: e.target.value as PromptProfile['names'] })}>
-          <option value="transliterate">Транслитерировать</option>
-          <option value="keep-original">Оставлять латиницей</option>
-          <option value="adapt">Адаптировать</option>
+          <option value="transliterate">{tr('Транслитерировать')}</option>
+          <option value="keep-original">{tr('Оставлять латиницей')}</option>
+          <option value="adapt">{tr('Адаптировать')}</option>
         </select>
       </Field>
-      <Field label="Тон">
-        <input className="ait-input" placeholder="например: дерзкий, подростковый сленг" value={p.tone} onChange={(e) => onChange({ ...p, tone: e.target.value })} />
+      <Field label={tr('Тон')}>
+        <input className="ait-input" placeholder={tr('например: дерзкий, подростковый сленг')} value={p.tone} onChange={(e) => onChange({ ...p, tone: e.target.value })} />
       </Field>
       <div style={{ gridColumn: '1 / -1' }}>
-        <Field label="Инструкции для модели">
+        <Field label={tr('Инструкции для модели')}>
           <textarea className="ait-textarea" value={p.customPrompt} onChange={(e) => onChange({ ...p, customPrompt: e.target.value })} />
         </Field>
       </div>
@@ -189,18 +191,18 @@ function StorageLine() {
   const measure = () => void navigator.storage?.estimate?.().then((e) => setUsed(e.usage ?? null)).catch(() => undefined);
   useEffect(measure, []);
   const clear = async (store: 'results' | 'history', what: string) => {
-    if (!confirm(`Удалить ${what}? Это нельзя отменить.`)) return;
+    if (!confirm(tr('Удалить {0}? Это нельзя отменить.', what))) return;
     setBusy(true);
     await platform.db.clear(store);
     setBusy(false);
-    toast(`${what[0].toUpperCase()}${what.slice(1)} удалены`);
+    toast(tr('{0}{1} удалены', what[0].toUpperCase(), what.slice(1)));
     measure();
   };
   return (
     <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 12 }} data-testid="storage-line">
-      <span className="ait-muted">Занято на устройстве: {used === null ? '…' : `${(used / 1048576).toFixed(used > 104857600 ? 0 : 1)} МБ`}</span>
-      <button className="ait-btn small" disabled={busy} onClick={() => void clear('results', 'переведённые страницы из кэша')}>Очистить кэш</button>
-      <button className="ait-btn small" disabled={busy} onClick={() => void clear('history', 'записи истории')}>Очистить историю</button>
+      <span className="ait-muted">{tr('Занято на устройстве:')}{' '}{used === null ? '…' : tr('{0} МБ', (used / 1048576).toFixed(used > 104857600 ? 0 : 1))}</span>
+      <button className="ait-btn small" disabled={busy} onClick={() => void clear('results', tr('переведённые страницы из кэша'))}>{tr('Очистить кэш')}</button>
+      <button className="ait-btn small" disabled={busy} onClick={() => void clear('history', tr('записи истории'))}>{tr('Очистить историю')}</button>
     </div>
   );
 }
@@ -211,14 +213,14 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
   const getKey = (id: string) => platform.secrets.get(`provider:${id}`);
   useEffect(() => {
     if (params.get('update') === '1') document.getElementById('ait-update')?.scrollIntoView({ block: 'center' });
-    if (params.get('updated')) toast(`Обновлено до версии ${params.get('updated')}`);
+    if (params.get('updated')) toast(tr('Обновлено до версии {0}', params.get('updated')));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [addPreset, setAddPreset] = useState('anthropic');
   const [profileId, setProfileId] = useState(s.activeProfileId);
   const [siteKey, setSiteKey] = useState('');
   const engineTest = useAction(async () => {
     const h = await new EngineClient(s.engine.url, s.engine.token).health();
-    toast(h.status === 'ok' && (h as { paired?: boolean }).paired !== false ? `Движок ${h.version}: ${h.device}${h.gpu ? `, ${h.gpu}` : ''}` : 'Движок отвечает, но код сопряжения не подошёл');
+    toast(h.status === 'ok' && (h as { paired?: boolean }).paired !== false ? tr('Движок {0}: {1}{2}', h.version, h.device, h.gpu ? `, ${h.gpu}` : '') : tr('Движок отвечает, но код сопряжения не подошёл'));
   });
 
   const setProvider = (c: ProviderConfig) => update({ providers: s.providers.map((p) => (p.id === c.id ? c : p)) });
@@ -236,14 +238,15 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
     const value = presets.some((p) => p.preset === addPreset) ? addPreset : presets[0]?.preset ?? '';
     return (
       <div className="ait-row">
-        <Field label="Добавить">
+        <Field label={tr('Добавить')}>
           <select className="ait-select" value={value} onChange={(e) => setAddPreset(e.target.value)}>
-            {presets.map((p) => <option key={p.preset} value={p.preset}>{p.label}</option>)}
+            {presets.map((p) => <option key={p.preset} value={p.preset}>{tr(p.label)}</option>)}
           </select>
         </Field>
         <div style={{ flex: '0 0 auto' }}>
           <button className="ait-btn" onClick={() => update({ providers: [...s.providers, configFromPreset(value, shortId(value + '-'))] })}>
-            Добавить
+            
+            {tr('Добавить')}
           </button>
         </div>
       </div>
@@ -251,14 +254,14 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
   };
   const guideFor = (presets: typeof PROVIDER_PRESETS) => {
     const p = presets.find((x) => x.preset === addPreset) ?? presets[0];
-    return <ProviderGuideBox preset={p} title={`Как подключить: ${p?.label ?? ''}`} />;
+    return <ProviderGuideBox preset={p} title={tr('Как подключить: {0}', tr(p?.label ?? ''))} />;
   };
   /** Make this provider read the pictures (or translate, if it cannot see) and allow the cloud for it. */
   const pickProvider = (p: ProviderConfig) => {
     const cloud = !isLocalProvider(p);
     if (p.vision) update({ visionProviderId: p.id, translationProviderId: null, ...(cloud ? { privacy: 'cloud' as const } : {}) });
     else update({ translationProviderId: p.id, ...(cloud && s.privacy === 'local' ? { privacy: 'hybrid' as const } : {}) });
-    toast(p.vision ? `${p.label} теперь читает и переводит страницы` : `${p.label} теперь переводит текст`);
+    toast(p.vision ? tr('{0} теперь читает и переводит страницы', tr(p.label)) : tr('{0} теперь переводит текст', tr(p.label)));
   };
 
   return (
@@ -267,38 +270,38 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
       {s.pipeline === 'standalone' ? <ModelCheckCard settings={s} update={update} getKey={getKey} /> : null}
       {s.pipeline === 'standalone' && platform.kind === 'extension' ? <LocalModels settings={s} update={update} getKey={getKey} autoStart={params.get('pull') === '1'} /> : null}
       <div className="ait-panel">
-        <h2>Как переводить</h2>
+        <h2>{tr('Как переводить')}</h2>
         <div className="ait-grid2">
-          <Field label="Исходный язык">
+          <Field label={tr('Исходный язык')}>
             <select className="ait-select" value={s.sourceLang} onChange={(e) => update({ sourceLang: e.target.value })}>
-              <option value="auto">Определять автоматически</option>
+              <option value="auto">{tr('Определять автоматически')}</option>
               {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
             </select>
           </Field>
-          <Field label="Язык перевода">
+          <Field label={tr('Язык перевода')}>
             <select className="ait-select" value={s.targetLang} onChange={(e) => update({ targetLang: e.target.value })}>
               {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
             </select>
           </Field>
-          <Field label="Проверка перевода" hint="Ещё один короткий запрос на страницу: смысл, контекст, эмоции, персонажи, грамматика, термины">
+          <Field label={tr('Проверка перевода')} hint={tr('Ещё один короткий запрос на страницу: смысл, контекст, эмоции, персонажи, грамматика, термины')}>
             <select className="ait-select" value={s.qaMode ?? 'fix'} onChange={(e) => update({ qaMode: e.target.value as AppSettings['qaMode'] })}>
-              <option value="fix">Исправлять ошибки автоматически</option>
-              <option value="report">Только показывать замечания</option>
-              <option value="off">Выключена (быстрее)</option>
+              <option value="fix">{tr('Исправлять ошибки автоматически')}</option>
+              <option value="report">{tr('Только показывать замечания')}</option>
+              <option value="off">{tr('Выключена (быстрее)')}</option>
             </select>
           </Field>
-          <Field label="Качество" hint="Чем выше, тем крупнее картинка уходит модели и дольше ответ">
-            <Segmented label="Качество" value={s.quality} onChange={(quality) => update({ quality })} options={[{ value: 'fast', label: 'Быстро' }, { value: 'balanced', label: 'Баланс' }, { value: 'best', label: 'Максимум' }]} />
+          <Field label={tr('Качество')} hint={tr('Чем выше, тем крупнее картинка уходит модели и дольше ответ')}>
+            <Segmented label={tr('Качество')} value={s.quality} onChange={(quality) => update({ quality })} options={[{ value: 'fast', label: tr('Быстро') }, { value: 'balanced', label: tr('Баланс') }, { value: 'best', label: tr('Максимум') }]} />
           </Field>
-          <Field label="Звуки (SFX)">
+          <Field label={tr('Звуки (SFX)')}>
             <div style={{ display: 'grid', gap: 8 }}>
-              <Switch checked={s.translateSfx} onChange={(translateSfx) => update({ translateSfx })} label="Переводить звуковые эффекты" />
+              <Switch checked={s.translateSfx} onChange={(translateSfx) => update({ translateSfx })} label={tr('Переводить звуковые эффекты')} />
               <select className="ait-select" value={s.sfxStyle} onChange={(e) => update({ sfxStyle: e.target.value as AppSettings['sfxStyle'] })}>
-                <option value="translated">Перевод</option>
-                <option value="original">Оставить оригинал</option>
-                <option value="small">Мелкий</option>
-                <option value="large">Крупный</option>
-                <option value="artistic">Художественный</option>
+                <option value="translated">{tr('Перевод')}</option>
+                <option value="original">{tr('Оставить оригинал')}</option>
+                <option value="small">{tr('Мелкий')}</option>
+                <option value="large">{tr('Крупный')}</option>
+                <option value="artistic">{tr('Художественный')}</option>
               </select>
             </div>
           </Field>
@@ -306,55 +309,56 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
       </div>
 
       <div className="ait-panel">
-        <h2>Где обрабатывать</h2>
+        <h2>{tr('Где обрабатывать')}</h2>
         <Segmented
-          label="Режим обработки"
+          label={tr('Режим обработки')}
           value={s.pipeline}
           onChange={(pipeline) => update({ pipeline })}
           options={[
-            { value: 'standalone', label: 'Здесь (через модель)' },
-            { value: 'engine', label: 'Локальный движок' },
+            { value: 'standalone', label: tr('Здесь (через модель)') },
+            { value: 'engine', label: tr('Локальный движок') },
           ]}
         />
         <p className="ait-hint">
           {s.pipeline === 'standalone'
-            ? 'Изображение читает vision-модель, очистка и вёрстка выполняются прямо здесь. Работает без установки движка, в том числе на телефоне.'
-            : 'Поиск текста, OCR и очистку делает движок на ПК (GPU). Телефон может подключиться к нему по Wi-Fi.'}
+            ? tr('Изображение читает vision-модель, очистка и вёрстка выполняются прямо здесь. Работает без установки движка, в том числе на телефоне.')
+            : tr('Поиск текста, OCR и очистку делает движок на ПК (GPU). Телефон может подключиться к нему по Wi-Fi.')}
         </p>
         {s.pipeline === 'engine' ? (
           <div className="ait-grid2" style={{ marginTop: 12 }}>
-            <Field label="Адрес движка" hint="На ПК: http://127.0.0.1:8765. С телефона: LAN-адрес из окна движка.">
+            <Field label={tr('Адрес движка')} hint={tr('На ПК: http://127.0.0.1:8765. С телефона: LAN-адрес из окна движка.')}>
               <input className="ait-input" value={s.engine.url} onChange={(e) => update({ engine: { ...s.engine, url: e.target.value.trim() } })} />
             </Field>
-            <Field label="Код сопряжения" hint="Показывается в окне движка при запуске">
+            <Field label={tr('Код сопряжения')} hint={tr('Показывается в окне движка при запуске')}>
               <input className="ait-input" value={s.engine.token} onChange={(e) => update({ engine: { ...s.engine, token: e.target.value.trim() } })} />
             </Field>
-            <Field label="Поиск текста">
+            <Field label={tr('Поиск текста')}>
               <select className="ait-select" value={s.engine.options.detector} onChange={(e) => update({ engine: { ...s.engine, options: { ...s.engine.options, detector: e.target.value as AppSettings['engine']['options']['detector'] } } })}>
-                <option value="auto">Авто (баблы, иначе vision)</option>
-                <option value="classic">Только баблы (без модели)</option>
-                <option value="vision">Vision-модель</option>
+                <option value="auto">{tr('Авто (баблы, иначе vision)')}</option>
+                <option value="classic">{tr('Только баблы (без модели)')}</option>
+                <option value="vision">{tr('Vision-модель')}</option>
               </select>
             </Field>
-            <Field label="Распознавание (OCR)">
+            <Field label={tr('Распознавание (OCR)')}>
               <select className="ait-select" value={s.engine.options.ocr} onChange={(e) => update({ engine: { ...s.engine, options: { ...s.engine.options, ocr: e.target.value as AppSettings['engine']['options']['ocr'] } } })}>
-                <option value="auto">Авто</option>
-                <option value="manga-ocr">manga-ocr (японский)</option>
-                <option value="paddle">PaddleOCR (корейский, китайский)</option>
-                <option value="vision">Vision-модель</option>
+                <option value="auto">{tr('Авто')}</option>
+                <option value="manga-ocr">{tr('manga-ocr (японский)')}</option>
+                <option value="paddle">{tr('PaddleOCR (корейский, китайский)')}</option>
+                <option value="vision">{tr('Vision-модель')}</option>
               </select>
             </Field>
-            <Field label="Очистка">
+            <Field label={tr('Очистка')}>
               <select className="ait-select" value={s.engine.options.inpainter} onChange={(e) => update({ engine: { ...s.engine, options: { ...s.engine.options, inpainter: e.target.value as AppSettings['engine']['options']['inpainter'] } } })}>
-                <option value="auto">Авто</option>
-                <option value="fill">Заливка цветом бабла</option>
+                <option value="auto">{tr('Авто')}</option>
+                <option value="fill">{tr('Заливка цветом бабла')}</option>
                 <option value="telea">OpenCV</option>
-                <option value="lama">LaMa (нужна модель)</option>
+                <option value="lama">{tr('LaMa (нужна модель)')}</option>
               </select>
             </Field>
             <div style={{ alignSelf: 'end' }}>
               <button className="ait-btn" onClick={() => void engineTest.run()} disabled={engineTest.busy}>
-                Проверить движок
+                
+                {tr('Проверить движок')}
               </button>
             </div>
           </div>
@@ -363,41 +367,41 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
       </div>
 
       <div className="ait-panel">
-        <h2>Модели</h2>
+        <h2>{tr('Модели')}</h2>
         <div className="ait-grid2">
-          <Field label="Читает изображение" hint="Нужна модель с поддержкой изображений">
+          <Field label={tr('Читает изображение')} hint={tr('Нужна модель с поддержкой изображений')}>
             <select className="ait-select" value={s.visionProviderId ?? ''} onChange={(e) => update({ visionProviderId: e.target.value || null })}>
-              <option value="">— не выбрано —</option>
-              {visionCandidates.map((p) => <option key={p.id} value={p.id}>{p.label} · {p.model}</option>)}
+              <option value="">{tr('— не выбрано —')}</option>
+              {visionCandidates.map((p) => <option key={p.id} value={p.id}>{tr(p.label)} · {p.model}</option>)}
             </select>
           </Field>
-          <Field label="Переводит текст" hint="Пусто — переводит та же модель за один запрос">
+          <Field label={tr('Переводит текст')} hint={tr('Пусто — переводит та же модель за один запрос')}>
             <select className="ait-select" value={s.translationProviderId ?? ''} onChange={(e) => update({ translationProviderId: e.target.value || null })}>
-              <option value="">Та же модель</option>
-              {s.providers.map((p) => <option key={p.id} value={p.id}>{p.label} · {p.model}</option>)}
+              <option value="">{tr('Та же модель')}</option>
+              {s.providers.map((p) => <option key={p.id} value={p.id}>{tr(p.label)} · {p.model}</option>)}
             </select>
           </Field>
-          <Field label="Приватность">
+          <Field label={tr('Приватность')}>
             <select className="ait-select" value={s.privacy} onChange={(e) => update({ privacy: e.target.value as AppSettings['privacy'] })}>
-              <option value="local">Только локально — ничего не уходит наружу</option>
-              <option value="hybrid">Гибрид — наружу уходит только текст</option>
-              <option value="cloud">Облако — изображения могут уходить провайдеру</option>
+              <option value="local">{tr('Только локально — ничего не уходит наружу')}</option>
+              <option value="hybrid">{tr('Гибрид — наружу уходит только текст')}</option>
+              <option value="cloud">{tr('Облако — изображения могут уходить провайдеру')}</option>
             </select>
           </Field>
-          <Field label="Параллельных страниц">
+          <Field label={tr('Параллельных страниц')}>
             <input className="ait-input" type="number" min={1} max={8} value={s.concurrency} onChange={(e) => update({ concurrency: Math.max(1, Math.min(8, Number(e.target.value) || 1)) })} />
           </Field>
         </div>
       </div>
 
-      <FoldPanel title="Локальные серверы" summary={localProviders.map((p) => p.label).join(', ') || 'нет'} testId="local-servers">
+      <FoldPanel title={tr('Локальные серверы')} summary={localProviders.map((p) => tr(p.label)).join(', ') || tr('нет')} testId="local-servers">
         {localProviders.map((p) => (
           <ProviderEditor key={p.id} cfg={p} onChange={setProvider} onRemove={() => removeProvider(p.id)} onUse={() => pickProvider(p)} inUse={p.vision ? s.visionProviderId === p.id && !s.translationProviderId : s.translationProviderId === p.id} />
         ))}
         {addRow(PROVIDER_PRESETS.filter((p) => p.local))}
         {guideFor(PROVIDER_PRESETS.filter((p) => p.local))}
       </FoldPanel>
-      <FoldPanel title="Облачные модели" summary={cloudProviders.length ? cloudProviders.map((p) => p.label).join(', ') : 'не подключены — Claude, OpenAI, Gemini, OpenRouter…'} testId="cloud-providers">
+      <FoldPanel title={tr('Облачные модели')} summary={cloudProviders.length ? cloudProviders.map((p) => tr(p.label)).join(', ') : tr('не подключены — Claude, OpenAI, Gemini, OpenRouter…')} testId="cloud-providers">
         {cloudProviders.map((p) => (
           <ProviderEditor key={p.id} cfg={p} onChange={setProvider} onRemove={() => removeProvider(p.id)} onUse={() => pickProvider(p)} inUse={p.vision ? s.visionProviderId === p.id && !s.translationProviderId : s.translationProviderId === p.id} />
         ))}
@@ -406,38 +410,39 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
       </FoldPanel>
 
       <div className="ait-panel">
-        <h2>Профили перевода</h2>
+        <h2>{tr('Профили перевода')}</h2>
         <div className="ait-row" style={{ marginBottom: 12 }}>
-          <Field label="Профиль">
+          <Field label={tr('Профиль')}>
             <select className="ait-select" value={profile.id} onChange={(e) => setProfileId(e.target.value)}>
-              {s.profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {s.profiles.map((p) => <option key={p.id} value={p.id}>{tr(p.name)}</option>)}
             </select>
           </Field>
           <div style={{ flex: '0 0 auto', display: 'flex', gap: 6 }}>
             <button className="ait-btn" onClick={() => update({ activeProfileId: profile.id })} disabled={s.activeProfileId === profile.id}>
-              {s.activeProfileId === profile.id ? 'Используется по умолчанию' : 'Сделать основным'}
+              {s.activeProfileId === profile.id ? tr('Используется по умолчанию') : tr('Сделать основным')}
             </button>
             <button
               className="ait-btn"
               onClick={() => {
                 const id = shortId('prof');
-                update({ profiles: [...s.profiles, { ...profile, id, name: `${profile.name} (копия)` }] });
+                update({ profiles: [...s.profiles, { ...profile, id, name: tr('{0} (копия)', tr(profile.name)) }] });
                 setProfileId(id);
               }}
             >
-              Копировать
+              
+              {tr('Копировать')}
             </button>
           </div>
         </div>
         <ProfileEditor p={profile} onChange={(np) => update({ profiles: s.profiles.map((x) => (x.id === np.id ? np : x)) })} />
-        <h3>Профиль для конкретного сайта или серии</h3>
+        <h3>{tr('Профиль для конкретного сайта или серии')}</h3>
         <div className="ait-row">
-          <Field label="Сайт или серия" hint="Например: mangadex.org/title/abc">
+          <Field label={tr('Сайт или серия')} hint={tr('Например: mangadex.org/title/abc')}>
             <input className="ait-input" value={siteKey} onChange={(e) => setSiteKey(e.target.value.trim())} />
           </Field>
           <div style={{ flex: '0 0 auto' }}>
             <button className="ait-btn" disabled={!siteKey} onClick={() => { update({ seriesProfiles: { ...s.seriesProfiles, [siteKey]: profile.id } }); setSiteKey(''); }}>
-              Привязать «{profile.name}»
+              {tr('Привязать «{0}»', tr(profile.name))}
             </button>
           </div>
         </div>
@@ -449,7 +454,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
                   <td>{k}</td>
                   <td>{s.profiles.find((p) => p.id === v)?.name ?? v}</td>
                   <td style={{ width: 1 }}>
-                    <button className="ait-btn small ghost" onClick={() => { const next = { ...s.seriesProfiles }; delete next[k]; update({ seriesProfiles: next }); }}>Убрать</button>
+                    <button className="ait-btn small ghost" onClick={() => { const next = { ...s.seriesProfiles }; delete next[k]; update({ seriesProfiles: next }); }}>{tr('Убрать')}</button>
                   </td>
                 </tr>
               ))}
@@ -459,30 +464,40 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
       </div>
 
       <div className="ait-panel">
-        <h2>Интерфейс и данные</h2>
+        <h2>{tr('Интерфейс и данные')}</h2>
         <div className="ait-grid2">
-          <Field label="Тема">
-            <Segmented label="Тема" value={s.theme} onChange={(theme) => update({ theme })} options={[{ value: 'system', label: 'Как в системе' }, { value: 'light', label: 'Светлая' }, { value: 'dark', label: 'Тёмная' }]} />
+          <Field label={tr('Язык интерфейса')} hint={tr('«Как в системе» — язык браузера (в Windows — язык Windows). Страница перезагрузится.')}>
+            <select className="ait-select" data-testid="ui-lang" value={s.interfaceLang ?? 'auto'} onChange={(e) => update({ interfaceLang: e.target.value })}>
+              <option value="auto">{tr('Как в системе')} ({UI_LANGS.find((l) => l.code === resolveUiLang('auto'))?.native ?? 'English'})</option>
+              {UI_LANGS.map((l) => (
+                <option key={l.code} value={l.code}>
+                  {l.native}
+                </option>
+              ))}
+            </select>
           </Field>
-          <Field label="Режим работы">
-            <Segmented label="Режим" value={s.uiMode} onChange={(uiMode) => update({ uiMode })} options={[{ value: 'reader', label: 'Читатель' }, { value: 'advanced', label: 'Продвинутый' }, { value: 'scanlator', label: 'Сканлейтер' }]} />
+          <Field label={tr('Тема')}>
+            <Segmented label={tr('Тема')} value={s.theme} onChange={(theme) => update({ theme })} options={[{ value: 'system', label: tr('Как в системе') }, { value: 'light', label: tr('Светлая') }, { value: 'dark', label: tr('Тёмная') }]} />
           </Field>
-          <Field label="Хранить кэш, дней">
+          <Field label={tr('Режим работы')}>
+            <Segmented label={tr('Режим')} value={s.uiMode} onChange={(uiMode) => update({ uiMode })} options={[{ value: 'reader', label: tr('Читатель') }, { value: 'advanced', label: tr('Продвинутый') }, { value: 'scanlator', label: tr('Сканлейтер') }]} />
+          </Field>
+          <Field label={tr('Хранить кэш, дней')}>
             <input className="ait-input" type="number" min={1} max={365} value={s.cacheDays} onChange={(e) => update({ cacheDays: Math.max(1, Number(e.target.value) || 14) })} />
           </Field>
-          <Field label="Хранить историю, дней" hint="Старые записи удаляются сами">
+          <Field label={tr('Хранить историю, дней')} hint={tr('Старые записи удаляются сами')}>
             <input className="ait-input" type="number" min={1} max={3650} value={s.historyDays ?? 30} onChange={(e) => update({ historyDays: Math.max(1, Number(e.target.value) || 30) })} />
           </Field>
-          <Field label="Длина страницы в PDF/CBZ/EPUB" hint="Как резать длинную ленту вебтуна при скачивании">
-            <Segmented label="Длина страницы" value={s.exportPageLength ?? 'normal'} onChange={(exportPageLength) => update({ exportPageLength })} options={[{ value: 'normal', label: 'Обычная' }, { value: 'long', label: 'Длинная' }, { value: 'whole', label: 'Без нарезки' }]} />
+          <Field label={tr('Длина страницы в PDF/CBZ/EPUB')} hint={tr('Как резать длинную ленту вебтуна при скачивании')}>
+            <Segmented label={tr('Длина страницы')} value={s.exportPageLength ?? 'normal'} onChange={(exportPageLength) => update({ exportPageLength })} options={[{ value: 'normal', label: tr('Обычная') }, { value: 'long', label: tr('Длинная') }, { value: 'whole', label: tr('Без нарезки') }]} />
           </Field>
-          <Field label="Минимальный размер картинки, px">
+          <Field label={tr('Минимальный размер картинки, px')}>
             <input className="ait-input" type="number" min={50} max={2000} value={s.minImageSize} onChange={(e) => update({ minImageSize: Math.max(50, Number(e.target.value) || 200) })} />
           </Field>
         </div>
         <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
-          <Switch checked={s.saveHistory} onChange={(saveHistory) => update({ saveHistory })} label="Сохранять историю переводов" />
-          <Switch checked={s.debug} onChange={(debug) => update({ debug })} label="Показывать отладку (время этапов, токены, стоимость)" />
+          <Switch checked={s.saveHistory} onChange={(saveHistory) => update({ saveHistory })} label={tr('Сохранять историю переводов')} />
+          <Switch checked={s.debug} onChange={(debug) => update({ debug })} label={tr('Показывать отладку (время этапов, токены, стоимость)')} />
         </div>
         <StorageLine />
         <div style={{ marginTop: 14 }}>

@@ -1,3 +1,5 @@
+import { N_ } from '../i18n';
+
 export type HonorificsPolicy = 'keep' | 'adapt' | 'drop';
 export type NamePolicy = 'transliterate' | 'keep-original' | 'adapt';
 export type SfxPolicy = 'translate' | 'keep';
@@ -18,7 +20,7 @@ export interface PromptProfile {
 export const DEFAULT_PROFILES: PromptProfile[] = [
   {
     id: 'natural',
-    name: 'Естественный перевод',
+    name: N_('Естественный перевод'),
     customPrompt: 'Переводи максимально естественно, как в профессиональном сканлейте. Короткие фразы для баблов.',
     honorifics: 'adapt',
     names: 'transliterate',
@@ -28,7 +30,7 @@ export const DEFAULT_PROFILES: PromptProfile[] = [
   },
   {
     id: 'honorifics',
-    name: 'С японскими honorifics',
+    name: N_('С японскими honorifics'),
     customPrompt: 'Сохраняй японские honorifics (-сан, -кун, -сэмпай). Не переводи имена собственные, только транслитерируй.',
     honorifics: 'keep',
     names: 'transliterate',
@@ -38,7 +40,7 @@ export const DEFAULT_PROFILES: PromptProfile[] = [
   },
   {
     id: 'adapted',
-    name: 'Полная адаптация',
+    name: N_('Полная адаптация'),
     customPrompt: 'Полностью адаптируй текст для русскоязычного читателя, включая обращения и шутки.',
     honorifics: 'drop',
     names: 'adapt',

@@ -2,6 +2,7 @@ import type { ProviderConfig } from './types';
 import { AnthropicProvider } from './anthropic';
 import { OpenAICompatibleProvider } from './openai';
 import type { FetchLike, LlmProvider } from './types';
+import { N_ } from '../i18n';
 
 export interface ProviderPreset {
   preset: string;
@@ -32,55 +33,55 @@ export interface ProviderGuide {
   note?: string;
 }
 
-const FINISH = 'Вставьте ключ в поле «Ключ API» → «Сохранить» → «Проверить подключение». Затем нажмите «Использовать для перевода» (или выберите модель в блоке «Модели»).';
+const FINISH = N_('Вставьте ключ в поле «Ключ API» → «Сохранить» → «Проверить подключение». Затем нажмите «Использовать для перевода» (или выберите модель в блоке «Модели»).');
 
 const GUIDES: Record<string, ProviderGuide> = {
   lmstudio: {
     keyUrl: 'https://lmstudio.ai/download',
-    steps: ['Установите LM Studio и скачайте в нём модель, которая понимает картинки (значок «Vision»), например Qwen3.5 VL.', 'Вкладка Developer → Start Server; в настройках сервера включите «Enable CORS».', 'Ключ не нужен. Нажмите «Проверить подключение» и выберите модель кнопкой ⟳.'],
-    cost: 'Бесплатно, всё работает на вашем компьютере.',
+    steps: [N_('Установите LM Studio и скачайте в нём модель, которая понимает картинки (значок «Vision»), например Qwen3.5 VL.'), N_('Вкладка Developer → Start Server; в настройках сервера включите «Enable CORS».'), N_('Ключ не нужен. Нажмите «Проверить подключение» и выберите модель кнопкой ⟳.')],
+    cost: N_('Бесплатно, всё работает на вашем компьютере.'),
   },
   ollama: {
     keyUrl: 'https://ollama.com/download',
-    steps: ['Установите Ollama и запустите её.', 'Выше, в «Локальные модели», нажмите «Скачать» у модели, подобранной под вашу видеокарту.', 'Ключ не нужен.'],
-    cost: 'Бесплатно, всё работает на вашем компьютере.',
+    steps: [N_('Установите Ollama и запустите её.'), N_('Выше, в «Локальные модели», нажмите «Скачать» у модели, подобранной под вашу видеокарту.'), N_('Ключ не нужен.')],
+    cost: N_('Бесплатно, всё работает на вашем компьютере.'),
   },
   anthropic: {
     keyUrl: 'https://platform.claude.com/settings/keys',
-    steps: ['Зарегистрируйтесь в Claude Console (platform.claude.com) и пополните баланс в разделе Billing.', 'Settings → API keys → Create Key. Ключ начинается с «sk-ant-»; он показывается один раз — скопируйте его сразу.', FINISH],
-    models: 'claude-haiku-4-5 — быстро и недорого; claude-sonnet-5-5 — лучше качество. Обе читают картинки.',
-    cost: 'Платно, по предоплате; цена за страницу — доли цента.',
-    note: 'Сервис доступен не во всех странах; нужна банковская карта, которую он принимает.',
+    steps: [N_('Зарегистрируйтесь в Claude Console (platform.claude.com) и пополните баланс в разделе Billing.'), N_('Settings → API keys → Create Key. Ключ начинается с «sk-ant-»; он показывается один раз — скопируйте его сразу.'), FINISH],
+    models: N_('claude-haiku-4-5 — быстро и недорого; claude-sonnet-5-5 — лучше качество. Обе читают картинки.'),
+    cost: N_('Платно, по предоплате; цена за страницу — доли цента.'),
+    note: N_('Сервис доступен не во всех странах; нужна банковская карта, которую он принимает.'),
   },
   openai: {
     keyUrl: 'https://platform.openai.com/api-keys',
-    steps: ['Войдите на platform.openai.com и пополните баланс (Settings → Billing). Подписка ChatGPT Plus для API не подходит.', 'API keys → Create new secret key. Ключ начинается с «sk-»; скопируйте его сразу.', FINISH],
-    models: 'Нажмите ⟳ и выберите модель, которая понимает картинки; «mini» — дешевле и быстрее.',
-    cost: 'Платно, по предоплате.',
-    note: 'Сервис доступен не во всех странах.',
+    steps: [N_('Войдите на platform.openai.com и пополните баланс (Settings → Billing). Подписка ChatGPT Plus для API не подходит.'), N_('API keys → Create new secret key. Ключ начинается с «sk-»; скопируйте его сразу.'), FINISH],
+    models: N_('Нажмите ⟳ и выберите модель, которая понимает картинки; «mini» — дешевле и быстрее.'),
+    cost: N_('Платно, по предоплате.'),
+    note: N_('Сервис доступен не во всех странах.'),
   },
   gemini: {
     keyUrl: 'https://aistudio.google.com/apikey',
-    steps: ['Откройте Google AI Studio (aistudio.google.com) и войдите в аккаунт Google.', 'Get API key → Create API key. Ключ начинается с «AIza».', FINISH],
-    models: 'Модели «flash» — быстрые и хорошо читают картинки; «pro» — точнее, но медленнее.',
-    cost: 'Есть бесплатный лимит запросов в день — хватит, чтобы попробовать; дальше — оплата в Google Cloud.',
-    note: 'Сервис доступен не во всех странах; бесплатные запросы Google может использовать для улучшения своих моделей.',
+    steps: [N_('Откройте Google AI Studio (aistudio.google.com) и войдите в аккаунт Google.'), N_('Get API key → Create API key. Ключ начинается с «AIza».'), FINISH],
+    models: N_('Модели «flash» — быстрые и хорошо читают картинки; «pro» — точнее, но медленнее.'),
+    cost: N_('Есть бесплатный лимит запросов в день — хватит, чтобы попробовать; дальше — оплата в Google Cloud.'),
+    note: N_('Сервис доступен не во всех странах; бесплатные запросы Google может использовать для улучшения своих моделей.'),
   },
   deepseek: {
     keyUrl: 'https://platform.deepseek.com/api_keys',
-    steps: ['Зарегистрируйтесь на platform.deepseek.com и пополните баланс (Top up).', 'API keys → Create new API key; скопируйте ключ сразу.', 'Вставьте ключ → «Сохранить» → «Проверить подключение».', 'DeepSeek не видит картинки: в блоке «Модели» оставьте в «Читает изображение» локальную или другую модель, а DeepSeek выберите в «Переводит текст».'],
-    models: 'deepseek-chat — для перевода.',
-    cost: 'Платно, один из самых дешёвых вариантов.',
+    steps: [N_('Зарегистрируйтесь на platform.deepseek.com и пополните баланс (Top up).'), N_('API keys → Create new API key; скопируйте ключ сразу.'), N_('Вставьте ключ → «Сохранить» → «Проверить подключение».'), N_('DeepSeek не видит картинки: в блоке «Модели» оставьте в «Читает изображение» локальную или другую модель, а DeepSeek выберите в «Переводит текст».')],
+    models: N_('deepseek-chat — для перевода.'),
+    cost: N_('Платно, один из самых дешёвых вариантов.'),
   },
   openrouter: {
     keyUrl: 'https://openrouter.ai/settings/keys',
-    steps: ['Войдите на openrouter.ai (Google, GitHub или почта).', 'Settings → Keys → Create Key; ключ начинается с «sk-or-».', 'Пополните Credits (карта или криптовалюта) — либо берите бесплатные модели с пометкой «:free» (с лимитами).', FINISH],
-    models: 'Один ключ — сотни моделей. Нажмите ⟳ и выберите модель с поддержкой изображений, например google/gemini-…-flash.',
-    cost: 'Цены как у самих провайдеров плюс небольшая комиссия; есть бесплатные модели.',
-    note: 'Удобный вариант, если напрямую сервисы недоступны или не принимают вашу карту.',
+    steps: [N_('Войдите на openrouter.ai (Google, GitHub или почта).'), N_('Settings → Keys → Create Key; ключ начинается с «sk-or-».'), N_('Пополните Credits (карта или криптовалюта) — либо берите бесплатные модели с пометкой «:free» (с лимитами).'), FINISH],
+    models: N_('Один ключ — сотни моделей. Нажмите ⟳ и выберите модель с поддержкой изображений, например google/gemini-…-flash.'),
+    cost: N_('Цены как у самих провайдеров плюс небольшая комиссия; есть бесплатные модели.'),
+    note: N_('Удобный вариант, если напрямую сервисы недоступны или не принимают вашу карту.'),
   },
   custom: {
-    steps: ['Укажите адрес сервера, который понимает /v1/chat/completions (vLLM, llama.cpp server, text-generation-webui и т. п.), например http://192.168.1.10:8000/v1.', 'Ключ — только если сервер его требует.', 'Нажмите ⟳, чтобы получить список моделей, и включите «Модель понимает изображения», если это так.'],
+    steps: [N_('Укажите адрес сервера, который понимает /v1/chat/completions (vLLM, llama.cpp server, text-generation-webui и т. п.), например http://192.168.1.10:8000/v1.'), N_('Ключ — только если сервер его требует.'), N_('Нажмите ⟳, чтобы получить список моделей, и включите «Модель понимает изображения», если это так.')],
   },
 };
 
@@ -92,7 +93,7 @@ const GUIDES: Record<string, ProviderGuide> = {
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     preset: 'lmstudio',
-    label: 'LM Studio (локально)',
+    label: N_('LM Studio (локально)'),
     kind: 'openai-compatible',
     baseUrl: 'http://localhost:1234/v1',
     model: 'qwen3-14b',
@@ -100,11 +101,11 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     jsonMode: 'none',
     needsKey: false,
     local: true,
-    hint: 'Запустите сервер в LM Studio (Developer → Start Server) и включите CORS.',
+    hint: N_('Запустите сервер в LM Studio (Developer → Start Server) и включите CORS.'),
   },
   {
     preset: 'ollama',
-    label: 'Ollama (локально)',
+    label: N_('Ollama (локально)'),
     kind: 'openai-compatible',
     baseUrl: 'http://localhost:11434/v1',
     model: 'qwen3.5:9b-q4_K_M',
@@ -112,7 +113,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     jsonMode: 'json_object',
     needsKey: false,
     local: true,
-    hint: 'Модель для чтения картинок можно скачать прямо из настроек — подберём её под вашу видеокарту.',
+    hint: N_('Модель для чтения картинок можно скачать прямо из настроек — подберём её под вашу видеокарту.'),
   },
   {
     preset: 'anthropic',
@@ -126,7 +127,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     local: false,
     priceInput: 1,
     priceOutput: 5,
-    hint: 'Claude: читает картинки и хорошо переводит.',
+    hint: N_('Claude: читает картинки и хорошо переводит.'),
   },
   {
     preset: 'openai',
@@ -138,7 +139,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     jsonMode: 'json_object',
     needsKey: true,
     local: false,
-    hint: 'OpenAI GPT: читает картинки.',
+    hint: N_('OpenAI GPT: читает картинки.'),
   },
   {
     preset: 'gemini',
@@ -150,7 +151,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     jsonMode: 'json_object',
     needsKey: true,
     local: false,
-    hint: 'Google Gemini: читает картинки, есть бесплатный лимит.',
+    hint: N_('Google Gemini: читает картинки, есть бесплатный лимит.'),
   },
   {
     preset: 'deepseek',
@@ -162,7 +163,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     jsonMode: 'json_object',
     needsKey: true,
     local: false,
-    hint: 'Только текст: для распознавания нужен vision-провайдер или движок.',
+    hint: N_('Только текст: для распознавания нужен vision-провайдер или движок.'),
   },
   {
     preset: 'openrouter',
@@ -174,11 +175,11 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     jsonMode: 'json_object',
     needsKey: true,
     local: false,
-    hint: 'Сотни моделей одним ключом, есть бесплатные.',
+    hint: N_('Сотни моделей одним ключом, есть бесплатные.'),
   },
   {
     preset: 'custom',
-    label: 'Свой endpoint (OpenAI-совместимый)',
+    label: N_('Свой endpoint (OpenAI-совместимый)'),
     kind: 'openai-compatible',
     baseUrl: 'http://localhost:8000/v1',
     model: 'model',
@@ -186,7 +187,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     jsonMode: 'none',
     needsKey: false,
     local: true,
-    hint: 'Любой сервер с /v1/chat/completions: vLLM, llama.cpp server, text-generation-webui.',
+    hint: N_('Любой сервер с /v1/chat/completions: vLLM, llama.cpp server, text-generation-webui.'),
   },
 ];
 

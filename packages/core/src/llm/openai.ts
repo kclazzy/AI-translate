@@ -3,6 +3,7 @@ import { timeoutSignal } from '../util/retry';
 import { httpError, joinUrl, safeFetch } from './http';
 import { isLocalUrl } from './privacy';
 import type { CompletionRequest, CompletionResult, ContentPart, FetchLike, LlmProvider, ProviderConfig } from './types';
+import { tr } from '../i18n';
 
 /**
  * One provider for every OpenAI-compatible Chat Completions endpoint:
@@ -103,7 +104,7 @@ export class OpenAICompatibleProvider implements LlmProvider {
       if (!res.ok) throw await httpError(res, this.config.label, this.config.baseUrl, this.config.model);
       const json = (await res.json()) as { message?: { content?: string }; prompt_eval_count?: number; eval_count?: number; eval_duration?: number; model?: string };
       const text = stripThinking(json.message?.content ?? '');
-      if (!text) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'Модель вернула пустой ответ' });
+      if (!text) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: tr('Модель вернула пустой ответ') });
       const tps = json.eval_count && json.eval_duration ? json.eval_count / (json.eval_duration / 1e9) : undefined;
       return { text, inputTokens: json.prompt_eval_count ?? 0, outputTokens: json.eval_count ?? 0, model: json.model ?? this.config.model, tokensPerSecond: tps };
     } finally {

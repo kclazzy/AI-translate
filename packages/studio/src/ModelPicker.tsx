@@ -30,6 +30,7 @@ import {
   type UpdateInfo,
 } from '@ait/core';
 import { FoldPanel } from './ui';
+import { tr, uiLocale } from '@ait/core/i18n';
 
 /**
  * Model selector with a refresh button: asks LM Studio / Ollama / any OpenAI-compatible
@@ -46,7 +47,7 @@ export function ModelPicker({ cfg, getKey, onPick, compact, hasKey }: { cfg: Pro
     try {
       const list = await discoverModels({ ...cfg, apiKey: cfg.apiKey ?? (await getKey()) });
       setModels(list);
-      if (!list.length) setError('Сервер работает, но моделей нет. Загрузите модель в LM Studio или выполните ollama pull.');
+      if (!list.length) setError(tr('Сервер работает, но моделей нет. Загрузите модель в LM Studio или выполните ollama pull.'));
     } catch (e) {
       setModels(null);
       setError(`${errorMessage(e)} ${(e as { detail?: string }).detail ?? ''}`.trim());
@@ -66,14 +67,14 @@ export function ModelPicker({ cfg, getKey, onPick, compact, hasKey }: { cfg: Pro
   const current = models?.find((m) => m.id === cfg.model);
   const options = models ? [...models] : [];
   if (cfg.model && !current) options.unshift({ id: cfg.model });
-  const label = (m: DiscoveredModel) => `${m.vision ? '👁 ' : m.vision === false ? '✎ ' : ''}${m.id}${m.loaded ? ' • загружена' : ''}`;
+  const label = (m: DiscoveredModel) => `${m.vision ? '👁 ' : m.vision === false ? '✎ ' : ''}${m.id}${m.loaded ? tr(' • загружена') : ''}`;
 
   return (
     <div style={{ display: 'grid', gap: 4 }}>
       <div style={{ display: 'flex', gap: 6 }}>
         <select
           className="ait-select"
-          aria-label="Модель"
+          aria-label={tr('Модель')}
           value={cfg.model}
           onChange={(e) => {
             const m = options.find((x) => x.id === e.target.value);
@@ -86,15 +87,16 @@ export function ModelPicker({ cfg, getKey, onPick, compact, hasKey }: { cfg: Pro
             </option>
           ))}
         </select>
-        <button type="button" className="ait-btn" style={{ flex: 'none', minWidth: 40, padding: '0 10px' }} onClick={() => void refresh()} disabled={busy} title="Обновить список моделей" aria-label="Обновить список моделей">
+        <button type="button" className="ait-btn" style={{ flex: 'none', minWidth: 40, padding: '0 10px' }} onClick={() => void refresh()} disabled={busy} title={tr('Обновить список моделей')} aria-label={tr('Обновить список моделей')}>
           <span style={{ display: 'inline-block', animation: busy ? 'ait-spin 0.9s linear infinite' : undefined }}>⟳</span>
         </button>
       </div>
       {error ? <small style={{ color: 'var(--err)' }}>{error}</small> : null}
       {!compact && models?.length ? (
         <small className="ait-muted">
-          👁 читает изображения, ✎ только текст.{current?.vision === false ? ' Эта модель не читает картинки: выберите её для перевода текста, а для чтения — модель с 👁.' : ''}
-          {isThinkingModel(cfg.model) ? ' Модель с размышлениями: режим размышлений отключается автоматически.' : ''}
+          
+          {tr('👁 читает изображения, ✎ только текст.')}{current?.vision === false ? tr(' Эта модель не читает картинки: выберите её для перевода текста, а для чтения — модель с 👁.') : ''}
+          {isThinkingModel(cfg.model) ? tr(' Модель с размышлениями: режим размышлений отключается автоматически.') : ''}
         </small>
       ) : null}
     </div>
@@ -104,15 +106,15 @@ export function ModelPicker({ cfg, getKey, onPick, compact, hasKey }: { cfg: Pro
 type KeyGetter = (providerId: string) => Promise<string | undefined>;
 
 function gb(n?: number): string {
-  return n ? `${(n / 1e9).toFixed(1)} ГБ` : '';
+  return n ? tr('{0} ГБ', (n / 1e9).toFixed(1)) : '';
 }
 
 function ago(iso: string): string {
   const min = Math.round((Date.now() - Date.parse(iso)) / 60_000);
-  if (min < 1) return 'только что';
-  if (min < 60) return `${min} мин назад`;
-  if (min < 60 * 24) return `${Math.round(min / 60)} ч назад`;
-  return new Date(iso).toLocaleDateString();
+  if (min < 1) return tr('только что');
+  if (min < 60) return tr('{0} мин назад', min);
+  if (min < 60 * 24) return tr('{0} ч назад', Math.round(min / 60));
+  return new Date(iso).toLocaleDateString(uiLocale());
 }
 
 /** Video card name from WebGL, and its memory if we know the model. */
@@ -159,10 +161,10 @@ function useModelCheck(settings: AppSettings, update: (p: Partial<AppSettings>) 
 }
 
 const LEVEL: Record<ModelCheck['level'] | 'none', { dot: string; label: string }> = {
-  ok: { dot: 'var(--ok)', label: 'Работает' },
-  partial: { dot: '#d4a017', label: 'Читает с ошибками' },
-  fail: { dot: 'var(--err)', label: 'Не работает' },
-  none: { dot: 'var(--ink-3, #999)', label: 'Не проверена' },
+  ok: { dot: 'var(--ok)', label: tr('Работает') },
+  partial: { dot: '#d4a017', label: tr('Читает с ошибками') },
+  fail: { dot: 'var(--err)', label: tr('Не работает') },
+  none: { dot: 'var(--ink-3, #999)', label: tr('Не проверена') },
 };
 
 function CheckResult({ check }: { check?: ModelCheck }) {
@@ -170,7 +172,7 @@ function CheckResult({ check }: { check?: ModelCheck }) {
   return (
     <small className="ait-muted" data-testid="model-check-result">
       {check.message}
-      {check.read ? ` Прочитала: «${check.read}»${check.translation ? ` → «${check.translation}»` : ''}.` : ''} Проверено {ago(check.at)}.
+      {check.read ? tr(' Прочитала: «{0}»{1}.', check.read, check.translation ? ` → «${check.translation}»` : '') : ''} {' '}{tr('Проверено')}{' '}{ago(check.at)}.
     </small>
   );
 }
@@ -193,8 +195,8 @@ export function ModelCheckCard({ settings, update, getKey, compact, onOpenSettin
 
   if (settings.pipeline !== 'standalone') return null;
   if (!vision) {
-    const msg = 'Не выбрана модель, которая читает картинки.';
-    return compact ? <div className="ait-notice">{msg} {onOpenSettings ? <button className="pp-link" onClick={() => onOpenSettings()}>Выбрать</button> : null}</div> : <div className="ait-panel ait-notice">{msg}</div>;
+    const msg = tr('Не выбрана модель, которая читает картинки.');
+    return compact ? <div className="ait-notice">{msg} {onOpenSettings ? <button className="pp-link" onClick={() => onOpenSettings()}>{tr('Выбрать')}</button> : null}</div> : <div className="ait-panel ait-notice">{msg}</div>;
   }
   const check = settings.modelChecks?.[modelCheckKey(vision)];
   const busy = running === modelCheckKey(vision);
@@ -207,13 +209,13 @@ export function ModelCheckCard({ settings, update, getKey, compact, onOpenSettin
       <i style={{ width: 9, height: 9, borderRadius: 9, background: busy ? 'var(--magenta)' : missing || offline ? 'var(--err)' : LEVEL[level!].dot, display: 'inline-block' }} />
       <b>{vision.model}</b>
       <span className="ait-muted">
-        {busy ? 'проверяю… (первый запуск модели может занять минуту)' : offline ? 'Ollama не запущена' : missing ? 'модель не скачана' : LEVEL[level!].label}
+        {busy ? tr('проверяю… (первый запуск модели может занять минуту)') : offline ? tr('Ollama не запущена') : missing ? tr('модель не скачана') : LEVEL[level!].label}
       </span>
     </span>
   );
   const button = (
     <button type="button" className={compact ? 'pp-link' : 'ait-btn small'} disabled={busy || missing || offline} onClick={() => void run(vision)}>
-      {busy ? 'Проверяю…' : check ? 'Проверить снова' : 'Проверить модель'}
+      {busy ? tr('Проверяю…') : check ? tr('Проверить снова') : tr('Проверить модель')}
     </button>
   );
 
@@ -222,7 +224,7 @@ export function ModelCheckCard({ settings, update, getKey, compact, onOpenSettin
       <div className={level === 'fail' || missing || offline ? 'ait-error' : 'ait-notice'} style={{ display: 'grid', gap: 4 }}>
         <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
           {status}
-          {missing || offline ? (onOpenSettings ? <button className="pp-link" onClick={() => onOpenSettings(missing)}>{missing ? 'Скачать' : 'Подробнее'}</button> : null) : button}
+          {missing || offline ? (onOpenSettings ? <button className="pp-link" onClick={() => onOpenSettings(missing)}>{missing ? tr('Скачать') : tr('Подробнее')}</button> : null) : button}
         </span>
         {level === 'fail' || level === 'partial' ? <small>{check?.message}</small> : null}
       </div>
@@ -230,14 +232,14 @@ export function ModelCheckCard({ settings, update, getKey, compact, onOpenSettin
   }
   return (
     <div className="ait-panel" style={{ display: 'grid', gap: 8 }}>
-      <h2 style={{ margin: 0 }}>Модель для чтения картинок</h2>
+      <h2 style={{ margin: 0 }}>{tr('Модель для чтения картинок')}</h2>
       <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         {status}
         {button}
       </span>
-      <small className="ait-muted">{vision.label}</small>
+      <small className="ait-muted">{tr(vision.label)}</small>
       {busy ? null : <CheckResult check={check} />}
-      {!check && !busy ? <small className="ait-muted">Проверка отправит модели маленькую картинку с японским текстом и покажет, что она прочитала и сколько времени это заняло.</small> : null}
+      {!check && !busy ? <small className="ait-muted">{tr('Проверка отправит модели маленькую картинку с японским текстом и покажет, что она прочитала и сколько времени это заняло.')}</small> : null}
     </div>
   );
 }
@@ -303,7 +305,7 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
     async (model: string) => {
       setError(null);
       abort.current = new AbortController();
-      setPull({ model, status: 'начинаю' });
+      setPull({ model, status: tr('начинаю') });
       try {
         await ollamaPull(cfg.baseUrl, model, (p) => setPull({ model, ...p }), abort.current.signal);
         setPull(null);
@@ -321,7 +323,7 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
 
   const remove = useCallback(
     async (model: string, size?: number) => {
-      if (!confirm(`Удалить модель ${model}${size ? ` (${gb(size)})` : ''} с диска?\nВернуть её можно только повторным скачиванием.`)) return;
+      if (!confirm(tr('Удалить модель {0}{1} с диска?\nВернуть её можно только повторным скачиванием.', model, size ? ` (${gb(size)})` : ''))) return;
       setDeleting(model);
       setError(null);
       try {
@@ -337,7 +339,7 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
         update({ modelChecks: checks });
         await refresh();
       } catch (e) {
-        setError(`Не удалось удалить ${model}: ${(e as { detail?: string }).detail ?? (e as Error).message}`);
+        setError(tr('Не удалось удалить {0}: {1}', model, (e as { detail?: string }).detail ?? (e as Error).message));
       } finally {
         setDeleting(null);
       }
@@ -353,26 +355,26 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
   }, [autoStart, status, download, tier.model, pull]);
 
   const summary = !status
-    ? 'проверяю…'
+    ? tr('проверяю…')
     : status.state === 'offline'
-      ? 'Ollama не запущена'
+      ? tr('Ollama не запущена')
       : status.state === 'forbidden'
-        ? 'Ollama не пускает расширение'
-        : `установлено: ${status.list.length}${current && isOllama(current) ? ` · выбрана ${current.model}` : ''}`;
+        ? tr('Ollama не пускает расширение')
+        : tr('установлено: {0}{1}', status.list.length, current && isOllama(current) ? tr(' · выбрана {0}', current.model) : '');
   const box = (children: ReactNode) => (
-    <FoldPanel title="Локальные модели (Ollama)" summary={summary} defaultOpen={autoStart || !!pull} testId="local-models">
+    <FoldPanel title={tr('Локальные модели (Ollama)')} summary={summary} defaultOpen={autoStart || !!pull} testId="local-models">
       {children}
     </FoldPanel>
   );
 
-  if (!status) return box(<span className="ait-muted">Проверяю Ollama…</span>);
+  if (!status) return box(<span className="ait-muted">{tr('Проверяю Ollama…')}</span>);
   if (status.state === 'offline') {
     return box(
       <>
-        <span>Ollama не запущена или не установлена ({cfg.baseUrl.replace(/\/v1$/, '')}). Она нужна, чтобы переводить на своей видеокарте, без интернета.</span>
+        <span>{tr('Ollama не запущена или не установлена (')}{cfg.baseUrl.replace(/\/v1$/, '')}{tr('). Она нужна, чтобы переводить на своей видеокарте, без интернета.')}</span>
         <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <a className="ait-btn small" href="https://ollama.com/download" target="_blank" rel="noreferrer">Скачать Ollama</a>
-          <button className="ait-btn small" onClick={() => void refresh()}>Проверить снова</button>
+          <a className="ait-btn small" href="https://ollama.com/download" target="_blank" rel="noreferrer">{tr('Скачать Ollama')}</a>
+          <button className="ait-btn small" onClick={() => void refresh()}>{tr('Проверить снова')}</button>
         </span>
       </>,
     );
@@ -380,9 +382,9 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
   if (status.state === 'forbidden') {
     return box(
       <>
-        <span>Ollama запущена, но не пускает расширение. Выполните в командной строке и перезапустите Ollama:</span>
+        <span>{tr('Ollama запущена, но не пускает расширение. Выполните в командной строке и перезапустите Ollama:')}</span>
         <code style={{ userSelect: 'all', wordBreak: 'break-all' }}>setx OLLAMA_ORIGINS "chrome-extension://*,moz-extension://*"</code>
-        <button className="ait-btn small" style={{ justifySelf: 'start' }} onClick={() => void refresh()}>Проверить снова</button>
+        <button className="ait-btn small" style={{ justifySelf: 'start' }} onClick={() => void refresh()}>{tr('Проверить снова')}</button>
       </>,
     );
   }
@@ -394,49 +396,50 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
   return box(
     <>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <label htmlFor="ait-vram">Видеопамять</label>
+        <label htmlFor="ait-vram">{tr('Видеопамять')}</label>
         <select id="ait-vram" className="ait-select" style={{ width: 'auto' }} value={vram ?? ''} onChange={(e) => update({ gpuVramGb: e.target.value ? Number(e.target.value) : undefined })}>
-          {vram === undefined ? <option value="">не определена</option> : null}
+          {vram === undefined ? <option value="">{tr('не определена')}</option> : null}
           {VRAM_CHOICES.map((v) => (
             <option key={v} value={v}>
-              {v === 16 ? '16 ГБ и больше' : `${v} ГБ`}
+              {v === 16 ? tr('16 ГБ и больше') : tr('{0} ГБ', v)}
             </option>
           ))}
         </select>
-        <small className="ait-muted">{gpu.name ? `Определено: ${gpu.name}${gpu.vramGb ? ` (${gpu.vramGb} ГБ)` : ''}` : 'Видеокарту определить не удалось — выберите объём памяти вручную.'}</small>
+        <small className="ait-muted">{gpu.name ? tr('Определено: {0}{1}', gpu.name, gpu.vramGb ? tr(' ({0} ГБ)', gpu.vramGb) : '') : tr('Видеокарту определить не удалось — выберите объём памяти вручную.')}</small>
       </div>
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <label htmlFor="ait-keep">Держать модель в видеопамяти после перевода</label>
+        <label htmlFor="ait-keep">{tr('Держать модель в видеопамяти после перевода')}</label>
         <select id="ait-keep" className="ait-select" style={{ width: 'auto' }} value={settings.gpuKeepAliveMin ?? DEFAULT_KEEP_ALIVE_MIN} onChange={(e) => update({ gpuKeepAliveMin: Number(e.target.value) })}>
-          <option value={0}>не держать — выгружать сразу</option>
-          <option value={1}>1 минуту</option>
-          <option value={5}>5 минут</option>
-          <option value={15}>15 минут</option>
-          <option value={60}>1 час</option>
+          <option value={0}>{tr('не держать — выгружать сразу')}</option>
+          <option value={1}>{tr('1 минуту')}</option>
+          <option value={5}>{tr('5 минут')}</option>
+          <option value={15}>{tr('15 минут')}</option>
+          <option value={60}>{tr('1 час')}</option>
         </select>
-        <small className="ait-muted">Пока модель в памяти, следующая страница начинается сразу; после — память видеокарты освобождается для игр и других программ.</small>
+        <small className="ait-muted">{tr('Пока модель в памяти, следующая страница начинается сразу; после — память видеокарты освобождается для игр и других программ.')}</small>
       </div>
 
       <label className="ait-switch" data-testid="fast-local">
         <input type="checkbox" role="switch" checked={!!settings.fastLocal} onChange={(e) => update({ fastLocal: e.target.checked })} />
         <span>
-          Быстрый режим: картинка для модели поменьше, проверка перевода без дополнительного запроса к модели
-          <small className="ait-muted" style={{ display: 'block' }}>Обычно на треть быстрее; мелкий текст может читаться хуже.</small>
+          
+          {tr('Быстрый режим: картинка для модели поменьше, проверка перевода без дополнительного запроса к модели')}
+          <small className="ait-muted" style={{ display: 'block' }}>{tr('Обычно на треть быстрее; мелкий текст может читаться хуже.')}</small>
         </span>
       </label>
 
       <details data-testid="ollama-tuning">
         <summary style={{ cursor: 'pointer' }}>
-          <b>Ускорить Ollama</b> <span className="ait-muted">— настройки самой Ollama</span>
+          <b>{tr('Ускорить Ollama')}</b> <span className="ait-muted">{tr('— настройки самой Ollama')}</span>
         </summary>
         <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
-          <small>Выполните в командной строке (Win+R → cmd), затем закройте Ollama (трей → Quit) и запустите снова:</small>
+          <small>{tr('Выполните в командной строке (Win+R → cmd), затем закройте Ollama (трей → Quit) и запустите снова:')}</small>
           <code style={{ userSelect: 'all' }}>setx OLLAMA_FLASH_ATTENTION 1</code>
-          <small className="ait-muted">Flash attention: быстрее и меньше памяти на длинные запросы. В новых версиях Ollama включается сама, если видеокарта поддерживает.</small>
+          <small className="ait-muted">{tr('Flash attention: быстрее и меньше памяти на длинные запросы. В новых версиях Ollama включается сама, если видеокарта поддерживает.')}</small>
           <code style={{ userSelect: 'all' }}>setx OLLAMA_KV_CACHE_TYPE q8_0</code>
-          <small className="ait-muted">Сжатый кэш: модель с картинкой занимает меньше видеопамяти и реже вылезает в обычную память. Работает только вместе с flash attention.</small>
-          <small>Главное для скорости — чтобы модель целиком помещалась в видеокарту: если в окне расширения появилось «не помещается в видеопамять», выберите модель на ступень меньше.</small>
+          <small className="ait-muted">{tr('Сжатый кэш: модель с картинкой занимает меньше видеопамяти и реже вылезает в обычную память. Работает только вместе с flash attention.')}</small>
+          <small>{tr('Главное для скорости — чтобы модель целиком помещалась в видеокарту: если в окне расширения появилось «не помещается в видеопамять», выберите модель на ступень меньше.')}</small>
         </div>
       </details>
 
@@ -448,17 +451,18 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
           return (
             <div key={t.model} data-testid={`tier-${t.model}`} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 10px', border: `1px solid ${rec ? 'var(--magenta)' : 'var(--rule)'}`, borderRadius: 6, opacity: tooBig ? 0.55 : 1 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <b>{t.model}</b> {rec ? <span className="ait-badge ok">рекомендуем</span> : null} {isCurrent(t.model) ? <span className="ait-badge ok">✓ выбрана</span> : null}
+                <b>{t.model}</b> {rec ? <span className="ait-badge ok">{tr('рекомендуем')}</span> : null} {isCurrent(t.model) ? <span className="ait-badge ok">{tr('✓ выбрана')}</span> : null}
                 <br />
                 <small className="ait-muted">
-                  {t.vramGb === 16 ? '16+ ГБ' : `от ${t.vramGb} ГБ`} · {t.sizeGb} ГБ · качество: {t.quality} · ~{t.secondsPerPage} с/стр.{tooBig ? ' · не поместится в вашу видеокарту, будет медленно' : ''}
+                  {t.vramGb === 16 ? tr('16+ ГБ') : tr('от {0} ГБ', t.vramGb)} · {t.sizeGb} {' '}{tr('ГБ · качество:')}{' '}{t.quality} · ~{t.secondsPerPage} {' '}{tr('с/стр.')}{tooBig ? tr(' · не поместится в вашу видеокарту, будет медленно') : ''}
                 </small>
               </div>
               {inst ? (
-                isCurrent(t.model) ? null : <button className="ait-btn small" style={{ flex: 'none', width: 'auto' }} onClick={() => use(t.model)}>Использовать</button>
+                isCurrent(t.model) ? null : <button className="ait-btn small" style={{ flex: 'none', width: 'auto' }} onClick={() => use(t.model)}>{tr('Использовать')}</button>
               ) : (
                 <button className={rec ? 'ait-bubble-btn' : 'ait-btn small'} style={{ flex: 'none', width: 'auto', ...(rec ? { fontSize: 14, minHeight: 32, padding: '3px 14px' } : {}) }} disabled={!!pull} onClick={() => void download(t.model)}>
-                  Скачать
+                  
+                  {tr('Скачать')}
                 </button>
               )}
             </div>
@@ -468,24 +472,24 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
 
       {pull ? (
         <div style={{ display: 'grid', gap: 6 }}>
-          <span>Скачиваю {pull.model}…</span>
+          <span>{tr('Скачиваю')}{' '}{pull.model}…</span>
           <div className="ait-progress" role="progressbar" aria-valuenow={pct ?? 0} aria-valuemin={0} aria-valuemax={100}>
             <i style={{ width: `${pct ?? 3}%` }} />
           </div>
           <small className="ait-muted">
             {pull.status}
-            {pull.total ? ` — ${gb(pull.completed)} из ${gb(pull.total)} (${pct}%)` : ''}. Не закрывайте эту вкладку до конца загрузки.
+            {pull.total ? tr(' — {0} из {1} ({2}%)', gb(pull.completed), gb(pull.total), pct) : ''}{tr('. Не закрывайте эту вкладку до конца загрузки.')}
           </small>
-          <button className="ait-btn small" style={{ justifySelf: 'start' }} onClick={() => abort.current?.abort()}>Остановить</button>
+          <button className="ait-btn small" style={{ justifySelf: 'start' }} onClick={() => abort.current?.abort()}>{tr('Остановить')}</button>
         </div>
       ) : null}
 
       <div style={{ display: 'grid', gap: 6 }}>
         <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <b>Установлено ({installed.length})</b>
-          <button className="ait-btn small" onClick={() => void refresh()} title="Обновить список">⟳</button>
+          <b>{tr('Установлено (')}{installed.length})</b>
+          <button className="ait-btn small" onClick={() => void refresh()} title={tr('Обновить список')}>⟳</button>
         </span>
-        {installed.length === 0 ? <small className="ait-muted">Пока ни одной модели. Нажмите «Скачать» у рекомендуемой.</small> : null}
+        {installed.length === 0 ? <small className="ait-muted">{tr('Пока ни одной модели. Нажмите «Скачать» у рекомендуемой.')}</small> : null}
         {installed.map((m) => {
           const check = settings.modelChecks?.[modelCheckKey({ baseUrl: cfg.baseUrl, model: m.name })];
           const key = modelCheckKey({ baseUrl: cfg.baseUrl, model: m.name });
@@ -495,25 +499,25 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
               <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <i style={{ width: 9, height: 9, borderRadius: 9, background: LEVEL[check?.level ?? 'none'].dot, display: 'inline-block' }} title={LEVEL[check?.level ?? 'none'].label} />
                 <b style={{ flex: 1, minWidth: 140 }}>{m.name}</b>
-                <small className="ait-muted">{gb(m.size)}{textOnly ? ' · только текст' : ''}</small>
-                {isCurrent(m.name) ? <span className="ait-badge ok">✓ выбрана</span> : !textOnly ? <button className="ait-btn small" onClick={() => use(m.name)}>Использовать</button> : null}
+                <small className="ait-muted">{gb(m.size)}{textOnly ? tr(' · только текст') : ''}</small>
+                {isCurrent(m.name) ? <span className="ait-badge ok">{tr('✓ выбрана')}</span> : !textOnly ? <button className="ait-btn small" onClick={() => use(m.name)}>{tr('Использовать')}</button> : null}
                 {!textOnly ? (
                   <button className="ait-btn small" disabled={running === key} onClick={() => void run({ ...cfg, model: m.name, vision: true })}>
-                    {running === key ? 'Проверяю…' : 'Проверить'}
+                    {running === key ? tr('Проверяю…') : tr('Проверить')}
                   </button>
                 ) : null}
                 <button className="ait-btn small danger" disabled={deleting === m.name || pull?.model === m.name} onClick={() => void remove(m.name, m.size)}>
-                  {deleting === m.name ? 'Удаляю…' : 'Удалить'}
+                  {deleting === m.name ? tr('Удаляю…') : tr('Удалить')}
                 </button>
               </span>
-              {running === key ? <small className="ait-muted">Проверяю… первый запуск модели может занять минуту.</small> : <CheckResult check={check} />}
+              {running === key ? <small className="ait-muted">{tr('Проверяю… первый запуск модели может занять минуту.')}</small> : <CheckResult check={check} />}
             </div>
           );
         })}
       </div>
       {error ? <small style={{ color: 'var(--err)' }}>{error}</small> : null}
       <ModelsFolder settings={settings} update={update} needGb={tier.sizeGb} onRecheck={() => void refresh()} />
-      <small className="ait-muted">Модели LM Studio удаляются в самой LM Studio (вкладка «My Models»).</small>
+      <small className="ait-muted">{tr('Модели LM Studio удаляются в самой LM Studio (вкладка «My Models»).')}</small>
     </>,
   );
 }
@@ -537,21 +541,22 @@ function ModelsFolder({ settings, update, needGb, onRecheck }: { settings: AppSe
   return (
     <details data-testid="models-folder" open={!!saved && saved !== clean ? true : undefined}>
       <summary style={{ cursor: 'pointer' }}>
-        <b>Где хранить модели</b> <span className="ait-muted">{saved ? `— ${saved}` : '— стандартная папка Ollama'}</span>
+        <b>{tr('Где хранить модели')}</b> <span className="ait-muted">{saved ? `— ${saved}` : tr('— стандартная папка Ollama')}</span>
       </summary>
       <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-        <small className="ait-muted">По умолчанию Ollama хранит модели в C:\Users\&lt;имя&gt;\.ollama\models (диск C). Если там мало места, выберите папку на другом диске — рекомендуемая модель займёт {needGb} ГБ.</small>
+        <small className="ait-muted">{tr('По умолчанию Ollama хранит модели в C:\\Users\\&lt;имя&gt;\\.ollama\\models (диск C). Если там мало места, выберите папку на другом диске — рекомендуемая модель займёт')}{' '}{needGb} {' '}{tr('ГБ.')}</small>
         <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <input className="ait-input" style={{ flex: 1, minWidth: 220 }} placeholder="D:\AI\ollama-models" value={dir} onChange={(e) => setDir(e.target.value)} aria-label="Папка для моделей" />
-          <button className="ait-btn small" disabled={!ok || clean === saved} onClick={() => update({ ollamaModelsDir: clean })}>Сохранить</button>
-          {saved ? <button className="ait-btn small" onClick={() => { setDir(''); update({ ollamaModelsDir: undefined }); }}>По умолчанию</button> : null}
+          <input className="ait-input" style={{ flex: 1, minWidth: 220 }} placeholder="D:\AI\ollama-models" value={dir} onChange={(e) => setDir(e.target.value)} aria-label={tr('Папка для моделей')} />
+          <button className="ait-btn small" disabled={!ok || clean === saved} onClick={() => update({ ollamaModelsDir: clean })}>{tr('Сохранить')}</button>
+          {saved ? <button className="ait-btn small" onClick={() => { setDir(''); update({ ollamaModelsDir: undefined }); }}>{tr('По умолчанию')}</button> : null}
         </span>
-        {dir && !ok ? <small style={{ color: 'var(--err)' }}>Укажите полный путь, например D:\AI\ollama-models (без кавычек).</small> : null}
+        {dir && !ok ? <small style={{ color: 'var(--err)' }}>{tr('Укажите полный путь, например D:\\AI\\ollama-models (без кавычек).')}</small> : null}
         {ok ? (
           <ol style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 6 }}>
-            <li>Проще всего: значок Ollama в трее → <b>Settings</b> → <b>Model location</b> → выберите <code>{clean}</code>.</li>
+            <li>{tr('Проще всего: значок Ollama в трее →')}{' '}<b>Settings</b> → <b>Model location</b> {' '}{tr('→ выберите')}{' '}<code>{clean}</code>.</li>
             <li>
-              Или выполните в командной строке (Win+R → cmd):{' '}
+              
+              {tr('Или выполните в командной строке (Win+R → cmd):')}{' '}
               <code style={{ userSelect: 'all', wordBreak: 'break-all' }}>{command}</code>{' '}
               <button
                 className="ait-btn small"
@@ -562,13 +567,13 @@ function ModelsFolder({ settings, update, needGb, onRecheck }: { settings: AppSe
                   });
                 }}
               >
-                {copied ? 'Скопировано' : 'Копировать'}
+                {copied ? tr('Скопировано') : tr('Копировать')}
               </button>
             </li>
-            <li>Закройте Ollama (значок в трее → Quit) и запустите снова.</li>
-            <li>Уже скачанные модели перенесите: скопируйте содержимое старой папки models в новую — иначе их придётся скачать заново.</li>
+            <li>{tr('Закройте Ollama (значок в трее → Quit) и запустите снова.')}</li>
+            <li>{tr('Уже скачанные модели перенесите: скопируйте содержимое старой папки models в новую — иначе их придётся скачать заново.')}</li>
             <li>
-              <button className="ait-btn small" onClick={onRecheck}>Проверить</button> — список «Установлено» покажет модели из новой папки.
+              <button className="ait-btn small" onClick={onRecheck}>{tr('Проверить')}</button> {' '}{tr('— список «Установлено» покажет модели из новой папки.')}
             </li>
           </ol>
         ) : null}
@@ -589,7 +594,7 @@ export function UpdateCheck({ current, compact, install, autoCheck }: { current:
     try {
       setState({ busy: false, info: await checkForUpdate(current) });
     } catch (e) {
-      setState({ busy: false, error: `Не удалось проверить: ${(e as Error).message}` });
+      setState({ busy: false, error: tr('Не удалось проверить: {0}', (e as Error).message) });
     }
   };
   useEffect(() => {
@@ -597,7 +602,7 @@ export function UpdateCheck({ current, compact, install, autoCheck }: { current:
   }, [autoCheck]); // eslint-disable-line react-hooks/exhaustive-deps
   const doInstall = async () => {
     if (!install || !state.info) return;
-    setInst({ text: 'начинаю…' });
+    setInst({ text: tr('начинаю…') });
     try {
       await install(state.info, (text, pct) => setInst({ text, pct }));
     } catch (e) {
@@ -609,23 +614,25 @@ export function UpdateCheck({ current, compact, install, autoCheck }: { current:
   return (
     <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }} data-testid="update-check">
       <button type="button" className={compact ? 'pp-link' : 'ait-btn small'} onClick={() => void run()} disabled={state.busy || !!inst}>
-        {state.busy ? 'Проверяю…' : 'Проверить обновления'}
+        {state.busy ? tr('Проверяю…') : tr('Проверить обновления')}
       </button>
       {i ? (
         i.available ? (
           <>
-            <span>Есть версия {i.latest}</span>
+            <span>{tr('Есть версия')}{' '}{i.latest}</span>
             {install ? (
               <button type="button" className={compact ? 'pp-link' : 'ait-bubble-btn'} style={compact ? undefined : { fontSize: 14, minHeight: 30, padding: '2px 14px' }} disabled={!!inst} onClick={() => void doInstall()}>
-                Обновить сейчас
+                
+                {tr('Обновить сейчас')}
               </button>
             ) : null}
             <a href={i.url} target="_blank" rel="noreferrer">
-              что нового
+              
+              {tr('что нового')}
             </a>
           </>
         ) : (
-          <span className="ait-muted">У вас последняя версия ({i.current})</span>
+          <span className="ait-muted">{tr('У вас последняя версия (')}{i.current})</span>
         )
       ) : null}
       {inst ? (
@@ -689,7 +696,7 @@ export function LocalSetup({ settings, update, getKey, onReady }: { settings: Ap
 
   const download = async (model: string, baseUrl: string) => {
     setError(null);
-    setPull({ status: 'начинаю' });
+    setPull({ status: tr('начинаю') });
     try {
       await ollamaPull(baseUrl, model, (p) => setPull(p));
       // Use the model that was just downloaded for reading pictures.
@@ -734,63 +741,65 @@ export function LocalSetup({ settings, update, getKey, onReady }: { settings: Ap
 
   return (
     <div className="ait-panel" data-testid="local-setup" style={{ display: 'grid', gap: 14, borderColor: state?.ok ? 'var(--ok)' : 'var(--magenta)' }}>
-      <h2 style={{ margin: 0 }}>Подготовка к переводу на этом компьютере</h2>
-      {!state ? <span className="ait-muted">Проверяю программы…</span> : <span>{readinessText(state)}</span>}
+      <h2 style={{ margin: 0 }}>{tr('Подготовка к переводу на этом компьютере')}</h2>
+      {!state ? <span className="ait-muted">{tr('Проверяю программы…')}</span> : <span>{readinessText(state)}</span>}
 
       {need === 'engine' ? (
-        step(1, false, 'Запустите локальный движок', (
+        step(1, false, tr('Запустите локальный движок'), (
           <>
-            <small>Откройте папку, куда распакован AI Translate, и запустите <code>engine\scripts\start-engine.bat</code>. Нужен Python 3.11+.</small>
+            <small>{tr('Откройте папку, куда распакован AI Translate, и запустите')}{' '}<code>engine\scripts\start-engine.bat</code>{tr('. Нужен Python 3.11+.')}</small>
             <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <a className="ait-btn small" href={SETUP_LINKS.python} target="_blank" rel="noreferrer">Скачать Python</a>
-              <button className="ait-btn small" onClick={() => update({ pipeline: 'standalone' })}>Переводить без движка</button>
+              <a className="ait-btn small" href={SETUP_LINKS.python} target="_blank" rel="noreferrer">{tr('Скачать Python')}</a>
+              <button className="ait-btn small" onClick={() => update({ pipeline: 'standalone' })}>{tr('Переводить без движка')}</button>
             </span>
           </>
         ))
       ) : need === 'lmstudio' || need === 'server' ? (
-        step(1, false, need === 'lmstudio' ? 'Запустите LM Studio и её сервер' : 'Запустите сервер модели', (
+        step(1, false, need === 'lmstudio' ? tr('Запустите LM Studio и её сервер') : tr('Запустите сервер модели'), (
           <>
-            <small>{need === 'lmstudio' ? 'В LM Studio: вкладка Developer → Start Server, включите CORS. Загрузите модель, которая читает картинки.' : `Сервер должен отвечать по адресу ${(state as { baseUrl: string }).baseUrl}.`}</small>
-            {need === 'lmstudio' ? <a className="ait-btn small" style={{ justifySelf: 'start' }} href={SETUP_LINKS.lmstudio} target="_blank" rel="noreferrer">Скачать LM Studio</a> : null}
+            <small>{need === 'lmstudio' ? tr('В LM Studio: вкладка Developer → Start Server, включите CORS. Загрузите модель, которая читает картинки.') : tr('Сервер должен отвечать по адресу {0}.', (state as { baseUrl: string }).baseUrl)}</small>
+            {need === 'lmstudio' ? <a className="ait-btn small" style={{ justifySelf: 'start' }} href={SETUP_LINKS.lmstudio} target="_blank" rel="noreferrer">{tr('Скачать LM Studio')}</a> : null}
           </>
         ))
       ) : (
         <>
-          {step(1, !!programOk, 'Ollama — программа, которая запускает модель', need === 'ollama' ? (
+          {step(1, !!programOk, tr('Ollama — программа, которая запускает модель'), need === 'ollama' ? (
             <>
               <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <a className="ait-bubble-btn" style={{ fontSize: 14, minHeight: 32, padding: '3px 14px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }} href={win ? SETUP_LINKS.ollamaWindows : SETUP_LINKS.ollamaPage} target="_blank" rel="noreferrer">
-                  Скачать Ollama{win ? ' для Windows' : ''}
+                  
+                  {tr('Скачать Ollama')}{win ? tr(' для Windows') : ''}
                 </a>
                 {win ? <a className="ait-btn small" href={SETUP_LINKS.ollamaPage} target="_blank" rel="noreferrer">macOS / Linux</a> : null}
               </span>
-              <small className="ait-muted">Откройте скачанный файл и установите. Если Ollama уже установлена — запустите её из меню «Пуск» (значок ламы появится рядом с часами).</small>
-              <small className="ait-muted">{checking ? 'Проверяю…' : 'Жду запуска Ollama — проверяю каждые 3 секунды, нажимать ничего не нужно.'}</small>
+              <small className="ait-muted">{tr('Откройте скачанный файл и установите. Если Ollama уже установлена — запустите её из меню «Пуск» (значок ламы появится рядом с часами).')}</small>
+              <small className="ait-muted">{checking ? tr('Проверяю…') : tr('Жду запуска Ollama — проверяю каждые 3 секунды, нажимать ничего не нужно.')}</small>
             </>
           ) : null)}
-          {step(2, !!state?.ok, 'Модель, которая читает картинки', need === 'ollama-model' ? (
+          {step(2, !!state?.ok, tr('Модель, которая читает картинки'), need === 'ollama-model' ? (
             pull ? (
               <>
                 <div className="ait-progress"><i style={{ width: `${pct ?? 3}%` }} /></div>
-                <small className="ait-muted">{pull.status}{pull.total ? ` — ${gb(pull.completed)} из ${gb(pull.total)} (${pct}%)` : ''}</small>
+                <small className="ait-muted">{pull.status}{pull.total ? tr(' — {0} из {1} ({2}%)', gb(pull.completed), gb(pull.total), pct) : ''}</small>
               </>
             ) : (
               <>
                 <button className="ait-bubble-btn" style={{ justifySelf: 'start', fontSize: 14, minHeight: 32, padding: '3px 14px' }} onClick={() => void download(suggested, (state as { baseUrl: string }).baseUrl)}>
-                  Скачать {suggested}
+                  
+                  {tr('Скачать')}{' '}{suggested}
                 </button>
                 <small className="ait-muted">
-                  {MODEL_TIERS.find((t) => t.model === suggested) ? `${MODEL_TIERS.find((t) => t.model === suggested)!.sizeGb} ГБ, подобрана ${gpu.name ? `под ${gpu.name}` : 'под видеокарту'}. ` : ''}Другую можно выбрать в «Локальных моделях» ниже.
+                  {MODEL_TIERS.find((t) => t.model === suggested) ? tr('{0} ГБ, подобрана {1}. ', MODEL_TIERS.find((t) => t.model === suggested)!.sizeGb, gpu.name ? tr('под {0}', gpu.name) : tr('под видеокарту')) : ''}{tr('Другую можно выбрать в «Локальных моделях» ниже.')}
                 </small>
               </>
             )
-          ) : need === 'ollama' ? <small className="ait-muted">После запуска Ollama предложим скачать модель под вашу видеокарту.</small> : null)}
-          {step(3, check?.level === 'ok', 'Проверка', state?.ok ? (
-            running ? <small className="ait-muted">Проверяю модель… первый запуск может занять минуту.</small> : check ? <small>{check.message}</small> : null
+          ) : need === 'ollama' ? <small className="ait-muted">{tr('После запуска Ollama предложим скачать модель под вашу видеокарту.')}</small> : null)}
+          {step(3, check?.level === 'ok', tr('Проверка'), state?.ok ? (
+            running ? <small className="ait-muted">{tr('Проверяю модель… первый запуск может занять минуту.')}</small> : check ? <small>{check.message}</small> : null
           ) : null)}
         </>
       )}
-      {state?.ok && onReady ? <small>Готово — продолжаю перевод на странице.</small> : null}
+      {state?.ok && onReady ? <small>{tr('Готово — продолжаю перевод на странице.')}</small> : null}
       {error ? <small style={{ color: 'var(--err)' }}>{error}</small> : null}
     </div>
   );

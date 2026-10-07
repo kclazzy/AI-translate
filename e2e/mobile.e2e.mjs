@@ -34,7 +34,8 @@ await new Promise((r) => app.listen(18082, '127.0.0.1', r));
 const { server: llm, calls } = await startMockLlm(18080);
 let browser;
 try {
-  browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--disable-gpu'] });
+  browser = await puppeteer.launch({
+  env: { ...process.env, LANG: 'ru_RU.UTF-8', LANGUAGE: 'ru' }, // the interface follows the browser language executablePath: CHROME, headless: 'new', args: ['--no-sandbox', '--lang=ru', '--disable-gpu'] });
 } catch (e) {
   check('browser launches', false, String(e?.stack ?? e));
   writeFileSync(join(OUT, 'e2e-mobile.json'), JSON.stringify(results, null, 2));

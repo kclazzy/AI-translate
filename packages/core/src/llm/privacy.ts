@@ -1,5 +1,6 @@
 import { AppError } from '../errors';
 import type { ProviderConfig } from './types';
+import { tr } from '../i18n';
 
 export type PrivacyMode = 'local' | 'hybrid' | 'cloud';
 
@@ -51,9 +52,9 @@ export function assertPrivacy(mode: PrivacyMode, cfg: ProviderConfig, sends: 'im
 
 export function describeRoute(mode: PrivacyMode, vision: ProviderConfig | undefined, text: ProviderConfig | undefined, engineUrl?: string): string[] {
   const lines: string[] = [];
-  if (engineUrl) lines.push(`Изображение → движок ${engineUrl} (${isLocalUrl(engineUrl) ? 'локально' : 'удалённо'})`);
-  else if (vision) lines.push(`Изображение → ${vision.label} (${isLocalProvider(vision) ? 'локально' : 'облако'})`);
-  if (text && text.id !== vision?.id) lines.push(`Текст → ${text.label} (${isLocalProvider(text) ? 'локально' : 'облако'})`);
-  lines.push(mode === 'local' ? 'Локальный режим: данные не покидают устройство или локальную сеть.' : mode === 'hybrid' ? 'Гибридный режим: изображения остаются локально, наружу уходит только текст.' : 'Облачный режим: изображения могут отправляться провайдеру.');
+  if (engineUrl) lines.push(tr('Изображение → движок {0} ({1})', engineUrl, isLocalUrl(engineUrl) ? tr('локально') : tr('удалённо')));
+  else if (vision) lines.push(tr('Изображение → {0} ({1})', vision.label, isLocalProvider(vision) ? tr('локально') : tr('облако')));
+  if (text && text.id !== vision?.id) lines.push(tr('Текст → {0} ({1})', text.label, isLocalProvider(text) ? tr('локально') : tr('облако')));
+  lines.push(mode === 'local' ? tr('Локальный режим: данные не покидают устройство или локальную сеть.') : mode === 'hybrid' ? tr('Гибридный режим: изображения остаются локально, наружу уходит только текст.') : tr('Облачный режим: изображения могут отправляться провайдеру.'));
   return lines;
 }

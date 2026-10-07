@@ -4,6 +4,7 @@ import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@a
 import type { StageEvent } from '@ait/core';
 import type { FromOffscreen, JobStatus, RenderedTiles, SpeedStats, ToOffscreen } from '../shared/messages';
 import { db, loadSettings, secrets } from '../shared/store';
+import { tr } from '@ait/core/i18n';
 
 /**
  * The pipeline runs here (offscreen document in Chrome, the background page in Firefox):
@@ -121,7 +122,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
               emit({ source: 'offscreen', type: 'done', jobId, tabId, result: toRendered(result, cached) });
             } catch (e) {
               if (watch.signal.aborted && watch.signal.reason instanceof DOMException && watch.signal.reason.message === 'watchdog') {
-                throw new AppError('TIMEOUT', { retryable: true, detail: `Модель не ответила за ${limitMin} мин. Картинка пропущена, перевод главы продолжается. Проверьте модель в настройках: возможно, она не помещается в видеопамять.` });
+                throw new AppError('TIMEOUT', { retryable: true, detail: tr('Модель не ответила за {0} мин. Картинка пропущена, перевод главы продолжается. Проверьте модель в настройках: возможно, она не помещается в видеопамять.', limitMin) });
               }
               throw e;
             } finally {
@@ -154,9 +155,9 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
         const r = await service.getResult(key);
         if (r) pages.push({ name: `${String(i + 1).padStart(3, '0')}.png`, width: r.page.width, height: r.page.height, tiles: r.rendered });
       }
-      if (!pages.length) throw new AppError('UNKNOWN', { retryable: false, message: 'Нет переведённых страниц' });
+      if (!pages.length) throw new AppError('UNKNOWN', { retryable: false, message: tr('Нет переведённых страниц') });
       // Letters (any alphabet), digits and simple punctuation only: Chrome rejects some characters.
-      const safe = (msg.title || 'Глава').replace(/[^\p{L}\p{N} ._,()\-]+/gu, ' ').replace(/\s+/g, ' ').replace(/^[ .]+|[ .]+$/g, '').slice(0, 100) || 'Глава';
+      const safe = (msg.title || tr('Глава')).replace(/[^\p{L}\p{N} ._,()\-]+/gu, ' ').replace(/\s+/g, ' ').replace(/^[ .]+|[ .]+$/g, '').slice(0, 100) || tr('Глава');
       const backend = browserBackend;
       const len = (await loadSettings()).exportPageLength;
       let bytes: Uint8Array;

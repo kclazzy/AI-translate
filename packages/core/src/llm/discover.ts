@@ -1,5 +1,6 @@
 import { httpError, joinUrl, safeFetch } from './http';
 import type { FetchLike, ProviderConfig } from './types';
+import { tr } from '../i18n';
 
 export interface DiscoveredModel {
   id: string;
@@ -85,13 +86,13 @@ export interface ModelTier {
 }
 
 export const MODEL_TIERS: ModelTier[] = [
-  { vramGb: 2, model: 'qwen3.5:0.8b', sizeGb: 1.3, quality: 'базовое: может путать японский в баблах', secondsPerPage: '20–40' },
-  { vramGb: 4, model: 'qwen3.5:2b-q4_K_M', sizeGb: 1.9, quality: 'приемлемое', secondsPerPage: '20–40' },
-  { vramGb: 6, model: 'qwen3.5:4b-q4_K_M', sizeGb: 3.3, quality: 'хорошее', secondsPerPage: '15–30' },
-  { vramGb: 8, model: 'qwen3.5:4b-q8_0', sizeGb: 5.2, quality: 'хорошее, точнее читает мелкий текст', secondsPerPage: '15–25' },
+  { vramGb: 2, model: 'qwen3.5:0.8b', sizeGb: 1.3, quality: tr('базовое: может путать японский в баблах'), secondsPerPage: '20–40' },
+  { vramGb: 4, model: 'qwen3.5:2b-q4_K_M', sizeGb: 1.9, quality: tr('приемлемое'), secondsPerPage: '20–40' },
+  { vramGb: 6, model: 'qwen3.5:4b-q4_K_M', sizeGb: 3.3, quality: tr('хорошее'), secondsPerPage: '15–30' },
+  { vramGb: 8, model: 'qwen3.5:4b-q8_0', sizeGb: 5.2, quality: tr('хорошее, точнее читает мелкий текст'), secondsPerPage: '15–25' },
   // 9B Q4 leaves room on a 12 GB card for the picture and the answer; on 8 GB it would spill into RAM.
-  { vramGb: 12, model: 'qwen3.5:9b-q4_K_M', sizeGb: 6.6, quality: 'очень хорошее', secondsPerPage: '10–20' },
-  { vramGb: 16, model: 'qwen3.5:9b-q8_0', sizeGb: 10, quality: 'лучшее для домашних видеокарт', secondsPerPage: '10–20' },
+  { vramGb: 12, model: 'qwen3.5:9b-q4_K_M', sizeGb: 6.6, quality: tr('очень хорошее'), secondsPerPage: '10–20' },
+  { vramGb: 16, model: 'qwen3.5:9b-q8_0', sizeGb: 10, quality: tr('лучшее для домашних видеокарт'), secondsPerPage: '10–20' },
 ];
 
 export function tierForVram(vramGb: number | undefined): ModelTier {
@@ -196,7 +197,7 @@ export async function ollamaPull(baseUrl: string, model: string, onProgress: (p:
     last = j;
     onProgress(j);
   }
-  if (last?.status !== 'success') throw new Error(`Загрузка прервана (${last?.status ?? 'нет ответа'})`);
+  if (last?.status !== 'success') throw new Error(tr('Загрузка прервана ({0})', last?.status ?? tr('нет ответа')));
 }
 
 export interface LoadedModel {

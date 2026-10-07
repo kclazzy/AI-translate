@@ -1,7 +1,8 @@
 import type { StageEvent } from '@ait/core';
 import { markUi } from './scanner';
+import { lazyStrings, tr } from '@ait/core/i18n';
 
-const STAGE: Partial<Record<StageEvent['stage'], string>> = {
+const STAGE: Partial<Record<StageEvent['stage'], string>> = lazyStrings({
   queued: 'В очереди',
   fetching: 'Загрузка',
   decoding: 'Открываю',
@@ -11,7 +12,7 @@ const STAGE: Partial<Record<StageEvent['stage'], string>> = {
   checking: 'Проверяю перевод',
   cleaning: 'Очищаю',
   rendering: 'Вписываю',
-};
+});
 
 const CSS = `
 :host { all: initial; }
@@ -100,9 +101,9 @@ export class Overlay {
     this.bar.className = 'bar busy';
     this.pill = document.createElement('span');
     this.pill.className = 'pill';
-    this.stageLabel = STAGE[ev.stage] ?? 'Работаю';
+    this.stageLabel = STAGE[ev.stage] ?? tr('Работаю');
     this.pill.textContent = `${this.stageLabel}…`;
-    this.buttons([['✕', 'Отменить', this.actions.onCancel]]);
+    this.buttons([['✕', tr('Отменить'), this.actions.onCancel]]);
   }
 
   /** Extra live info next to the stage: queue position, elapsed time, a hint for slow models. */
@@ -126,9 +127,9 @@ export class Overlay {
       d.textContent = detail;
       this.pill.append(d);
     }
-    const defs: [string, string, () => void][] = action ? [[action[0], action[0], action[1]]] : [['Повторить', 'Попробовать ещё раз', this.actions.onRetry]];
-    if (this.actions.onClose) defs.push(['✕', 'Закрыть', this.actions.onClose]);
-    else if (!this.hasResult) defs.push(['✕', 'Скрыть', () => this.destroy()]);
+    const defs: [string, string, () => void][] = action ? [[action[0], action[0], action[1]]] : [[tr('Повторить'), tr('Попробовать ещё раз'), this.actions.onRetry]];
+    if (this.actions.onClose) defs.push(['✕', tr('Закрыть'), this.actions.onClose]);
+    else if (!this.hasResult) defs.push(['✕', tr('Скрыть'), () => this.destroy()]);
     this.buttons(defs);
   }
 
@@ -150,12 +151,12 @@ export class Overlay {
     this.pill = null;
     this.bar.className = 'bar';
     const defs: [string, string, () => void][] = [
-      ['⇄', 'Оригинал / перевод', this.actions.onToggle],
-      ['◫', 'Сравнить со слайдером', () => this.toggleCompare()],
-      ['✎', 'Править в редакторе', this.actions.onEdit],
-      ['⟳', 'Перевести заново', this.actions.onRetry],
+      ['⇄', tr('Оригинал / перевод'), this.actions.onToggle],
+      ['◫', tr('Сравнить со слайдером'), () => this.toggleCompare()],
+      ['✎', tr('Править в редакторе'), this.actions.onEdit],
+      ['⟳', tr('Перевести заново'), this.actions.onRetry],
     ];
-    if (this.actions.onClose) defs.push(['✕', 'Закрыть', this.actions.onClose]);
+    if (this.actions.onClose) defs.push(['✕', tr('Закрыть'), this.actions.onClose]);
     this.buttons(defs);
     this.toggleBtn = this.bar.querySelector('button');
     this.setOriginal(false);
@@ -166,7 +167,7 @@ export class Overlay {
     if (!count) return;
     const b = document.createElement('button');
     b.textContent = `🔍 ${count}`;
-    b.title = `Проверка перевода — замечаний: ${count}\n${details}\nНажмите, чтобы открыть в редакторе.`;
+    b.title = tr('Проверка перевода — замечаний: {0}\n{1}\nНажмите, чтобы открыть в редакторе.', count, details);
     b.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -182,7 +183,7 @@ export class Overlay {
     if (b && this.langs) {
       const next = show ? this.langs.target : this.langs.source;
       b.textContent = `⇄ ${next}`;
-      b.title = show ? `Показать перевод (${this.langs.target})` : `Показать оригинал (${this.langs.source})`;
+      b.title = show ? tr('Показать перевод ({0})', this.langs.target) : tr('Показать оригинал ({0})', this.langs.source);
     }
   }
 

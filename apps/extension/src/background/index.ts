@@ -1,6 +1,8 @@
+import '@ait/core/i18n/all';
 import { AppError, bytesToBase64, checkReadiness, dataUrlToBytes, isOllama, ollamaUnloadAll, readinessText, toAppError, type Readiness } from '@ait/core';
-import type { BackgroundToContent, ContentToBackground, FromOffscreen, JobStatus, ToOffscreen, UiToBackground } from '../shared/messages';
+import type { BackgroundToContent, ContentToBackground, FromOffscreen, JobStatus, ToOffscreen, UiToBackground, UiStrings } from '../shared/messages';
 import { hostOf, loadSettings, saveSettings } from '../shared/store';
+import { dictionaryFor, setUiLang, tr, uiLang } from '@ait/core/i18n';
 
 /**
  * Service worker: a thin router. It fetches image bytes (with host permissions and the page's
@@ -204,7 +206,8 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       return toOffscreen({ target: 'offscreen', type: 'cancel', jobId: `${tabId}|${msg.id}` });
     case 'get-page-state': {
       const s = await loadSettings();
-      return { autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(msg.host), minImageSize: s.minImageSize, enabled: s.enabled !== false, targetLang: s.targetLang };
+      applyLang(s.interfaceLang);
+      return { autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(msg.host), minImageSize: s.minImageSize, enabled: s.enabled !== false, targetLang: s.targetLang, ui: uiStrings() };
     }
     case 'build-download': {
       const s = await loadSettings();
@@ -241,13 +244,33 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
   }
 }
 
+/** The interface dictionary for content scripts (they carry none to stay small). */
+function uiStrings(): UiStrings {
+  const lang = uiLang();
+  return { lang, dict: lang === 'ru' ? {} : dictionaryFor(lang) ?? {} };
+}
+
+/** Follow the language from the settings; the context menu is re-labelled when it changes. */
+function applyLang(pref: string | undefined): void {
+  if (setUiLang(pref, false)) createMenus();
+}
+
+function createMenus(): void {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({ id: 'ait-translate-image', title: tr('Перевести изображение'), contexts: ['image'] });
+    chrome.contextMenus.create({ id: 'ait-translate-page', title: tr('Перевести все картинки на странице'), contexts: ['page'] });
+    chrome.contextMenus.create({ id: 'ait-select-area', title: tr('Перевести область экрана'), contexts: ['page', 'image'] });
+  });
+}
+
 async function broadcastState() {
   const s = await loadSettings();
+  applyLang(s.interfaceLang);
   const tabs = await chrome.tabs.query({});
   for (const t of tabs) {
     if (t.id === undefined) continue;
     const host = hostOf(t.url);
-    sendToTab(t.id, { type: 'state', autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(host), minImageSize: s.minImageSize, enabled: s.enabled !== false, targetLang: s.targetLang });
+    sendToTab(t.id, { type: 'state', autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(host), minImageSize: s.minImageSize, enabled: s.enabled !== false, targetLang: s.targetLang, ui: uiStrings() });
   }
   showEnabled(s.enabled !== false);
 }
@@ -305,7 +328,7 @@ async function offerSetup(tabId: number | undefined, force = false) {
   await chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?view=settings&setup=1${tabId !== undefined ? `&resume=${tabId}&cmd=translate-page` : ''}`) });
 }
 
-const OFF_ERROR = () => new AppError('NOT_CONFIGURED', { retryable: false, detail: 'AI Translate выключен. Включите его в окне расширения (значок на панели).' });
+const OFF_ERROR = () => new AppError('NOT_CONFIGURED', { retryable: false, detail: tr('AI Translate выключен. Включите его в окне расширения (значок на панели).') });
 
 async function handleUi(msg: UiToBackground): Promise<unknown> {
   switch (msg.type) {
@@ -404,10 +427,9 @@ chrome.runtime.onInstalled.addListener((details) => {
       void chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?view=settings&updated=${encodeURIComponent((justUpdated as { to: string }).to)}`) });
     });
   }
-  chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: 'ait-translate-image', title: 'Перевести изображение', contexts: ['image'] });
-    chrome.contextMenus.create({ id: 'ait-translate-page', title: 'Перевести все картинки на странице', contexts: ['page'] });
-    chrome.contextMenus.create({ id: 'ait-select-area', title: 'Перевести область экрана', contexts: ['page', 'image'] });
+  void loadSettings().then((s) => {
+    setUiLang(s.interfaceLang, false);
+    createMenus();
   });
 });
 
@@ -427,4 +449,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 chrome.tabs.onRemoved.addListener((tabId) => running.delete(tabId));
 
 // Show the on/off state on the icon after the browser or the extension starts.
-void loadSettings().then((s) => showEnabled(s.enabled !== false));
+void loadSettings().then((s) => {
+  setUiLang(s.interfaceLang, false);
+  showEnabled(s.enabled !== false);
+});

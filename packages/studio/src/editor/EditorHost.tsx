@@ -4,6 +4,7 @@ import { usePlatform } from '../platform';
 import { loadOriginalImage, rerenderProjectPage, type ProjectStore } from '../projects';
 import { ErrorBox } from '../ui';
 import { Editor } from './Editor';
+import { tr } from '@ait/core/i18n';
 
 interface Loaded {
   page: PageResult;
@@ -21,7 +22,7 @@ export function CachedPageEditor({ resultKey, settings, onClose }: { resultKey: 
     let cancelled = false;
     (async () => {
       const r = await platform.service.getResult(resultKey);
-      if (!r) throw new Error('Перевод не найден в кэше — переведите страницу ещё раз');
+      if (!r) throw new Error(tr('Перевод не найден в кэше — переведите страницу ещё раз'));
       const original = await TiledImage.fromBytes(platform.backend, r.original.bytes, r.original.mime);
       const cleaned = await tilesToImage(platform.backend, r.page.width, r.page.height, r.cleaned);
       if (!cancelled) {
@@ -34,7 +35,7 @@ export function CachedPageEditor({ resultKey, settings, onClose }: { resultKey: 
     };
   }, [platform, resultKey]);
   if (error) return <ErrorBox error={error} />;
-  if (!data) return <p className="ait-muted">Загрузка страницы…</p>;
+  if (!data) return <p className="ait-muted">{tr('Загрузка страницы…')}</p>;
   return (
     <Editor
       key={resultKey}
@@ -61,7 +62,7 @@ export function ProjectPageEditor({ store, project, page, settings, onClose, onS
     let cancelled = false;
     (async () => {
       const a = await store.assets(project.id, page.id);
-      if (!a || !page.result) throw new Error('Страница ещё не переведена');
+      if (!a || !page.result) throw new Error(tr('Страница ещё не переведена'));
       const original = await loadOriginalImage(platform.backend, a);
       const cleaned = await tilesToImage(platform.backend, page.result.width, page.result.height, a.cleaned ?? []);
       if (!cancelled) setData({ page: page.result, original, cleaned });
@@ -71,7 +72,7 @@ export function ProjectPageEditor({ store, project, page, settings, onClose, onS
     };
   }, [platform, store, project.id, page]);
   if (error) return <ErrorBox error={error} />;
-  if (!data) return <p className="ait-muted">Загрузка страницы…</p>;
+  if (!data) return <p className="ait-muted">{tr('Загрузка страницы…')}</p>;
   return (
     <Editor
       key={page.id}

@@ -1,3 +1,4 @@
+import '@ait/core/i18n/all';
 import { createRoot } from 'react-dom/client';
 import { StudioApp, type View } from '@ait/studio';
 import '@ait/studio/styles.css';

@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import { downloadWithProgress, pickAsset, releaseAssets, type UpdateInfo } from '@ait/core';
 import { db } from '../shared/store';
+import { tr } from '@ait/core/i18n';
 
 /**
  * In-app update for an unpacked extension (how this project is installed):
@@ -17,10 +18,17 @@ type DirHandle = FileSystemDirectoryHandle & {
 const HANDLE_KEY = 'update-dir';
 const ZIP_FOLDER = 'extension-chrome';
 
-async function readManifest(dir: FileSystemDirectoryHandle): Promise<{ name?: string; version?: string } | null> {
+type ManifestId = { name?: string; short_name?: string; version?: string };
+
+/** Same extension: same name, or the same short name (the full name may be localised). */
+function sameExtension(a: ManifestId, b: ManifestId): boolean {
+  return a.name === b.name || (!!a.short_name && a.short_name === b.short_name);
+}
+
+async function readManifest(dir: FileSystemDirectoryHandle): Promise<ManifestId | null> {
   try {
     const f = await (await dir.getFileHandle('manifest.json')).getFile();
-    return JSON.parse(await f.text()) as { name?: string; version?: string };
+    return JSON.parse(await f.text()) as ManifestId;
   } catch {
     return null;
   }
@@ -39,8 +47,8 @@ async function resolveExtensionDir(picked: FileSystemDirectoryHandle): Promise<F
       /* not the release folder */
     }
   }
-  if (!m || m.name !== own.name) throw new Error(`В этой папке нет расширения «${own.name}». Выберите папку, которую вы указали в chrome://extensions → «Загрузить распакованное» (обычно ${ZIP_FOLDER}).`);
-  if (m.version !== own.version) throw new Error(`В выбранной папке версия ${m.version}, а запущена ${own.version}. Похоже, это другая копия. Выберите папку, из которой расширение загружено в chrome://extensions.`);
+  if (!m || !sameExtension(m, own)) throw new Error(tr('В этой папке нет расширения «{0}». Выберите папку, которую вы указали в chrome://extensions → «Загрузить распакованное» (обычно {1}).', own.name, ZIP_FOLDER));
+  if (m.version !== own.version) throw new Error(tr('В выбранной папке версия {0}, а запущена {1}. Похоже, это другая копия. Выберите папку, из которой расширение загружено в chrome://extensions.', m.version, own.version));
   return dir;
 }
 
@@ -52,14 +60,14 @@ async function ensurePermission(dir: DirHandle): Promise<boolean> {
 
 async function pickDir(): Promise<FileSystemDirectoryHandle> {
   const picker = (window as unknown as { showDirectoryPicker?: (o: object) => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker;
-  if (!picker) throw new Error('Этот браузер не умеет обновлять расширение сам. Скачайте новую версию со страницы релизов.');
-  alert('Выберите папку, в которую распаковано расширение (ту, что указана в chrome://extensions). Это нужно один раз: дальше обновления будут ставиться одной кнопкой.');
+  if (!picker) throw new Error(tr('Этот браузер не умеет обновлять расширение сам. Скачайте новую версию со страницы релизов.'));
+  alert(tr('Выберите папку, в которую распаковано расширение (ту, что указана в chrome://extensions). Это нужно один раз: дальше обновления будут ставиться одной кнопкой.'));
   return picker({ mode: 'readwrite', id: 'ait-extension' });
 }
 
 async function writeFile(root: FileSystemDirectoryHandle, path: string, data: Uint8Array): Promise<void> {
   const parts = path.split('/').filter(Boolean);
-  if (parts.some((p) => p === '..' || p === '.')) throw new Error(`Недопустимый путь в архиве: ${path}`);
+  if (parts.some((p) => p === '..' || p === '.')) throw new Error(tr('Недопустимый путь в архиве: {0}', path));
   let dir = root;
   for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
   const w = await (await dir.getFileHandle(parts[parts.length - 1], { create: true })).createWritable();
@@ -78,10 +86,10 @@ async function removeStale(dir: DirHandle, keep: Set<string>, prefix = ''): Prom
 
 export async function installExtensionUpdate(info: UpdateInfo, progress: (text: string, pct?: number) => void): Promise<void> {
   if (typeof (globalThis as { browser?: unknown }).browser !== 'undefined' && !chrome.offscreen) {
-    throw new Error('В Firefox временное дополнение обновляется вручную: скачайте новую версию со страницы релизов.');
+    throw new Error(tr('В Firefox временное дополнение обновляется вручную: скачайте новую версию со страницы релизов.'));
   }
   const asset = pickAsset(info, 'desktop') ?? pickAsset({ assets: releaseAssets(info.latest) }, 'desktop');
-  if (!asset) throw new Error('Не удалось найти файл новой версии. Скачайте его со страницы релизов.');
+  if (!asset) throw new Error(tr('Не удалось найти файл новой версии. Скачайте его со страницы релизов.'));
 
   // 1. The extension folder (asked once, then remembered).
   let dir = (await db.get<FileSystemDirectoryHandle>('kv', HANDLE_KEY)) ?? null;
@@ -95,23 +103,23 @@ export async function installExtensionUpdate(info: UpdateInfo, progress: (text: 
   }
   if (!dir) {
     dir = await resolveExtensionDir(await pickDir());
-    if (!(await ensurePermission(dir as DirHandle))) throw new Error('Нет разрешения на запись в папку расширения.');
+    if (!(await ensurePermission(dir as DirHandle))) throw new Error(tr('Нет разрешения на запись в папку расширения.'));
     await db.put('kv', HANDLE_KEY, dir);
   }
 
   // 2. Download and check the archive before touching anything.
-  progress(`Скачиваю ${info.latest}…`, 0);
-  const bytes = await downloadWithProgress(asset.url, (done, total) => progress(`Скачиваю ${info.latest}: ${(done / 1048576).toFixed(1)}${total ? ` из ${(total / 1048576).toFixed(1)}` : ''} МБ`, total ? Math.round((done / total) * 80) : undefined));
-  progress('Проверяю архив…', 82);
+  progress(tr('Скачиваю {0}…', info.latest), 0);
+  const bytes = await downloadWithProgress(asset.url, (done, total) => progress(tr('Скачиваю {0}: {1}{2} МБ', info.latest, (done / 1048576).toFixed(1), total ? tr(' из {0}', (total / 1048576).toFixed(1)) : ''), total ? Math.round((done / total) * 80) : undefined));
+  progress(tr('Проверяю архив…'), 82);
   const zip = await JSZip.loadAsync(bytes);
   const files = Object.values(zip.files).filter((f) => !f.dir && f.name.startsWith(`${ZIP_FOLDER}/`));
   const manifestFile = zip.file(`${ZIP_FOLDER}/manifest.json`);
-  if (!manifestFile || !files.length) throw new Error('В архиве нет расширения — обновление отменено, ничего не изменено.');
-  const manifest = JSON.parse(await manifestFile.async('string')) as { name?: string; version?: string };
-  if (manifest.name !== chrome.runtime.getManifest().name) throw new Error('Архив от другого расширения — обновление отменено.');
+  if (!manifestFile || !files.length) throw new Error(tr('В архиве нет расширения — обновление отменено, ничего не изменено.'));
+  const manifest = JSON.parse(await manifestFile.async('string')) as ManifestId;
+  if (!sameExtension(manifest, chrome.runtime.getManifest())) throw new Error(tr('Архив от другого расширения — обновление отменено.'));
   let total = 0;
   for (const f of files) total += (f as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0;
-  if (total > 200 * 1048576) throw new Error('Архив подозрительно большой — обновление отменено.');
+  if (total > 200 * 1048576) throw new Error(tr('Архив подозрительно большой — обновление отменено.'));
 
   // 3. Write: manifest last, so a half-written update keeps the old manifest.
   const keep = new Set<string>();
@@ -121,13 +129,13 @@ export async function installExtensionUpdate(info: UpdateInfo, progress: (text: 
     keep.add(rel);
     if (rel === 'manifest.json') continue;
     await writeFile(dir, rel, await f.async('uint8array'));
-    progress('Устанавливаю…', 82 + Math.round((++n / files.length) * 16));
+    progress(tr('Устанавливаю…'), 82 + Math.round((++n / files.length) * 16));
   }
   await removeStale(dir as DirHandle, keep);
   await writeFile(dir, 'manifest.json', await manifestFile.async('uint8array'));
 
   // 4. Reload from disk; the background opens a "updated" note after the restart.
-  progress(`Готово. Перезапускаю расширение на версии ${manifest.version}…`, 100);
+  progress(tr('Готово. Перезапускаю расширение на версии {0}…', manifest.version), 100);
   await chrome.storage.local.set({ justUpdated: { from: chrome.runtime.getManifest().version, to: manifest.version } });
   setTimeout(() => chrome.runtime.reload(), 600);
 }

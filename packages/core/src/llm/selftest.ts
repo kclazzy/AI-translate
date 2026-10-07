@@ -4,6 +4,7 @@ import { languageName } from '../languages';
 import { bytesToBase64 } from '../util/bytes';
 import { createProvider } from './presets';
 import type { FetchLike, ProviderConfig } from './types';
+import { tr } from '../i18n';
 
 /** Result of "Проверить модель": shown in settings and in the popup. */
 export interface ModelCheck {
@@ -96,9 +97,9 @@ export async function checkVisionModel(cfg: ProviderConfig, opts: { backend: Ima
     const got = pickJson(res.text);
     const read = got.text ?? '';
     if (norm(read).includes(SELFTEST_TEXT)) {
-      const slow = ms > 60_000 ? ' Но отвечает медленно: страница может занимать несколько минут — попробуйте модель полегче.' : '';
-      const tps = res.tokensPerSecond ? ` Скорость ответа ${Math.round(res.tokensPerSecond)} токенов/с.` : '';
-      return { ...base, level: 'ok', read, translation: got.translation, ms, tokensPerSecond: res.tokensPerSecond, message: `Модель работает: прочитала текст на картинке за ${(ms / 1000).toFixed(1)} с.${tps}${slow}` };
+      const slow = ms > 60_000 ? tr(' Но отвечает медленно: страница может занимать несколько минут — попробуйте модель полегче.') : '';
+      const tps = res.tokensPerSecond ? tr(' Скорость ответа {0} токенов/с.', Math.round(res.tokensPerSecond)) : '';
+      return { ...base, level: 'ok', read, translation: got.translation, ms, tokensPerSecond: res.tokensPerSecond, message: tr('Модель работает: прочитала текст на картинке за {0} с.{1}{2}', (ms / 1000).toFixed(1), tps, slow) };
     }
     return {
       ...base,
@@ -107,8 +108,8 @@ export async function checkVisionModel(cfg: ProviderConfig, opts: { backend: Ima
       translation: got.translation,
       ms,
       message: read
-        ? `Модель отвечает, но прочитала картинку неверно («${read.slice(0, 40)}» вместо «${SELFTEST_TEXT}»). Переводы будут с ошибками — возьмите модель побольше.`
-        : 'Модель отвечает, но не видит текст на картинке. Возможно, она не умеет читать изображения.',
+        ? tr('Модель отвечает, но прочитала картинку неверно («{0}» вместо «{1}»). Переводы будут с ошибками — возьмите модель побольше.', read.slice(0, 40), SELFTEST_TEXT)
+        : tr('Модель отвечает, но не видит текст на картинке. Возможно, она не умеет читать изображения.'),
     };
   } catch (e) {
     const err = toAppError(e);

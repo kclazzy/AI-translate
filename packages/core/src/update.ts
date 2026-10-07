@@ -1,4 +1,5 @@
 import type { FetchLike } from './llm/types';
+import { tr } from './i18n';
 
 export const REPO = 'kclazzy/AI-translate';
 export const RELEASES_URL = `https://github.com/${REPO}/releases`;
@@ -38,8 +39,8 @@ export function pickAsset(info: Pick<UpdateInfo, 'assets'>, kind: 'desktop' | 'a
 /** Download a file with progress (bytes so far, total if the server says). */
 export async function downloadWithProgress(url: string, onProgress: (done: number, total?: number) => void, fetchImpl: FetchLike = (u, i) => fetch(u, i), signal?: AbortSignal): Promise<Uint8Array> {
   const res = await fetchImpl(url, { signal, cache: 'no-store' });
-  if (res.status === 404) throw new Error('Файл новой версии ещё собирается на GitHub (обычно 10–15 минут после выхода). Попробуйте чуть позже.');
-  if (!res.ok) throw new Error(`Не удалось скачать обновление: HTTP ${res.status}`);
+  if (res.status === 404) throw new Error(tr('Файл новой версии ещё собирается на GitHub (обычно 10–15 минут после выхода). Попробуйте чуть позже.'));
+  if (!res.ok) throw new Error(tr('Не удалось скачать обновление: HTTP {0}', res.status));
   const total = Number(res.headers.get('content-length')) || undefined;
   if (!res.body) {
     const buf = new Uint8Array(await res.arrayBuffer());

@@ -61,10 +61,11 @@ await new Promise((r) => slow.listen(18092, '127.0.0.1', r));
 
 const cdp = !!process.env.E2E_CDP_EXTENSIONS;
 const browser = await puppeteer.launch({
+  env: { ...process.env, LANG: 'ru_RU.UTF-8', LANGUAGE: 'ru' }, // the interface follows the browser language
   executablePath: CHROME,
   headless: false,
   ...(cdp ? { pipe: true, enableExtensions: [ext] } : {}),
-  args: [...(cdp ? [] : [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`]), '--no-sandbox', '--no-first-run', '--disable-gpu'],
+  args: [...(cdp ? [] : [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`]), '--no-sandbox', '--lang=ru', '--no-first-run', '--disable-gpu'],
   defaultViewport: { width: 1000, height: 1800 },
 });
 
