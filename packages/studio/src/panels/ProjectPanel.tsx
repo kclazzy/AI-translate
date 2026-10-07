@@ -144,7 +144,7 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
       const a = await store.assets(project.id, p.id);
       if (!a) continue;
       const tiles = a.rendered ?? [{ y: 0, h: p.height ?? 0, bytes: a.original.bytes }];
-      pages.push({ name: p.name, width: p.width ?? p.result?.width ?? 0, height: p.height ?? p.result?.height ?? 0, tiles });
+      pages.push({ name: p.name, width: p.width ?? p.result?.width ?? 0, height: p.height ?? p.result?.height ?? 0, tiles, avoid: p.result?.blocks?.map((b) => b.bubble?.box ?? b.bbox) });
     }
     const onP = (d: number, t: number) => setProgress({ done: d, total: t, label: tr('Экспорт {0} / {1}', d, t) });
     try {

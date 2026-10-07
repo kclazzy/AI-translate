@@ -51,7 +51,15 @@ const strip = makeStrip();
 const BLANK = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 const variant = (n) => Buffer.concat([page, Buffer.from(`\n${n}`)]);
 const html = `<!doctype html><meta charset="utf-8"><title>Звёздный мечник — глава 131</title><style>img{display:block;width:400px;margin:0 auto}</style>
-<img src="/p1.png" width="400" height="550"><img src="/p2.png" width="400" height="550"><img src="/blank.png" data-url="/p3.png" width="400" height="550"><img src="/strip.png" width="400" height="2400">`;
+<img src="/p1.png" width="400" height="550"><img src="/p2.png" width="400" height="550"><img src="/blank.png" data-url="/p3.png" width="400" height="550"><img src="/strip.png" width="400" height="2400">
+<div style="height:2500px"></div>
+<img id="late" data-x-later="/p5.png" style="width:400px">
+<h3>Другие эпизоды</h3><img src="/p4.png" style="width:260px;height:357px;display:inline-block;margin:0" alt="thumb">
+<script>
+// A reader that inserts the last page only when the reader scrolls down to it (unknown attribute).
+const late = document.getElementById('late');
+new IntersectionObserver((e) => { if (e[0].isIntersecting && !late.src) late.src = late.dataset.xLater; }).observe(late);
+</script>`;
 const site = createServer((req, res) => {
   if (req.url === '/') return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(html);
   if (req.url === '/blank.png') return res.writeHead(200, { 'content-type': 'image/png' }).end(BLANK);
@@ -161,12 +169,13 @@ try {
     await new Promise((r) => setTimeout(r, 500));
     const pdf = readFileSync(join(DL, file)).toString('latin1');
     const pages = (pdf.match(/\/Type\s*\/Page[^s]/g) ?? []).length;
-    // 3 ordinary pages (one of them was not loaded yet) + the 2400 px strip cut into ~4 book pages.
+    // 3 ordinary pages (one of them was not loaded yet) + the 2400 px strip cut into 3 book pages
+    // + the last page that appears only when scrolled to; the thumbnail of another episode is left out.
     const hist = await studio.evaluate(async () => {
       const db = await new Promise((res) => { const r = indexedDB.open('ai-translate', 1); r.onsuccess = () => res(r.result); });
       return new Promise((res) => { const g = db.transaction('history').objectStore('history').getAll(); g.onsuccess = () => res(g.result.filter((h) => h.status !== 'done').map((h) => `${h.title ?? ''} ${h.error ?? ''}`)); });
     });
-    check('all pictures are in it, including the lazy one, and the strip is cut into pages', pages >= 6, `pages=${pages} ${JSON.stringify(hist)}`);
+    check('the whole chapter is in it (also the page that loads only on scroll), the strip is cut into pages, other episodes are not', pages === 7, `pages=${pages} ${JSON.stringify(hist)}`);
   }
 } catch (e) {
   check('unexpected failure', false, String(e?.stack ?? e));

@@ -62,6 +62,13 @@ const ollama = createServer((req, res) => {
     if (req.url === '/api/chat') {
       const text = body.messages?.at(-1)?.content ?? '';
       if (text.includes('Read the Japanese text in the speech bubble')) return json(200, { message: { content: JSON.stringify({ text: 'こんにちは', translation: 'Привет' }) } });
+      // The translation step (text only, after reading the picture).
+      const blocksIn = /<blocks>\s*([\s\S]*?)\s*<\/blocks>/.exec(text);
+      if (blocksIn && !body.messages?.at(-1)?.images?.length) {
+        const items = JSON.parse(blocksIn[1]);
+        if (items[0]?.translation !== undefined) return json(200, { message: { content: JSON.stringify({ reviews: items.map((b) => ({ id: b.id, ok: true })) }) } });
+        return json(200, { message: { content: JSON.stringify({ translations: items.map((b) => ({ id: b.id, text: TR[b.text] ?? b.text })), entities: [], summary: '' }) } });
+      }
       const blocks = geometry.page.map((g) => ({ box: norm(g.textBox), text: g.text, translation: TR[g.text], type: 'DIALOGUE', vertical: true }));
       return json(200, { message: { content: JSON.stringify({ blocks, entities: [], summary: '' }) }, prompt_eval_count: 900, eval_count: 80 });
     }

@@ -71,6 +71,8 @@ export interface VisionBlock {
   translation?: string;
   type: TextType;
   vertical: boolean;
+  speaker?: string;
+  gender?: 'male' | 'female' | 'unknown';
 }
 
 export interface VisionAnswer {
@@ -106,6 +108,8 @@ export function parseVisionAnswer(raw: string, expectTranslation: boolean): Visi
       translation: expectTranslation ? limitLength(translation || text, text) : undefined,
       type: normalizeType(b.type),
       vertical: b.vertical === true,
+      speaker: sanitizeText(b.speaker, 60) || undefined,
+      gender: b.gender === 'male' || b.gender === 'female' ? b.gender : undefined,
     });
   }
   return {

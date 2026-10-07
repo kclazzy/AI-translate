@@ -69,6 +69,8 @@ export interface AppSettings {
   fastLocal?: boolean;
   /** Page length when a long strip is saved as PDF/CBZ/EPUB: normal ≈ a book page, long ≈ 3×, whole = as long as possible. */
   exportPageLength?: 'normal' | 'long' | 'whole';
+  /** Translate in a separate step after reading the picture (default: on, except fast mode). */
+  twoStepTranslation?: boolean;
   /** Interface language: "auto" (default) follows the browser / Windows language. */
   interfaceLang?: string;
 }

@@ -21,6 +21,11 @@ export interface LayoutInput {
   alignment?: Alignment;
   /** Language of the text; enables character wrapping for CJK. */
   lang?: string;
+  /**
+   * Free horizontal span [left, right] (relative to the box) for a band of rows [top, bottom]
+   * (relative to the box): the real outline of an irregular bubble. Overrides `shape`.
+   */
+  spans?: (top: number, bottom: number) => [number, number] | null;
 }
 
 export interface LaidOutLine {
@@ -127,6 +132,17 @@ function availableWidth(shape: 'ellipse' | 'rect', w: number, h: number, top: nu
   return k <= 0 ? 0 : w * Math.sqrt(k);
 }
 
+/** Free span [left, right] of a band of rows: the bubble's real outline, or the ellipse / box. */
+function band(input: LayoutInput, w: number, h: number, top: number, bottom: number): [number, number] {
+  if (input.spans) {
+    const s = input.spans(top, bottom);
+    if (!s) return [w / 2, w / 2];
+    return [Math.max(0, s[0]), Math.min(w, s[1])];
+  }
+  const a = availableWidth(input.shape, w, h, top, bottom);
+  return [(w - a) / 2, (w + a) / 2];
+}
+
 function tryHorizontal(m: Measurer, input: LayoutInput, size: number, allowHyphen = true): LayoutResult | null {
   const [, , w, h] = input.box;
   const font = cssFont(size, input.fontFamily, input.bold, input.italic);
@@ -142,7 +158,10 @@ function tryHorizontal(m: Measurer, input: LayoutInput, size: number, allowHyphe
     const total = n * lh;
     const startY = (h - total) / 2;
     const widths: number[] = [];
-    for (let i = 0; i < n; i++) widths.push(availableWidth(input.shape, w, h, startY + i * lh, startY + (i + 1) * lh));
+    for (let i = 0; i < n; i++) {
+      const [l, r] = band(input, w, h, startY + i * lh, startY + (i + 1) * lh);
+      widths.push(r - l);
+    }
     const lines: string[] = [];
     let queue = [...tokens];
     let ok = true;
@@ -175,9 +194,9 @@ function tryHorizontal(m: Measurer, input: LayoutInput, size: number, allowHyphe
     const align = input.alignment ?? 'center';
     const laid: LaidOutLine[] = lines.map((text, i) => {
       const top = realStart + i * lh;
-      const avail = availableWidth(input.shape, w, h, top, top + lh);
+      const [l, r] = band(input, w, h, top, top + lh);
       const width = m.measure(text, font);
-      const x = align === 'center' ? w / 2 : align === 'left' ? (w - avail) / 2 : w - (w - avail) / 2;
+      const x = align === 'center' ? (l + r) / 2 : align === 'left' ? l : r;
       return { text, x, y: top + lh / 2 + size * 0.35, width };
     });
     return { fontSize: size, font, lineHeight: lh, lines: laid, glyphs: [], vertical: false, alignment: align, overflow: false };

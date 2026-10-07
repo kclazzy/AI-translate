@@ -17,7 +17,9 @@ const STAGE: Partial<Record<StageEvent['stage'], string>> = lazyStrings({
 const CSS = `
 :host { all: initial; }
 .wrap { position: fixed; z-index: 2147483600; pointer-events: none; overflow: hidden; }
-.tiles img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
+.tiles { position: absolute; inset: 0; }
+/* Pieces of a long page overlap by a pixel: no hairline gap where the original could show through. */
+.tiles img { position: absolute; left: 0; width: 100%; display: block; user-select: none; -webkit-user-drag: none; }
 .tiles.hidden { visibility: hidden; }
 .cmp { position: absolute; inset: 0; pointer-events: none; }
 .bar { position: absolute; top: 8px; right: 8px; display: flex; align-items: flex-start; gap: 4px; pointer-events: auto; opacity: .35; transition: opacity .12s; font: 13px/1.2 system-ui, sans-serif; }
@@ -46,7 +48,8 @@ export class Overlay {
   hasResult = false;
 
   constructor(
-    private anchor: () => DOMRect | null,
+    /** Where to draw; `inner` = the drawn picture inside that box (object-fit), relative to it. */
+    private anchor: () => (DOMRect & { inner?: { x: number; y: number; w: number; h: number } }) | null,
     private actions: { onToggle: () => void; onEdit: () => void; onRetry: () => void; onClose?: () => void; onCancel: () => void },
   ) {
     this.host = document.createElement('div');
@@ -69,15 +72,29 @@ export class Overlay {
   position(): void {
     const r = this.anchor();
     if (!r || r.width < 2 || r.bottom < -2000 || r.top > innerHeight + 2000) {
-      this.wrap.style.display = 'none';
+      if (this.placed !== 'none') this.wrap.style.display = 'none';
+      this.placed = 'none';
       return;
     }
+    // Write only when something moved: style writes on hundreds of pictures make scrolling stutter.
+    const key = `${r.left}|${r.top}|${r.width}|${r.height}|${r.inner ? `${r.inner.x},${r.inner.y},${r.inner.w},${r.inner.h}` : ''}`;
+    if (key === this.placed) return;
+    this.placed = key;
     this.wrap.style.display = 'block';
     this.wrap.style.left = `${r.left}px`;
     this.wrap.style.top = `${r.top}px`;
     this.wrap.style.width = `${r.width}px`;
     this.wrap.style.height = `${r.height}px`;
+    // The wrap clips to the element; the tiles cover the drawn picture (bigger when cropped by cover).
+    const i = r.inner;
+    this.tiles.style.inset = i ? 'auto' : '0';
+    this.tiles.style.left = i ? `${i.x}px` : '';
+    this.tiles.style.top = i ? `${i.y}px` : '';
+    this.tiles.style.width = i ? `${i.w}px` : '';
+    this.tiles.style.height = i ? `${i.h}px` : '';
   }
+
+  private placed = '';
 
   private buttons(defs: [string, string, () => void][]) {
     this.bar.replaceChildren();
@@ -136,8 +153,11 @@ export class Overlay {
   setTiles(tiles: { y: number; h: number; dataUrl: string }[], langs?: { source: string; target: string }): void {
     if (langs) this.langs = langs;
     this.revoke();
-    const imgs = tiles.map((t) => {
+    const total = tiles.length ? tiles[tiles.length - 1].y + tiles[tiles.length - 1].h : 1;
+    const imgs = tiles.map((t, i) => {
       const img = document.createElement('img');
+      img.style.top = `${(t.y / total) * 100}%`;
+      img.style.height = i < tiles.length - 1 ? `calc(${(t.h / total) * 100}% + 1px)` : `${(t.h / total) * 100}%`;
       // data: → blob: keeps memory lower for very long strips.
       const url = URL.createObjectURL(dataUrlToBlob(t.dataUrl));
       this.urls.push(url);

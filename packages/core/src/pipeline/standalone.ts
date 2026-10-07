@@ -1,6 +1,6 @@
 import { AppError } from '../errors';
 import type { ImageBackend } from '../image/backend';
-import { cleanBlock, findLeftoverText, luminance, parseHex, type Lettering, type LeftoverProbe } from '../image/clean';
+import { cleanBlock, findLeftoverText, findTextRegions, luminance, parseHex, type Lettering, type LeftoverProbe } from '../image/clean';
 import { boxToPolygon, clampBox, expandBox, overlapRatio, TiledImage } from '../image/tiled';
 import { detectScript } from '../languages';
 import { assertPrivacy, isLocalProvider } from '../llm/privacy';
@@ -72,6 +72,8 @@ interface Located {
   type: TextBlock['textType'];
   vertical: boolean;
   view: View;
+  speaker?: string;
+  gender?: 'male' | 'female' | 'unknown';
 }
 
 async function readView(provider: LlmProvider, image: TiledImage, view: View, config: PipelineConfig, context: TranslationContext | undefined, withTranslation: boolean, deps: StandaloneDeps, signal?: AbortSignal): Promise<{ answer: VisionAnswer; usage: Usage }> {
@@ -127,6 +129,14 @@ export function matchLettering(b: TextBlock, l: Lettering | undefined): Partial<
         style.strokeWidth = 0;
       }
     }
+    // Outlined letters (white with a black edge over the art, coloured shouting): keep both colours.
+    if (l.fill && l.outline && b.textType !== 'SFX') {
+      style.color = l.fill;
+      style.strokeColor = l.outline;
+      style.strokeWidth = Math.max(2, Math.min(8, Math.round(l.stroke * 0.5)));
+    }
+    // Captions written flush left (or right) stay that way.
+    if (l.align && l.align !== 'center') style.alignment = l.align;
   }
   return style;
 }
@@ -218,7 +228,8 @@ export function separateAreas(blocks: TextBlock[]): void {
  */
 export function fontFromLettering(box: Box, text: string, l: Lettering | undefined): number {
   const byArea = estimateFontSize(box, text);
-  if (!l || l.letterHeight < 6) return byArea;
+  // Outlined lettering (fill + outline, low colour share) breaks into pieces: its height is not reliable.
+  if (!l || l.letterHeight < 6 || l.colorShare < 0.6) return byArea;
   const script = detectScript(text);
   const ratio = script === 'latin' || script === 'cyrillic' ? (isAllCaps(text) ? 0.72 : 0.6) : 0.9;
   return Math.max(8, Math.min(byArea, Math.round(l.letterHeight / ratio)));
@@ -242,8 +253,10 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   if (!config.vision) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: 'No vision provider' });
   if (!config.vision.vision) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: `${config.vision.label} does not accept images; pick a vision model or use the engine` });
   assertPrivacy(config.privacy, config.vision, 'image');
-  const separate = !!config.translator && config.translator.id !== config.vision.id;
-  if (separate) assertPrivacy(config.privacy, config.translator!, 'text');
+  // A separate translation request: another model, or the same one in two steps (more accurate).
+  const translatorCfg = config.translator && config.translator.id !== config.vision.id ? config.translator : config.twoStep ? config.vision : null;
+  const separate = !!translatorCfg;
+  if (translatorCfg) assertPrivacy(config.privacy, translatorCfg, 'text');
 
   stage('decoding');
   const original = await TiledImage.fromBytes(deps.backend, req.bytes, req.mime);
@@ -272,7 +285,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     if (answer.summary) summaries.push(answer.summary);
     for (const b of answer.blocks) {
       const box: Box = [(b.box[0] / 1000) * original.width, view.y + (b.box[1] / 1000) * view.h, ((b.box[2] - b.box[0]) / 1000) * original.width, ((b.box[3] - b.box[1]) / 1000) * view.h];
-      located.push({ box: clampBox(box, original.width, original.height), text: b.text, translation: b.translation, type: b.type, vertical: b.vertical, view });
+      located.push({ box: clampBox(box, original.width, original.height), text: b.text, translation: b.translation, type: b.type, vertical: b.vertical, view, speaker: b.speaker, gender: b.gender });
     }
   }
   const tDetected = performance.now();
@@ -299,13 +312,15 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       fontSizeEstimate: estimateFontSize(l.box, l.text),
       bubble: null,
       translate: !(l.type === 'SFX' && !config.translateSfx),
+      ...(l.speaker ? { speaker: l.speaker } : {}),
+      ...(l.gender ? { speakerGender: l.gender } : {}),
     };
   });
 
   stage('translating');
   if (separate) {
-    const translator = createProvider(config.translator!, deps.fetchImpl);
-    const toTranslate = blocks.filter((b) => b.translate).map((b) => ({ id: b.id, type: b.textType, text: b.originalText }));
+    const translator = createProvider(translatorCfg!, deps.fetchImpl);
+    const toTranslate = blocks.filter((b) => b.translate).map((b) => ({ id: b.id, type: b.textType, text: b.originalText, speaker: b.speaker, gender: b.speakerGender }));
     const res = await translateBlocks(translator, promptInput(config, req.context), toTranslate, { signal });
     usage.push(...res.usage);
     entities = entities.concat(res.entities);
@@ -362,8 +377,10 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     const probes: LeftoverProbe[] = blocks
       .filter((b) => b.translate && b.textType !== 'SFX' && b.bubble && (letterHeight.get(b.id) ?? 0) >= 6)
       .map((b) => ({ area: b.bubble!.box, fill: parseHex(b.bubble!.fill), letterHeight: letterHeight.get(b.id)! }));
+    // …and lettering in light areas nobody reported: a bubble of an unusual shape the model skipped.
+    probes.push(...findTextRegions(cleaned));
     const known = blocks.flatMap((b) => (b.textBox ? [b.bbox, b.textBox] : [b.bbox]));
-    for (const [k, box] of findLeftoverText(cleaned, probes, known).slice(0, 3).entries()) {
+    for (const [k, box] of findLeftoverText(cleaned, probes, known).slice(0, 4).entries()) {
       try {
         const pad = Math.round(Math.max(box[2], box[3]) * 0.3) + 12;
         const r = await recognizeRegion(original, expandBox(box, pad), config, deps, { context: req.context, signal, idPrefix: `x${k}` });

@@ -290,6 +290,13 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
           </Field>
           <Field label={tr('Качество')} hint={tr('Чем выше, тем крупнее картинка уходит модели и дольше ответ')}>
             <Segmented label={tr('Качество')} value={s.quality} onChange={(quality) => update({ quality })} options={[{ value: 'fast', label: tr('Быстро') }, { value: 'balanced', label: tr('Баланс') }, { value: 'best', label: tr('Максимум') }]} />
+            <div style={{ marginTop: 8 }}>
+              <Switch
+                checked={s.twoStepTranslation ?? (s.quality !== 'fast' && !s.fastLocal)}
+                onChange={(twoStepTranslation) => update({ twoStepTranslation })}
+                label={tr('Переводить отдельным шагом — точнее смысл и окончания слов, чуть дольше')}
+              />
+            </div>
           </Field>
           <Field label={tr('Звуки (SFX)')}>
             <div style={{ display: 'grid', gap: 8 }}>

@@ -2,7 +2,7 @@ import { errorMessage } from '@ait/core/errors';
 import { dominantLanguage, nativeName } from '@ait/core/languages';
 import type { BackgroundToContent, ChapterFormat, ContentToBackground, ImageRef, JobStatus, PageLangs, RenderedTiles, UiStrings } from '../shared/messages';
 import { Overlay } from './overlay';
-import { asCandidate, candidateAt, imgSrc, inlineData, lazySrc, markUi, scanPage, viewportRect, type Candidate } from './scanner';
+import { asCandidate, candidateAt, chapterColumn, imgSrc, inlineData, lazySrc, markUi, scanPage, viewportRect, type Candidate } from './scanner';
 import { registerDictionary, setUiLang, tr } from '@ait/core/i18n';
 
 /**
@@ -104,6 +104,7 @@ function main() {
     });
     const req = `${id}~${(reqSeq++).toString(36)}`;
     const item: Item = { id, req, cand: c, src: c.src, status: 'queued', overlay };
+    watchEl(c.el);
     items.set(id, item);
     overlay.stage({ stage: 'queued' });
     try {
@@ -182,7 +183,23 @@ function main() {
     const t = parseFloat(cs.paddingTop) + parseFloat(cs.borderTopWidth);
     const w = r.width - l - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth);
     const h = r.height - t - parseFloat(cs.paddingBottom) - parseFloat(cs.borderBottomWidth);
-    return new DOMRect(r.left + l, r.top + t, w, h);
+    const box = new DOMRect(r.left + l, r.top + t, w, h) as DOMRect & { inner?: { x: number; y: number; w: number; h: number } };
+    // object-fit: the picture is drawn smaller (contain) or larger and cropped (cover) inside the box —
+    // the translation must sit exactly on the drawn picture, or part of the page looks cut off.
+    const nw = el.naturalWidth;
+    const nh = el.naturalHeight;
+    const fit = cs.objectFit;
+    if (nw && nh && w > 0 && h > 0 && fit && fit !== 'fill') {
+      let k = fit === 'contain' ? Math.min(w / nw, h / nh) : fit === 'cover' ? Math.max(w / nw, h / nh) : fit === 'none' ? 1 : Math.min(1, w / nw, h / nh);
+      if (!Number.isFinite(k) || k <= 0) k = 1;
+      const dw = nw * k;
+      const dh = nh * k;
+      const [px, py] = (cs.objectPosition || '50% 50%').split(' ').map((v) => (v.endsWith('%') ? parseFloat(v) / 100 : v === 'left' || v === 'top' ? 0 : v === 'right' || v === 'bottom' ? 1 : 0.5));
+      const ix = (w - dw) * (px ?? 0.5);
+      const iy = (h - dh) * (py ?? 0.5);
+      if (Math.abs(dw - w) > 1 || Math.abs(dh - h) > 1) box.inner = { x: ix, y: iy, w: dw, h: dh };
+    }
+    return box;
   }
 
   // ---- messages from the background --------------------------------------------------------
@@ -291,11 +308,10 @@ function main() {
   let pageMode = false;
 
   // ---- «Перевести и скачать»: the whole chapter as one file --------------------------------
-  let chapter: { format: ChapterFormat; timer: ReturnType<typeof setInterval>; panel: HTMLElement; text: HTMLElement; lastChange: number; lastDone: number; seen: number } | null = null;
+  let chapter: { format: ChapterFormat; timer: ReturnType<typeof setInterval>; panel: HTMLElement; text: HTMLElement; lastChange: number; lastDone: number; seen: number; loaded: boolean } | null = null;
 
   function downloadChapter(format: ChapterFormat) {
     if (chapter) return;
-    translatePage();
     const host = document.createElement('div');
     markUi(host);
     const root = host.attachShadow({ mode: 'closed' });
@@ -318,15 +334,43 @@ function main() {
       host.remove();
     });
     document.documentElement.appendChild(host);
-    chapter = { format, timer: setInterval(() => void tickChapter(), 1000), panel: host, text, lastChange: Date.now(), lastDone: -1, seen: 0 };
+    chapter = { format, timer: setInterval(() => void tickChapter(), 1000), panel: host, text, lastChange: Date.now(), lastDone: -1, seen: 0, loaded: false };
+    translatePage();
+    void loadWholeChapter(chapter);
     void tickChapter();
   }
 
-  /** Items of the page (not screen-area results), in reading (document) order. */
+  /** Items of the chapter (not screen-area results, not pictures outside its column), in reading order. */
   function pageItemsInOrder(): Item[] {
-    return [...items.values()]
-      .filter((it) => !it.docRect && it.cand.el.isConnected)
+    const page = [...items.values()].filter((it) => !it.docRect && it.cand.el.isConnected);
+    const column = new Set(chapterColumn(page.map((it) => ({ el: it.cand.el, it }))).map((x) => x.it));
+    return page
+      .filter((it) => column.has(it))
       .sort((a, b) => (a.cand.el.compareDocumentPosition(b.cand.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+  }
+
+  /**
+   * Readers load pictures only when they come near the screen. Scroll through the chapter once so
+   * that every page loads (and is translated), then return to where the reader was.
+   */
+  async function loadWholeChapter(c: NonNullable<typeof chapter>) {
+    const startY = scrollY;
+    let last = -1;
+    let still = 0;
+    for (let i = 0; i < 400 && chapter === c; i++) {
+      const col = chapterColumn(scanPage(Math.min(minSize, 120)));
+      const bottom = col.length ? Math.max(...col.map((x) => x.el.getBoundingClientRect().bottom + scrollY)) : document.documentElement.scrollHeight;
+      const target = Math.min(scrollY + innerHeight * 0.9, Math.max(0, bottom - innerHeight * 0.5));
+      if (Math.abs(target - scrollY) < 4) {
+        // At the end of the column: wait a little for late pictures, then stop.
+        if (bottom === last && ++still >= 4) break;
+      } else still = 0;
+      last = bottom;
+      scrollTo({ top: target, behavior: 'instant' as ScrollBehavior });
+      await new Promise((r) => setTimeout(r, 350));
+    }
+    scrollTo({ top: startY, behavior: 'instant' as ScrollBehavior });
+    if (chapter === c) c.loaded = true;
   }
 
   async function tickChapter() {
@@ -353,7 +397,8 @@ function main() {
     c.text.textContent = tr('Глава → {0}: готово {1} из {2}{3}', label, done, list.length, failed ? tr(', не удалось {0}', failed) : '');
     // Everything finished (or nothing moved for 15 minutes): build the file from what is ready.
     const stalled = Date.now() - c.lastChange > 15 * 60_000;
-    if (list.length && (pending === 0 || stalled)) {
+    // Finish only after the whole chapter was scrolled through (its last pages load late).
+    if (list.length && ((pending === 0 && c.loaded) || stalled)) {
       clearInterval(c.timer);
       const keys = list.filter((it) => it.status === 'done' && it.result).map((it) => it.result!.key);
       if (!keys.length) {
@@ -378,7 +423,8 @@ function main() {
   function translatePage() {
     pageMode = true;
     dismissed = new WeakSet();
-    const cands = scanPage(minSize);
+    // For a chapter download only the chapter's own column of pictures (no banners, other episodes).
+    const cands = chapter ? chapterColumn(scanPage(minSize)) : scanPage(minSize);
     if (!cands.length) toastOnce(tr('На странице не найдено подходящих изображений'));
     // Pictures on screen first, then the rest of the chapter in reading order.
     for (const c of cands) void translate(c);
@@ -422,8 +468,11 @@ function main() {
       }
       if (!autoTranslate && !pageMode) return;
       if (!enabled) return;
-      for (const c of scanPage(minSize)) {
+      const found = scanPage(minSize);
+      const inChapter = chapter ? new Set(chapterColumn(found).map((c) => c.el)) : null;
+      for (const c of found) {
         if (dismissed.has(c.el)) continue;
+        if (inChapter && !inChapter.has(c.el)) continue;
         if (pageMode) {
           const known = byElement.get(c.el);
           if (!known || !items.has(known)) void translate(c);
@@ -443,7 +492,10 @@ function main() {
   }
 
   const mo = new MutationObserver((muts) => {
-    if (muts.some((m) => !(m.target instanceof Element) || !m.target.closest('[data-ait-ui]'))) rescan();
+    if (muts.some((m) => !(m.target instanceof Element) || !m.target.closest('[data-ait-ui]'))) {
+      rescan();
+      reposition();
+    }
   });
   mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset', 'style', 'data-src'] });
   document.addEventListener('load', (e) => e.target instanceof HTMLImageElement && rescan(), true);
@@ -465,6 +517,17 @@ function main() {
   addEventListener('scroll', reposition, { capture: true, passive: true });
   addEventListener('resize', reposition, { passive: true });
   setInterval(reposition, 500);
+  // Pictures above loading (webtoons) move everything below without a scroll event: follow at once,
+  // otherwise the original shows from under a translation that lags behind for a moment.
+  const ro = new ResizeObserver(reposition);
+  ro.observe(document.documentElement);
+  if (document.body) ro.observe(document.body);
+  const watched = new WeakSet<Element>();
+  const watchEl = (el: Element) => {
+    if (watched.has(el)) return;
+    watched.add(el);
+    ro.observe(el);
+  };
 
   // ---- hover button -------------------------------------------------------------------------
   const hoverHost = document.createElement('div');

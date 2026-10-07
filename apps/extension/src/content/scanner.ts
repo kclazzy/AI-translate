@@ -149,3 +149,26 @@ export function viewportRect(el: Element): { x: number; y: number; width: number
   if (!fully || r.width < 20 || r.height < 20) return undefined;
   return { x: r.left, y: r.top, width: r.width, height: r.height };
 }
+
+/**
+ * The pictures of the chapter itself: readers show the pages as one column of pictures of the
+ * same width (a webtoon strip, a manga reader). Banners, thumbnails of other episodes, avatars and
+ * ads sit elsewhere or have other sizes. Returns the column with the most picture area.
+ */
+export function chapterColumn<T extends { el: Element }>(cands: T[]): T[] {
+  if (cands.length <= 1) return cands;
+  const groups = new Map<string, { items: T[]; area: number }>();
+  for (const c of cands) {
+    const r = c.el.getBoundingClientRect();
+    if (r.width < 2) continue;
+    // Same column: same left edge and width, to within a few pixels.
+    const key = `${Math.round((r.left + scrollX) / 8)}|${Math.round(r.width / 8)}`;
+    const g = groups.get(key) ?? { items: [], area: 0 };
+    g.items.push(c);
+    g.area += r.width * r.height;
+    groups.set(key, g);
+  }
+  let best: { items: T[]; area: number } | null = null;
+  for (const g of groups.values()) if (!best || g.area > best.area) best = g;
+  return best?.items ?? cands;
+}

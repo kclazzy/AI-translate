@@ -1,4 +1,4 @@
-import type { Box, BubbleInfo } from '../types';
+import type { Box, BubbleInfo, BubbleRows } from '../types';
 import type { PixelData } from './backend';
 import { boxArea, clampBox, expandBox, type TiledImage } from './tiled';
 
@@ -345,6 +345,11 @@ export interface Lettering {
   letterHeight: number;
   /** Share of letter pixels close to `color` (low for outlined lettering: fill + outline). */
   colorShare: number;
+  /** Outlined lettering: fill colour inside the strokes and the outline colour around them. */
+  fill?: string;
+  outline?: string;
+  /** How the lines are aligned (needs at least two lines). */
+  align?: 'left' | 'center' | 'right';
 }
 
 export interface CleanOptions {
@@ -355,7 +360,7 @@ export interface CleanOptions {
 }
 
 /** Colour, stroke thickness and letter height of the lettering in `mask` (before erasing). */
-export function measureLettering(img: PixelData, mask: Uint8Array, rect: Box): Lettering | undefined {
+export function measureLettering(img: PixelData, mask: Uint8Array, rect: Box, bg?: RGB): Lettering | undefined {
   const [x0, y0, w, h] = clampBox(rect, img.width, img.height);
   let area = 0;
   let edges = 0;
@@ -395,7 +400,82 @@ export function measureLettering(img: PixelData, mask: Uint8Array, rect: Box): L
   const ink: RGB = best.n ? [best.r / best.n, best.g / best.n, best.b / best.n] : [median(rs), median(gs), median(bs)];
   let close = 0;
   for (let i = 0; i < rs.length; i++) if (Math.hypot(rs[i] - ink[0], gs[i] - ink[1], bs[i] - ink[2]) < 60) close++;
-  return { color: toHex(ink), stroke, letterHeight, colorShare: close / Math.max(1, rs.length) };
+  const out: Lettering = { color: toHex(ink), stroke, letterHeight, colorShare: close / Math.max(1, rs.length) };
+  // Outlined lettering: the edge of the strokes has another colour than their middle.
+  {
+    let er = 0, eg = 0, eb = 0, en = 0;
+    const deepBins = new Map<number, { n: number; r: number; g: number; b: number }>();
+    let inn = 0;
+    for (let y = y0 + 1; y < y0 + h - 1; y++) {
+      for (let x = x0 + 1; x < x0 + w - 1; x++) {
+        const p = y * img.width + x;
+        if (!mask[p]) continue;
+        const edge = !mask[p - 1] || !mask[p + 1] || !mask[p - img.width] || !mask[p + img.width];
+        const deep = !edge && mask[p - 2] && mask[p + 2] && mask[p - 2 * img.width] && mask[p + 2 * img.width];
+        if (edge) (er += img.data[p * 4]), (eg += img.data[p * 4 + 1]), (eb += img.data[p * 4 + 2]), en++;
+        else if (deep) {
+          const [r0, g0, b0] = [img.data[p * 4], img.data[p * 4 + 1], img.data[p * 4 + 2]];
+          const k = ((r0 >> 5) << 6) | ((g0 >> 5) << 3) | (b0 >> 5);
+          const e = deepBins.get(k) ?? { n: 0, r: 0, g: 0, b: 0 };
+          e.n++;
+          e.r += r0;
+          e.g += g0;
+          e.b += b0;
+          deepBins.set(k, e);
+          inn++;
+        }
+      }
+    }
+    if (en > 30 && inn > 30) {
+      const e: RGB = [er / en, eg / en, eb / en];
+      // The fill: the most common colour in the middle of the strokes (anti-aliasing excluded).
+      let top = { n: 0, r: 0, g: 0, b: 0 };
+      for (const v of deepBins.values()) if (v.n > top.n) top = v;
+      const i: RGB = [top.r / top.n, top.g / top.n, top.b / top.n];
+      // Anti-aliased edges are a blend of the fill and the background, not an outline.
+      const blend = (() => {
+        if (!bg) return false;
+        const d = [bg[0] - i[0], bg[1] - i[1], bg[2] - i[2]];
+        const len2 = d[0] ** 2 + d[1] ** 2 + d[2] ** 2 || 1;
+        const t = Math.max(0, Math.min(1, ((e[0] - i[0]) * d[0] + (e[1] - i[1]) * d[1] + (e[2] - i[2]) * d[2]) / len2));
+        return Math.hypot(e[0] - (i[0] + d[0] * t), e[1] - (i[1] + d[1] * t), e[2] - (i[2] + d[2] * t)) < 45;
+      })();
+      if (!blend && Math.hypot(e[0] - i[0], e[1] - i[1], e[2] - i[2]) > 120) {
+        out.fill = toHex(i);
+        out.outline = toHex(e);
+      }
+    }
+  }
+  // Alignment: lines whose left edges line up (and right edges do not) are left-aligned, etc.
+  {
+    const rows: Box[] = [];
+    const letterComps = comps.filter((c) => c.box[3] <= letterHeight * 1.8 && c.box[2] <= letterHeight * 4);
+    for (const c of letterComps.sort((a, b) => a.box[1] - b.box[1])) {
+      const row = rows.find((r) => c.box[1] < r[1] + r[3] * 0.7 && c.box[1] + c.box[3] > r[1] + r[3] * 0.3);
+      if (row) {
+        const x = Math.min(row[0], c.box[0]);
+        const y = Math.min(row[1], c.box[1]);
+        row[2] = Math.max(row[0] + row[2], c.box[0] + c.box[2]) - x;
+        row[3] = Math.max(row[1] + row[3], c.box[1] + c.box[3]) - y;
+        row[0] = x;
+        row[1] = y;
+      } else rows.push([...c.box] as Box);
+    }
+    const lines = rows.filter((r) => r[3] >= letterHeight * 0.6);
+    if (lines.length >= 2) {
+      const spread = (v: number[]) => Math.max(...v) - Math.min(...v);
+      const lefts = spread(lines.map((r) => r[0]));
+      const rights = spread(lines.map((r) => r[0] + r[2]));
+      const centres = spread(lines.map((r) => r[0] + r[2] / 2));
+      const tol = Math.max(4, letterHeight * 0.35);
+      // Lines of almost equal length say nothing about alignment: only clearly ragged edges count.
+      const ragged = letterHeight * 1.2;
+      if (lefts <= tol && rights >= ragged && centres > letterHeight * 0.6) out.align = 'left';
+      else if (rights <= tol && lefts >= ragged && centres > letterHeight * 0.6) out.align = 'right';
+      else out.align = 'center';
+    }
+  }
+  return out;
 }
 
 /** Most common colour in a rectangle (coarse histogram) and the share of pixels close to it. */
@@ -668,7 +748,7 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       letterMask = snap.mask;
       mask = dilate(snap.mask, img.width, img.height, 2);
     }
-    const lettering = measureLettering(img, letterMask, closed ? flood!.box : search);
+    const lettering = measureLettering(img, letterMask, closed ? flood!.box : search, bg);
     if (!opts.analyzeOnly) fillMask(img, mask, bg);
     let method: CleanResult['method'] = opts.analyzeOnly ? 'none' : 'fill';
     // Verify: nothing that stands out from the bubble colour may remain where the text was.
@@ -700,6 +780,10 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       const safe: Box = [bb[0] + bb[2] * insetX, bb[1] + bb[3] * insetY, bb[2] * (1 - 2 * insetX), bb[3] * (1 - 2 * insetY)];
       // A bubble cut by the picture edge: keep the text inside the visible part.
       bubble = { box: bb, fill: toHex(bg), safeArea: clampBox(safe.map(Math.round) as Box, image.width, image.height), shape };
+      // The real inside, row by row, so the translation follows any outline (spiky, cloud, wavy).
+      const holes = enclosedHoles(flood!.mask, img.width, img.height, clampBox(expandBox(flood!.box, 1), img.width, img.height));
+      const cx = Math.round(tb ? tb[0] + tb[2] / 2 : local[0] + local[2] / 2);
+      bubble.rows = bubbleRows(flood!.mask, holes, img.width, flood!.box, cx, region);
     } else {
       const base = textBox ? unionBox(textBox, bbox) : bbox;
       bubble = { box: base, fill: toHex(bg), safeArea: clampBox(expandBox(base, Math.round(base[2] * 0.08), Math.round(base[3] * 0.08)).map(Math.round) as Box, image.width, image.height), shape: 'rect' };
@@ -722,7 +806,7 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     let mask = snap.mask;
     const tb = snap.box;
     const inner = clampBox(expandBox(local, 2), img.width, img.height);
-    const lettering = measureLettering(img, mask, search);
+    const lettering = measureLettering(img, mask, search, bg);
     // No clear letters found: smear the box only if it is small. A big box (a sound effect drawn
     // into the art, an imprecise model box) would turn a large part of the picture into a blur.
     const small = inner[2] * inner[3] <= 45_000;
@@ -763,6 +847,41 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
 
   if (!opts.analyzeOnly) image.putRegion(img, region[0], region[1]);
   return result;
+}
+
+/** Free horizontal span of the bubble interior on every second row, through the text's centre column. */
+export function bubbleRows(mask: Uint8Array, holes: Uint8Array, width: number, box: Box, cx: number, region: Box): BubbleRows {
+  const step = 2;
+  const l: number[] = [];
+  const r: number[] = [];
+  const inside = (p: number) => mask[p] === 1 || holes[p] === 1;
+  const x0 = box[0];
+  const x1 = box[0] + box[2] - 1;
+  for (let y = box[1]; y < box[1] + box[3]; y += step) {
+    const row = y * width;
+    let c = Math.max(x0, Math.min(x1, cx));
+    if (!inside(row + c)) {
+      // The centre column may hit a stray mark: look for the interior nearby on this row.
+      let found = -1;
+      for (let d = 1; d < box[2] / 4 && found < 0; d++) {
+        if (c - d >= x0 && inside(row + c - d)) found = c - d;
+        else if (c + d <= x1 && inside(row + c + d)) found = c + d;
+      }
+      if (found < 0) {
+        l.push(cx + region[0]);
+        r.push(cx + region[0]);
+        continue;
+      }
+      c = found;
+    }
+    let a = c;
+    let b = c;
+    while (a > x0 && inside(row + a - 1)) a--;
+    while (b < x1 && inside(row + b + 1)) b++;
+    l.push(a + region[0]);
+    r.push(b + 1 + region[0]);
+  }
+  return { y: box[1] + region[1], step, l, r };
 }
 
 function floodLeaks(f: FloodResult, region: Box, imageW: number, imageH: number): boolean {
@@ -859,4 +978,95 @@ export function findLeftoverText(image: TiledImage, probes: LeftoverProbe[], kno
     }
   }
   return found;
+}
+
+/**
+ * Places with lettering anywhere on a (cleaned) page: light areas — bubbles of any shape, captions,
+ * the white gutter — that enclose rows of letter-sized marks. Used to find text the model did not
+ * report at all (an unusual bubble it skipped). Returns probes for findLeftoverText.
+ */
+export function findTextRegions(image: TiledImage, opts: { band?: number; minLetters?: number } = {}): LeftoverProbe[] {
+  const bandH = opts.band ?? 2048;
+  const minLetters = opts.minLetters ?? 6;
+  const probes: LeftoverProbe[] = [];
+  for (let top = 0; top < image.height; top += bandH - 200) {
+    const region = clampBox([0, top, image.width, Math.min(bandH, image.height - top)], image.width, image.height);
+    const img = image.getRegion(...region);
+    const { width: w, height: h, data } = img;
+    const n = w * h;
+    // Light pixels: the inside of bubbles and captions (white or nearly white).
+    const light = new Uint8Array(n);
+    for (let p = 0; p < n; p++) if (data[p * 4] > 215 && data[p * 4 + 1] > 215 && data[p * 4 + 2] > 215) light[p] = 1;
+    const label = new Int32Array(n).fill(-1);
+    const comps: { box: Box; area: number }[] = [];
+    const stack: number[] = [];
+    for (let p0 = 0; p0 < n; p0++) {
+      if (!light[p0] || label[p0] >= 0) continue;
+      const id = comps.length;
+      label[p0] = id;
+      stack.push(p0);
+      let minX = w, minY = h, maxX = 0, maxY = 0, area = 0;
+      while (stack.length) {
+        const p = stack.pop()!;
+        area++;
+        const x = p % w;
+        const y = (p - x) / w;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (x > 0 && light[p - 1] && label[p - 1] < 0) (label[p - 1] = id), stack.push(p - 1);
+        if (x < w - 1 && light[p + 1] && label[p + 1] < 0) (label[p + 1] = id), stack.push(p + 1);
+        if (y > 0 && light[p - w] && label[p - w] < 0) (label[p - w] = id), stack.push(p - w);
+        if (y < h - 1 && light[p + w] && label[p + w] < 0) (label[p + w] = id), stack.push(p + w);
+      }
+      comps.push({ box: [minX, minY, maxX - minX + 1, maxY - minY + 1], area });
+    }
+    for (const [id, c] of comps.entries()) {
+      if (c.area < 1500 || c.box[2] < 40 || c.box[3] < 24) continue;
+      // Marks enclosed by this light area (not connected to its bounding box's edge).
+      const [bx, by, bw, bh] = c.box;
+      const outside = new Uint8Array(bw * bh);
+      const q: number[] = [];
+      const local = (x: number, y: number) => (y - by) * bw + (x - bx);
+      const seed = (x: number, y: number) => {
+        const i = local(x, y);
+        if (label[y * w + x] !== id && !outside[i]) (outside[i] = 1), q.push(i);
+      };
+      for (let x = bx; x < bx + bw; x++) seed(x, by), seed(x, by + bh - 1);
+      for (let y = by; y < by + bh; y++) seed(bx, y), seed(bx + bw - 1, y);
+      while (q.length) {
+        const i = q.pop()!;
+        const x = (i % bw) + bx;
+        const y = Math.floor(i / bw) + by;
+        for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]] as const) {
+          if (nx < bx || ny < by || nx >= bx + bw || ny >= by + bh) continue;
+          const j = local(nx, ny);
+          if (!outside[j] && label[ny * w + nx] !== id) (outside[j] = 1), q.push(j);
+        }
+      }
+      const holes = new Uint8Array(bw * bh);
+      let any = 0;
+      for (let y = by; y < by + bh; y++) for (let x = bx; x < bx + bw; x++) if (label[y * w + x] !== id && !outside[local(x, y)]) (holes[local(x, y)] = 1), any++;
+      if (any < 60 || any > c.area) continue;
+      // Letters: small, dark ink (bubble lettering is black or near-black, unlike bits of art).
+      const ink = (m: Component) => {
+        let sum = 0;
+        for (let k = 0; k < m.pixels.length; k += 3) {
+          const lx = m.pixels[k] % bw;
+          const ly = (m.pixels[k] - lx) / bw;
+          const p = ((ly + by) * w + lx + bx) * 4;
+          sum += luminance(data[p], data[p + 1], data[p + 2]);
+        }
+        return sum / Math.ceil(m.pixels.length / 3);
+      };
+      const marks = components(holes, bw, [0, 0, bw, bh]).filter((m) => m.pixels.length >= 12 && m.box[3] >= 8 && m.box[3] <= 90 && m.box[2] <= m.box[3] * 3.5 && ink(m) < 100);
+      if (marks.length < minLetters) continue;
+      const hs = marks.map((m) => m.box[3]).sort((a, b) => a - b);
+      const letterHeight = hs[Math.floor(hs.length / 2)];
+      probes.push({ area: [bx + region[0], by + region[1], bw, bh], fill: [255, 255, 255], letterHeight });
+    }
+    if (top + bandH >= image.height) break;
+  }
+  return probes;
 }

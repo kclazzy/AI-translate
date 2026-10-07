@@ -440,7 +440,11 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
               <canvas ref={strokeCanvas} width={page.width} height={Math.min(page.height, 32000)} style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }} />
               {!compare && tool === 'select'
                 ? blocks.map((b) => {
-                    const box = targetBox(b, defaults);
+                    // Keep the frame on the picture: a box sticking out above the page cannot be grabbed.
+                    const raw = targetBox(b, defaults);
+                    const bx = Math.max(0, Math.min(raw[0], page.width - 8));
+                    const by = Math.max(0, Math.min(raw[1], page.height - 8));
+                    const box: [number, number, number, number] = [bx, by, Math.min(raw[0] + raw[2], page.width) - bx, Math.min(raw[1] + raw[3], page.height) - by];
                     const rot = resolveStyle(b, defaults).rotation;
                     return (
                       <div

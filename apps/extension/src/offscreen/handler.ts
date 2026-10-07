@@ -155,7 +155,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       const pages: ExportPage[] = [];
       for (const [i, key] of msg.keys.entries()) {
         const r = await service.getResult(key);
-        if (r) pages.push({ name: `${String(i + 1).padStart(3, '0')}.png`, width: r.page.width, height: r.page.height, tiles: r.rendered });
+        if (r) pages.push({ name: `${String(i + 1).padStart(3, '0')}.png`, width: r.page.width, height: r.page.height, tiles: r.rendered, avoid: r.page.blocks.map((b) => b.bubble?.box ?? b.bbox) });
       }
       if (!pages.length) throw new AppError('UNKNOWN', { retryable: false, message: tr('Нет переведённых страниц') });
       // Letters (any alphabet), digits and simple punctuation only: Chrome rejects some characters.

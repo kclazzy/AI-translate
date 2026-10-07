@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { AnyCanvas, ImageBackend, ImageMime } from '../image/backend';
 import type { TiledImage } from '../image/tiled';
-import type { Box, TextBlock } from '../types';
+import type { Box, BubbleRows, TextBlock } from '../types';
 import { layoutText, type LayoutResult, type Measurer } from '../typeset/layout';
 import { resolveStyle, targetBox, type StyleDefaults, DEFAULT_STYLE_DEFAULTS } from './style';
 
@@ -69,8 +69,27 @@ function layoutBlockRaw(measurer: Measurer, block: TextBlock, d: StyleDefaults):
   return second.overflow ? first : { ...second, box: inner };
 }
 
+/** Free span of a bubble's real outline for a band of rows of `box`, a little inside its edge. */
+export function spansFromRows(rows: BubbleRows, box: Box, pad: number): (top: number, bottom: number) => [number, number] | null {
+  return (top, bottom) => {
+    const a = Math.max(0, Math.floor((box[1] + top - rows.y) / rows.step));
+    const b = Math.min(rows.l.length - 1, Math.ceil((box[1] + bottom - rows.y) / rows.step));
+    if (b < a) return null;
+    let l = -Infinity;
+    let r = Infinity;
+    for (let i = a; i <= b; i++) {
+      l = Math.max(l, rows.l[i]);
+      r = Math.min(r, rows.r[i]);
+    }
+    if (r - l <= pad * 2) return null;
+    return [l + pad - box[0], r - pad - box[0]];
+  };
+}
+
 function layoutBlockIn(measurer: Measurer, block: TextBlock, d: StyleDefaults, box: Box, shape: 'rect' | 'ellipse', minSize?: number): LayoutResult {
   const style = resolveStyle(block, d);
+  const rows = !block.textBox && block.bubble?.rows && !style.vertical ? block.bubble.rows : undefined;
+  const pad = Math.max(3, (block.bubble?.box[2] ?? 0) * 0.06);
   const cap = block.fontSizeEstimate > 0 ? Math.max(14, block.fontSizeEstimate * 1.3) : undefined;
   return layoutText(measurer, {
     text: displayText(block, d),
@@ -86,6 +105,7 @@ function layoutBlockIn(measurer: Measurer, block: TextBlock, d: StyleDefaults, b
     vertical: style.vertical,
     alignment: style.alignment,
     lang: d.targetLang,
+    spans: rows ? spansFromRows(rows, box, pad) : undefined,
   });
 }
 

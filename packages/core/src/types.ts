@@ -43,6 +43,18 @@ export interface BubbleInfo {
   safeArea: Box;
   /** 'ellipse' lets the typesetter follow a rounded bubble. */
   shape: 'ellipse' | 'rect';
+  /**
+   * The real inside of the bubble, row by row (any shape: spiky, cloud, rounded box): free span
+   * [l[i], r[i]] in page pixels for the row y + i·step. The translation follows it.
+   */
+  rows?: BubbleRows;
+}
+
+export interface BubbleRows {
+  y: number;
+  step: number;
+  l: number[];
+  r: number[];
 }
 
 export interface TextBlock {
@@ -64,6 +76,9 @@ export interface TextBlock {
   textBox?: Box;
   style?: Partial<TextStyle>;
   lowConfidence?: boolean;
+  /** Who says it (from the picture) and their gender: verbs and adjectives must agree in many languages. */
+  speaker?: string;
+  speakerGender?: 'male' | 'female' | 'unknown';
   /** Result of the translation check (linguistic + semantic QA). */
   qa?: import('./translate/qa').BlockQa;
   overflow?: boolean;

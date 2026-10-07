@@ -73,6 +73,8 @@ export interface ExportPage {
   width: number;
   height: number;
   tiles: { y: number; h: number; bytes: Uint8Array }[];
+  /** Where the text is (page pixels): a page is never cut through a speech bubble. */
+  avoid?: [number, number, number, number][];
 }
 
 /** Join tiles into one image (when it fits a canvas) or keep them as numbered parts. */
@@ -140,6 +142,10 @@ export async function bookPages(backend: ImageBackend, page: ExportPage, mime: I
       ctx.drawImage(img.source, 0, 0);
       const rows = rowBusyness(ctx.getImageData(0, 0, page.width, t.h).data, page.width, t.h);
       busy.set(rows.subarray(0, Math.min(t.h, page.height - t.y)), t.y);
+    }
+    // Rows crossing a bubble or a caption are never a place to cut.
+    for (const [, y, , h] of page.avoid ?? []) {
+      for (let r = Math.max(0, Math.floor(y) - 6); r < Math.min(page.height, Math.ceil(y + h) + 6); r++) busy[r] = 1e6;
     }
     const cuts = planSlices(busy, page.width, sliceOptions(page.width, len));
     const out: { width: number; height: number; bytes: Uint8Array }[] = [];

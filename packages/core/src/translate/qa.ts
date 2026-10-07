@@ -91,6 +91,7 @@ function reviewPrompt(targetLang: string, context?: TranslationContext): string 
     'For every block compare the original and the translation and look for real errors only:',
     '- linguistic: grammar, spelling, punctuation, terminology (names and terms used consistently), formatting;',
     '- semantic: meaning lost or changed, context of the scene, the speaker\'s intent, emotion and tone, how the character speaks (gender agreement, politeness).',
+    '- word endings: verbs, adjectives and participles must agree with the speaker\'s gender and number, cases must be right — report a wrong ending as "grammar" and give the fix.',
     'Do not rewrite good translations for style. Keep a fix about as short as the translation: it must fit the same bubble.',
     names.length ? `Known names and terms:\n${names.join('\n')}` : '',
     `Answer with JSON only: {"reviews":[{"id":"b1","ok":true}|{"id":"b2","ok":false,"issues":[{"kind":"meaning|context|intent|emotion|characters|grammar|spelling|punctuation|terminology|formatting","severity":"minor|major","note":"short note in ${noteLang}"}],"fix":"corrected translation"}]}`,
@@ -141,7 +142,7 @@ export async function qaPage(
   const todo = blocks.filter((b) => b.translate && b.originalText.trim());
   for (const b of todo) b.qa = { issues: ruleChecks(b, opts.targetLang, opts.glossary, opts.context), reviewed: false };
   if (!opts.provider || !todo.length || opts.mode === 'rules') return [];
-  const payload = todo.map((b) => ({ id: b.id, type: b.textType, original: b.originalText, translation: b.translatedText }));
+  const payload = todo.map((b) => ({ id: b.id, type: b.textType, original: b.originalText, translation: b.translatedText, ...(b.speaker ? { speaker: b.speaker } : {}), ...(b.speakerGender && b.speakerGender !== 'unknown' ? { speakerGender: b.speakerGender } : {}) }));
   const rules = todo.filter((b) => b.qa!.issues.length).map((b) => `${b.id}: ${b.qa!.issues.map((i) => i.note).join(' ')}`);
   const user = `<blocks>\n${JSON.stringify(payload)}\n</blocks>${rules.length ? `\nAutomatic checks found:\n${rules.join('\n')}` : ''}`;
   let res;
@@ -162,7 +163,10 @@ export async function qaPage(
     b.qa!.reviewed = !!r;
     if (!r) continue;
     b.qa!.issues.push(...r.issues);
-    const serious = r.issues.some((i) => i.severity === 'major') || b.qa!.issues.some((i) => i.severity === 'major');
+    // Wrong word endings and agreement are "minor" for the reviewer but very visible to a reader: fix them too.
+    const serious =
+      r.issues.some((i) => i.severity === 'major' || i.kind === 'grammar' || i.kind === 'spelling' || i.kind === 'characters') ||
+      b.qa!.issues.some((i) => i.severity === 'major');
     if (opts.mode === 'fix' && r.fix && serious && r.fix !== b.translatedText && [...r.fix].length <= [...b.translatedText].length * 1.6 + 20) {
       b.qa!.before = b.translatedText;
       b.translatedText = r.fix;

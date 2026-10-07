@@ -165,7 +165,8 @@ try {
   const work = calls.filter((c) => !String(c.messages?.[0]?.content ?? '').includes('editor-in-chief'));
   const reviews = calls.length - work.length;
   if (MODE === 'engine') check('engine path: OCR on crops + text translation', work.length === 2 && work[0].messages.at(-1).content.some((p) => p.type === 'text' && p.text.includes('cropped')), `calls=${work.length}`);
-  else check('vision model called once with the image', work.length === 1 && Array.isArray(work[0].messages.at(-1).content), `calls=${work.length}`);
+  // Read the picture, then translate the page as text in a separate step (more accurate wording).
+  else check('vision model reads the image, then the page is translated in a text step', work.length === 2 && Array.isArray(work[0].messages.at(-1).content) && typeof work[1].messages.at(-1).content === 'string', `calls=${work.length}`);
   check('the translation was checked (one review request)', reviews === 1, `reviews=${reviews}`);
   await new Promise((r) => setTimeout(r, 1500));
   await page.screenshot({ path: join(OUT, `e2e-${MODE}-after.png`) });

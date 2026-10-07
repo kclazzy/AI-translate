@@ -24,6 +24,11 @@ export interface PipelineConfig {
   engine?: { url: string; token: string; options: EngineOptions };
   /** Translation check after translating (see translate/qa.ts). */
   qa?: QaMode;
+  /**
+   * Read the picture first, then translate the whole page in a separate text request (with the
+   * speakers, their gender and the story so far): more accurate wording and word endings.
+   */
+  twoStep?: boolean;
 }
 
 function withKeepAlive(p: ProviderConfig | undefined, s: AppSettings): ProviderConfig | null {
@@ -55,6 +60,7 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     translator: withKeepAlive(providerById(s, s.translationProviderId), s),
     engine: s.engine,
     qa: fastLocalActive(s) && (s.qaMode ?? 'fix') !== 'off' ? 'rules' : s.qaMode ?? 'fix',
+    twoStep: s.twoStepTranslation ?? !(fastLocalActive(s) || s.quality === 'fast'),
   };
 }
 
@@ -74,6 +80,7 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     translator: strip(c.translator),
     engine: c.mode === 'engine' ? c.engine?.options : undefined,
     qa: c.qa ?? 'off',
+    two: c.twoStep ? 1 : undefined,
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);
 }

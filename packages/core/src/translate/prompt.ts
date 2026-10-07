@@ -71,6 +71,7 @@ export function buildSystemPrompt(input: PromptInput, hits?: GlossaryHit[]): str
     `Source language: ${source}. Target language: ${target}.`,
     securityRules(),
     'Translate meaning and tone, not words. Lines must be short enough to fit back into the same speech bubble.',
+    grammarRules(input.targetLang),
     HONORIFICS[p.honorifics],
     NAMES[p.names],
     sfx,
@@ -82,6 +83,23 @@ export function buildSystemPrompt(input: PromptInput, hits?: GlossaryHit[]): str
     .join('\n\n');
 }
 
+/** Languages where verbs/adjectives agree with the speaker's gender: endings go wrong without it. */
+const GENDERED = new Set(['ru', 'uk', 'be', 'pl', 'cs', 'sk', 'bg', 'sr', 'hr', 'sl', 'lt', 'lv', 'he', 'ar', 'hi', 'es', 'pt', 'fr', 'it', 'ro', 'de']);
+
+export function grammarRules(targetLang: string): string {
+  const base = targetLang.split('-')[0];
+  if (!GENDERED.has(base)) return 'Write grammatically correct, natural sentences; keep each character\'s way of speaking consistent.';
+  const example = base === 'ru' ? ' (Russian: a man says "я пришёл, я устал", a woman says "я пришла, я устала")' : base === 'uk' ? ' (Ukrainian: "я прийшов" / "я прийшла")' : '';
+  return [
+    `GRAMMAR: past-tense verbs, adjectives and participles must agree with the gender and number of the speaker and of the person addressed${example}.`,
+    'Decide every speaker\'s gender from the picture, the "speaker"/"speakerGender" hints, names and the known characters above, and keep it the same for the same character. When it really cannot be told, choose wording without gendered endings.',
+    'Check case endings after prepositions, numbers and negation, and agreement between nouns and adjectives. Never leave a word in the wrong form to save space — shorten the sentence instead.',
+  ].join(' ');
+}
+
+const SPEAKER_HELP =
+  'For speech give "speaker" (the character\'s name if known, otherwise a 2–4 word description like "tall boy") and "gender" (male|female|unknown) of who says it — judge from the drawing and the tail of the bubble.';
+
 export const TEXT_TYPE_HELP =
   'type is one of DIALOGUE (speech bubble), NARRATION (caption box), SFX (sound effect drawn in the art), SIGN (text on objects/signs), OTHER.';
 
@@ -92,9 +110,10 @@ const ENTITY_HELP =
 export function visionFullInstruction(width: number, height: number): string {
   return [
     `The image is ${width}×${height} pixels. Find every piece of text (speech bubbles, captions, sound effects, signs), in reading order.`,
-    'Return JSON: {"blocks":[{"box":[x0,y0,x1,y1],"text":"original text","translation":"translated text","type":"DIALOGUE","vertical":true}],"entities":[],"summary":""}.',
+    'Return JSON: {"blocks":[{"box":[x0,y0,x1,y1],"text":"original text","translation":"translated text","type":"DIALOGUE","vertical":true,"speaker":"","gender":"unknown"}],"entities":[],"summary":""}.',
     'box is the tight bounding box of the text itself (not the whole bubble) in coordinates normalised to 0–1000 on both axes, where [0,0] is the top-left corner and [1000,1000] the bottom-right.',
     'One block per bubble or caption; join the lines of one bubble into one text. vertical is true for top-to-bottom columns.',
+    SPEAKER_HELP,
     TEXT_TYPE_HELP,
     ENTITY_HELP,
     'If there is no text, return {"blocks":[],"entities":[],"summary":""}.',
@@ -105,8 +124,9 @@ export function visionFullInstruction(width: number, height: number): string {
 export function visionOcrInstruction(width: number, height: number): string {
   return [
     `The image is ${width}×${height} pixels. Find every piece of text (speech bubbles, captions, sound effects, signs), in reading order, and transcribe it exactly.`,
-    'Return JSON: {"blocks":[{"box":[x0,y0,x1,y1],"text":"original text","type":"DIALOGUE","vertical":true}]}.',
+    'Return JSON: {"blocks":[{"box":[x0,y0,x1,y1],"text":"original text","type":"DIALOGUE","vertical":true,"speaker":"","gender":"unknown"}]}.',
     'box is the tight bounding box of the text in coordinates normalised to 0–1000 on both axes.',
+    SPEAKER_HELP,
     TEXT_TYPE_HELP,
   ].join('\n');
 }
@@ -115,13 +135,22 @@ export interface BlockForTranslation {
   id: string;
   type: TextType;
   text: string;
+  speaker?: string;
+  gender?: string;
 }
 
 /** Text-only translation of already recognised blocks. */
 export function textTranslateInstruction(blocks: BlockForTranslation[], hintsByBlock: Record<string, string[]>): string {
-  const data = blocks.map((b) => ({ id: b.id, type: b.type, text: b.text, ...(hintsByBlock[b.id]?.length ? { glossary: hintsByBlock[b.id] } : {}) }));
+  const data = blocks.map((b) => ({
+    id: b.id,
+    type: b.type,
+    text: b.text,
+    ...(b.speaker ? { speaker: b.speaker } : {}),
+    ...(b.gender && b.gender !== 'unknown' ? { speakerGender: b.gender } : {}),
+    ...(hintsByBlock[b.id]?.length ? { glossary: hintsByBlock[b.id] } : {}),
+  }));
   return [
-    'Translate the blocks below. They are listed in reading order and belong to one page.',
+    'Translate the blocks below. They are listed in reading order and belong to one page: read them all first, as one scene, then translate each so the conversation stays coherent (a sentence may continue in the next bubble).',
     'Return JSON: {"translations":[{"id":"b1","text":"translation","type":"DIALOGUE"}],"entities":[],"summary":""} with exactly one entry per input id.',
     'You may correct "type" if it is clearly wrong. ' + TEXT_TYPE_HELP,
     ENTITY_HELP,
