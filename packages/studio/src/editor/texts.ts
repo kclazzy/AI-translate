@@ -49,3 +49,20 @@ export function importTexts(blocks: TextBlock[], text: string): { blocks: TextBl
   });
   return { blocks: next, changed };
 }
+
+/** All pages of a chapter in one text file: a heading per page, then its lines. */
+export function exportChapterTexts(pages: TextBlock[][], title: string | undefined): string {
+  const lines = [`# AI Translate${title ? ` — ${title}` : ''}`, ''];
+  let n = 0;
+  pages.forEach((blocks, p) => {
+    if (!blocks.length) return;
+    lines.push(`## ${p + 1}`, '');
+    for (const b of blocks) {
+      n++;
+      lines.push(`[${n}] ${b.originalText.replace(/\s*\n\s*/g, ' ')}`);
+      lines.push(`=> ${b.translatedText.replace(/\n/g, '\\n')}`);
+      lines.push('');
+    }
+  });
+  return lines.join('\n');
+}

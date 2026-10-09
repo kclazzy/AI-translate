@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { cropRows, pageForSpan, shiftBlock, tilesToImage, TiledImage, type AppSettings, type PageResult, type Project, type ProjectPage } from '@ait/core';
+import { cropRows, pageForSpan, shiftBlock, tilesToImage, TiledImage, type AppSettings, type PageResult, type TextBlock, type Project, type ProjectPage } from '@ait/core';
 import { usePlatform } from '../platform';
 import { loadOriginalImage, rerenderProjectPage, type ProjectStore } from '../projects';
 import { ErrorBox } from '../ui';
@@ -111,6 +111,21 @@ export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose }: 
       settings={settings}
       onClose={onClose}
       marks={data.segments.length > 1 ? data.segments.slice(1).map((s) => s.y) : undefined}
+      chapterTexts={
+        chapterKeys && chapterKeys.length > 1 && data.segments.length === 1
+          ? async (current) => {
+              const seen: string[] = [];
+              const pages: TextBlock[][] = [];
+              for (const k of chapterKeys) {
+                const e = await editableKey(platform.service, k);
+                if (seen.includes(e)) continue;
+                seen.push(e);
+                pages.push(e === data.segments[0].key ? current : (await platform.service.getResult(e))?.page.blocks ?? []);
+              }
+              return pages;
+            }
+          : undefined
+      }
       toolbarExtra={
         chapterKeys && chapterKeys.length > 1 ? (
           <button className={`ait-btn small ${whole ? 'active' : ''}`} aria-pressed={whole} onClick={() => setWhole(!whole)} title={tr('Все переведённые картинки главы одной лентой')}>
@@ -159,6 +174,7 @@ export function ProjectPageEditor({ store, project, page, settings, onClose, onS
       cleaned={data.cleaned}
       settings={settings}
       onClose={onClose}
+      chapterTexts={async (current) => project.pages.map((p) => (p.id === page.id ? current : p.result?.blocks ?? []))}
       onSave={async (result, cleaned, pixels) => {
         const fresh = (await store.get(project.id)) ?? project;
         onSaved(await rerenderProjectPage(store, platform.backend, settings, fresh, page, result, pixels ? cleaned : undefined));

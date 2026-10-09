@@ -21,3 +21,15 @@ describe('page texts as a file', () => {
     expect((importTexts(blocks, JSON.stringify(json)).blocks[1] as { translatedText: string }).translatedText).toBe('Куда собрался?');
   });
 });
+
+describe('chapter text', () => {
+  it('has every page in order, numbered through', async () => {
+    const { exportChapterTexts } = await import('../src/editor/texts');
+    const t = exportChapterTexts([[blocks[0]], [], [blocks[1]]], 'Глава 5');
+    expect(t).toContain('## 1');
+    expect(t).toContain('## 3');
+    expect(t).not.toContain('## 2');
+    expect(t.indexOf('[1] Wait!')).toBeLessThan(t.indexOf('[2] Where are you going?'));
+    expect(importTexts(blocks, t).changed).toBe(0);
+  });
+});

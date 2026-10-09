@@ -25,7 +25,7 @@ import {
   qaNote,
 } from '@ait/core';
 import { loadUserFonts, registerUserFont, saveUserFont } from '../fonts';
-import { exportTexts, importTexts } from './texts';
+import { exportChapterTexts, exportTexts, importTexts } from './texts';
 import { exportPsd } from '../psd';
 import { usePlatform } from '../platform';
 import { ErrorBox, Field, Switch, toast, useAction } from '../ui';
@@ -49,6 +49,8 @@ export interface EditorProps {
   marks?: number[];
   /** Extra buttons for the toolbar. */
   toolbarExtra?: React.ReactNode;
+  /** Texts of every translated page of the chapter, in reading order (for «Скачать весь текст с главы»). */
+  chapterTexts?: (current: TextBlock[]) => Promise<TextBlock[][]>;
 }
 
 const BASE_FONTS = ['"AIT Lettering"', '"AIT Comic"', '"AIT Narration"', '"AIT SFX"', 'Arial', '"Comic Sans MS"', '"Times New Roman"', 'Georgia', 'Impact'];
@@ -58,7 +60,7 @@ function clonePixels(p: PixelData): PixelData {
   return { width: p.width, height: p.height, data: new Uint8ClampedArray(p.data) };
 }
 
-export function Editor({ page, original, cleaned, settings, onSave, onClose, title, marks, toolbarExtra }: EditorProps) {
+export function Editor({ page, original, cleaned, settings, onSave, onClose, title, marks, toolbarExtra, chapterTexts }: EditorProps) {
   const platform = usePlatform();
   const [blocks, setBlocks] = useState<TextBlock[]>(page.blocks);
   const [selected, setSelected] = useState<string | null>(page.blocks[0]?.id ?? null);
@@ -796,7 +798,19 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           <div className="ait-panel">
             <h2 style={{ fontSize: 14 }}>{tr('Блоки (')}{blocks.length})</h2>
             <div className="ait-row" style={{ flexWrap: 'wrap', marginBottom: 6 }} data-testid="texts-io">
-              <button className="ait-btn small" onClick={() => void platform.saveFile(`${(title || 'page').slice(0, 60)}.txt`, new TextEncoder().encode(exportTexts(blocks, title, 'txt')), 'text/plain')}>{tr('Тексты → .txt')}</button>
+              <button
+                className="ait-btn small"
+                data-testid="chapter-text"
+                title={tr('Оригинал и перевод всех реплик главы одним файлом .txt')}
+                onClick={async () => {
+                  // The other pages of the chapter as saved, this page as it is now in the editor.
+                  const pages = chapterTexts ? await chapterTexts(blocks).catch(() => [blocks]) : [blocks];
+                  const text = pages.length > 1 ? exportChapterTexts(pages, title) : exportTexts(blocks, title, 'txt');
+                  await platform.saveFile(`${(title || tr('Глава')).slice(0, 60)}.txt`, new TextEncoder().encode(text), 'text/plain');
+                }}
+              >
+                {tr('Скачать весь текст с главы')}
+              </button>
               <button className="ait-btn small" onClick={() => void platform.saveFile(`${(title || 'page').slice(0, 60)}.json`, new TextEncoder().encode(exportTexts(blocks, title, 'json')), 'application/json')}>JSON</button>
               <label className="ait-btn small" style={{ cursor: 'pointer' }}>
                 {tr('Загрузить тексты')}
