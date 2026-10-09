@@ -56,7 +56,7 @@ async function rememberSrc(src: string | undefined, key: string): Promise<void> 
 /** «Сохранять каждую переведённую картинку»: Downloads/AI Translate/<site>/<chapter>/<picture>.png */
 async function autoSave(r: StoredResult, pageUrl: string, title: string, src: string | undefined, tabId: number, emit: (m: FromOffscreen) => void): Promise<void> {
   const s = await loadSettings();
-  if (!s.autoSave) return;
+  if (!s.autoSave || !s.autoSaveDir) return;
   const clean = (x: string) => x.replace(/[^\p{L}\p{N} ._,()\-]+/gu, ' ').replace(/\s+/g, ' ').replace(/^[ .]+|[ .]+$/g, '').slice(0, 80);
   let host = 'site';
   try {
@@ -70,9 +70,27 @@ async function autoSave(r: StoredResult, pageUrl: string, title: string, src: st
   const c = browserBackend.createCanvas(image.width, image.height);
   image.drawRegion(c.getContext('2d'), 0, 0, image.width, image.height, image.width, image.height);
   const bytes = await browserBackend.encode(c, 'image/png');
+  const folders = [clean(host) || 'site', clean(title) || 'page'];
+  // The folder the user chose: <folder>/<site>/<chapter>/<picture>.png
+  if (s.autoSaveDir && s.autoSaveDir !== 'downloads') {
+    const dir = await db.get<FileSystemDirectoryHandle>('kv', 'autosave-dir');
+    const h = dir as FileSystemDirectoryHandle & { queryPermission?: (o: { mode: string }) => Promise<string> };
+    if (h && (await h.queryPermission?.({ mode: 'readwrite' })) === 'granted') {
+      let d: FileSystemDirectoryHandle = h;
+      for (const f of folders) d = await d.getDirectoryHandle(f, { create: true });
+      const w = await (await d.getFileHandle(`${name}.png`, { create: true })).createWritable();
+      await w.write(bytes as BlobPart);
+      await w.close();
+      await db.delete('kv', 'autosave-blocked');
+      return;
+    }
+    // The browser forgot the permission (restart): ask again in the settings, nothing is lost —
+    // meanwhile the picture goes to Downloads/AI Translate.
+    await db.put('kv', 'autosave-blocked', new Date().toISOString());
+  }
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/png' }));
   setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
-  emit({ source: 'offscreen', type: 'save', tabId, url, filename: `AI Translate/${clean(host) || 'site'}/${clean(title) || 'page'}/${name}.png` });
+  emit({ source: 'offscreen', type: 'save', tabId, url, filename: `AI Translate/${folders.join('/')}/${name}.png` });
 }
 
 export function toRendered(r: StoredResult, cached: boolean): RenderedTiles {

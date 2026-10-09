@@ -445,7 +445,10 @@ function main() {
         targetLang = msg.targetLang;
         stitch = msg.stitch !== false;
         if (enabled) void applyCached();
-        if (!enabled) hoverBtn.style.display = 'none';
+        if (!enabled) {
+          hoverBtn.style.display = 'none';
+          hidePageProgress();
+        }
         setAuto(msg.autoTranslate);
         break;
     }
@@ -573,6 +576,7 @@ function main() {
   /** «Очистить всё»: remove every translation from this page and stop what is still running. */
   function clearPage() {
     pageMode = false;
+    hidePageProgress();
     if (chapter) {
       clearInterval(chapter.timer);
       chapter.panel.remove();
@@ -596,6 +600,67 @@ function main() {
     if (!cands.length) toastOnce(tr('На странице не найдено подходящих изображений'));
     // Pictures on screen first, then the rest of the chapter in reading order.
     for (const c of cands) void translate(c);
+    // The chapter download has its own panel; a plain «Перевести страницу» gets a progress bar.
+    if (!chapter && cands.length) showPageProgress();
+  }
+
+  // ---- progress of «Перевести страницу» ----------------------------------------------------
+  let progress: { host: HTMLElement; timer: ReturnType<typeof setInterval>; text: HTMLElement; bar: HTMLElement } | null = null;
+  function showPageProgress() {
+    if (progress) return;
+    const host = document.createElement('div');
+    markUi(host);
+    const root = host.attachShadow({ mode: 'closed' });
+    root.innerHTML = `<style>
+      .p { position: fixed; z-index: 2147483602; right: 16px; bottom: 16px; background: #1c2230; color: #fff; font: 14px/1.35 system-ui, sans-serif;
+        padding: 10px 12px; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.3); display: grid; gap: 8px; width: 330px; }
+      .row { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+      .track { height: 6px; border-radius: 6px; background: #ffffff2e; overflow: hidden; }
+      .fill { height: 100%; width: 0; background: #e2558f; border-radius: 6px; transition: width .4s ease; }
+      .fill.busy { width: 30% !important; animation: slide 1.2s ease-in-out infinite; }
+      @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+      button { all: initial; cursor: pointer; color: #fff; font: inherit; border: 1px solid #fff6; border-radius: 6px; padding: 2px 8px; }
+    </style><div class="p" role="status" aria-live="polite"><div class="row"><span class="t"></span><button type="button">${tr('Остановить')}</button></div><div class="track"><div class="fill busy"></div></div></div>`;
+    const text = root.querySelector('.t') as HTMLElement;
+    const bar = root.querySelector('.fill') as HTMLElement;
+    (root.querySelector('button') as HTMLButtonElement).addEventListener('click', () => {
+      for (const it of items.values()) {
+        if (it.status !== 'queued' && it.status !== 'working') continue;
+        dismissed.add(it.cand.el);
+        void send({ type: 'cancel', id: it.req ?? it.id }).catch(() => undefined);
+      }
+      pageMode = false;
+      hidePageProgress();
+    });
+    document.documentElement.appendChild(host);
+    progress = { host, text, bar, timer: setInterval(tickPageProgress, 700) };
+    tickPageProgress();
+  }
+  function hidePageProgress() {
+    if (!progress) return;
+    clearInterval(progress.timer);
+    progress.host.remove();
+    progress = null;
+  }
+  function tickPageProgress() {
+    const p = progress;
+    if (!p) return;
+    const list = [...items.values()].filter((it) => !it.docRect && it.cand.el.isConnected);
+    const done = list.filter((it) => it.status === 'done').length;
+    const failed = list.filter((it) => it.status === 'error').length;
+    const total = list.length;
+    const left = total - done - failed;
+    p.text.textContent = left
+      ? tr('Перевожу страницу: {0} из {1}{2}', done, total, failed ? tr(', ошибок: {0}', failed) : '')
+      : tr('Готово: переведено {0} из {1}{2}', done, total, failed ? tr(', ошибок: {0}', failed) : '');
+    // Until the first picture is ready the bar just runs; then it shows the share done.
+    const share = total ? (done + failed) / total : 0;
+    p.bar.classList.toggle('busy', share === 0 && left > 0);
+    p.bar.style.width = `${Math.round(share * 100)}%`;
+    if (!left && total) {
+      clearInterval(p.timer);
+      setTimeout(() => progress === p && hidePageProgress(), 4000);
+    }
   }
 
   // ---- auto translate (infinite scroll) ----------------------------------------------------

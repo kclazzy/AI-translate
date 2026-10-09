@@ -12,10 +12,10 @@ export function Field({ label, hint, children }: { label: string; hint?: ReactNo
   );
 }
 
-export function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: ReactNode }) {
+export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: ReactNode; disabled?: boolean }) {
   return (
-    <label className="ait-switch">
-      <input type="checkbox" role="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    <label className="ait-switch" style={disabled ? { opacity: 0.55 } : undefined}>
+      <input type="checkbox" role="switch" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span>{label}</span>
     </label>
   );

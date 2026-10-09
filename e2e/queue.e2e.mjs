@@ -164,6 +164,16 @@ try {
   check('waiting pictures show how many are ahead', t1.some((t) => /перед ней \d|следующая/.test(t)), JSON.stringify(t1));
   check('the running picture shows a timer', t1.some((t) => /\d:\d\d/.test(t)), JSON.stringify(t1));
   check('a local model runs one picture at a time', t1.filter((t) => /\d:\d\d/.test(t)).length === 1, JSON.stringify(t1));
+  {
+    // «Перевести страницу» shows a progress panel with a bar.
+    const c = await page.target().createCDPSession();
+    const { root } = await c.send('DOM.getDocument', { depth: -1, pierce: true });
+    const texts = [];
+    const walk = (n) => { if (n.nodeType === 3 && /Перевожу страницу|Готово: переведено/.test(n.nodeValue ?? '')) texts.push(n.nodeValue); (n.children ?? []).forEach(walk); (n.shadowRoots ?? []).forEach(walk); };
+    walk(root);
+    await c.detach();
+    check('translating the whole page shows a progress indicator', texts.some((t) => /Перевожу страницу: \d+ из 3/.test(t)), JSON.stringify(texts));
+  }
 
   // Simulate the worker losing its jobs (the browser closes the offscreen document mid-chapter).
   await (await sw.worker()).evaluate(() => chrome.offscreen.closeDocument());

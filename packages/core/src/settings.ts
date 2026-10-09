@@ -121,8 +121,13 @@ export interface AppSettings {
   onlySourceLang?: boolean;
   /** Show translations already in the cache as soon as a page with those pictures opens (default on). */
   autoApplyCached?: boolean;
-  /** Save every newly translated picture to Downloads/AI Translate/<site>/ (off unless chosen). */
+  /** Save every newly translated picture into the folder the user chose (off unless chosen). */
   autoSave?: boolean;
+  /**
+   * Where: a folder picked by the user (its handle is kept in the database, `autosave-dir`; this is
+   * its name for display) or 'downloads' = Downloads/AI Translate (browsers without folder picking).
+   */
+  autoSaveDir?: string;
   /** Named sets of model settings to switch between quickly. */
   presets?: ModelPreset[];
   /** Where the editor shows the other pages of a chapter. */

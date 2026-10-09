@@ -186,6 +186,71 @@ function ProfileEditor({ p, onChange }: { p: PromptProfile; onChange: (p: Prompt
 }
 
 /** How much space the app takes on this device, with buttons to free it. */
+type DirPicker = (o?: { mode?: string; id?: string }) => Promise<FileSystemDirectoryHandle>;
+type PermHandle = FileSystemDirectoryHandle & { queryPermission?: (o: { mode: string }) => Promise<string>; requestPermission?: (o: { mode: string }) => Promise<string> };
+
+/** «Сохранять каждую переведённую картинку»: the user picks the folder first, then switches it on. */
+function AutoSaveFolder({ settings: s, update }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void }) {
+  const platform = usePlatform();
+  const picker = (window as unknown as { showDirectoryPicker?: DirPicker }).showDirectoryPicker;
+  const [state, setState] = useState<'granted' | 'ask' | 'none'>('none');
+  const check = async () => {
+    if (!s.autoSaveDir) return setState('none');
+    if (s.autoSaveDir === 'downloads') return setState('granted');
+    const h = await platform.db.get<PermHandle>('kv', 'autosave-dir');
+    if (!h) return setState('none');
+    setState((await h.queryPermission?.({ mode: 'readwrite' })) === 'granted' ? 'granted' : 'ask');
+  };
+  useEffect(() => {
+    void check();
+  }, [s.autoSaveDir]); // eslint-disable-line react-hooks/exhaustive-deps
+  const choose = async () => {
+    if (!picker) {
+      update({ autoSaveDir: 'downloads' });
+      return;
+    }
+    try {
+      const h = (await picker({ mode: 'readwrite', id: 'ait-autosave' })) as PermHandle;
+      if ((await h.requestPermission?.({ mode: 'readwrite' })) === 'denied') return;
+      await platform.db.put('kv', 'autosave-dir', h);
+      await platform.db.delete('kv', 'autosave-blocked');
+      update({ autoSaveDir: h.name });
+      setState('granted');
+    } catch {
+      /* the user closed the picker */
+    }
+  };
+  const allow = async () => {
+    const h = await platform.db.get<PermHandle>('kv', 'autosave-dir');
+    if (h && (await h.requestPermission?.({ mode: 'readwrite' })) === 'granted') {
+      await platform.db.delete('kv', 'autosave-blocked');
+      setState('granted');
+    }
+  };
+  const where = s.autoSaveDir === 'downloads' ? tr('Загрузки/AI Translate') : s.autoSaveDir;
+  return (
+    <div style={{ display: 'grid', gap: 6 }} data-testid="autosave">
+      <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span>{tr('Папка для картинок:')}</span>
+        <b data-testid="autosave-dir">{where || tr('не выбрана')}</b>
+        <button className="ait-btn small" onClick={() => void choose()}>{picker ? (s.autoSaveDir ? tr('Сменить папку…') : tr('Выбрать папку…')) : tr('Сохранять в Загрузки/AI Translate')}</button>
+      </span>
+      {state === 'ask' ? (
+        <span className="ait-notice" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {tr('Браузер просит заново разрешить запись в папку «{0}». Пока разрешения нет, картинки сохраняются в Загрузки/AI Translate.', where ?? '')}
+          <button className="ait-btn small" onClick={() => void allow()}>{tr('Разрешить')}</button>
+        </span>
+      ) : null}
+      <Switch
+        checked={!!s.autoSave && !!s.autoSaveDir}
+        disabled={!s.autoSaveDir}
+        onChange={(autoSave) => update({ autoSave })}
+        label={s.autoSaveDir ? tr('Сохранять каждую переведённую картинку в «{0}/<сайт>/<глава>»', where ?? '') : tr('Сохранять каждую переведённую картинку (сначала выберите папку)')}
+      />
+    </div>
+  );
+}
+
 function StorageLine() {
   const platform = usePlatform();
   const [used, setUsed] = useState<number | null>(null);
@@ -339,7 +404,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               <Switch checked={s.autoApplyCached !== false} onChange={(autoApplyCached) => update({ autoApplyCached })} label={tr('Сразу показывать уже переведённые картинки, когда страница открывается снова')} />
             </div>
             <div style={{ marginTop: 8 }}>
-              <Switch checked={!!s.autoSave} onChange={(autoSave) => update({ autoSave })} label={tr('Сохранять каждую переведённую картинку в Загрузки/AI Translate/<сайт>')} />
+              {platform.kind === 'extension' ? <AutoSaveFolder settings={s} update={update} /> : null}
             </div>
             <div style={{ marginTop: 8 }}>
               <label className="ait-field" data-testid="font-scale">

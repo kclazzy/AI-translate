@@ -36,7 +36,7 @@ const site = createServer((req, res) => {
   if (req.url === '/')
     return res
       .writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-      .end(`<!doctype html><meta charset="utf-8"><title>Лента</title><style>body{margin:0}img{display:block;width:800px}</style><div><img src="/a.png"><img src="/b.png"></div>`);
+      .end(`<!doctype html><meta charset="utf-8"><title>Chapter 7</title><style>body{margin:0}img{display:block;width:800px}</style><div><img src="/a.png"><img src="/b.png"></div>`);
   if (req.url === '/page.png') return res.writeHead(200, { 'content-type': 'image/png' }).end(readFileSync(new URL('./fixtures/page.png', import.meta.url)));
   const p = parts[req.url];
   if (p) return res.writeHead(200, { 'content-type': 'image/png' }).end(p);
@@ -109,6 +109,10 @@ try {
   client.on('Browser.downloadWillBegin', (e) => names.push(e.suggestedFilename));
   const studio = await browser.newPage();
   await studio.goto(`chrome-extension://${extId}/studio.html?view=history`);
+  // The folder «chosen by the user»: a folder of the extension's private file system stands in for it.
+  await studio.evaluate(async () => {
+    window.__chosen = await (await navigator.storage.getDirectory()).getDirectoryHandle('chosen', { create: true });
+  });
   await studio.evaluate(async () => {
     const db = await new Promise((res) => {
       const r = indexedDB.open('ai-translate', 1);
@@ -126,6 +130,8 @@ try {
     s.privacy = 'local';
     s.pipeline = 'standalone';
     s.autoSave = true;
+    store.put(window.__chosen, 'autosave-dir');
+    s.autoSaveDir = 'chosen';
     store.put(s, 'settings');
     await new Promise((r) => (tx.oncomplete = r));
   });
@@ -186,8 +192,18 @@ try {
     const swNow = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().endsWith('background.js'), { timeout: 5000 }).catch(() => null);
     console.log('SWLOG', swNow ? await (await swNow.worker()).evaluate(() => (globalThis.__aitLog ?? []).slice(-15).join('\n')).catch((e) => String(e)) : 'none');
   }
-  const pngs = readdirSync(DL).filter((f) => { try { return readFileSync(join(DL, f)).subarray(1, 4).toString() === 'PNG'; } catch { return false; } });
-  check('«Сохранять каждую картинку»: both translated pictures are saved', pngs.length === 2, `${pngs.length} PNG files ${names.join(', ')}`);
+  const saved = await studio.evaluate(async () => {
+    const list = [];
+    const walk = async (d, path) => {
+      for await (const [n, h] of d.entries()) {
+        if (h.kind === 'directory') await walk(h, `${path}${n}/`);
+        else list.push(`${path}${n}`);
+      }
+    };
+    await walk(await (await navigator.storage.getDirectory()).getDirectoryHandle('chosen'), '');
+    return list.sort();
+  });
+  check('«Сохранять каждую картинку»: both pictures are saved into the chosen folder', saved.length === 2 && saved.every((f) => /^127\.0\.0\.1\/.+\/(a|b)\.png$/.test(f)), JSON.stringify(saved));
   if (file) {
     const dir = join(DL, 'x');
     mkdirSync(dir, { recursive: true });
