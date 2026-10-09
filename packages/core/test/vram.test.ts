@@ -120,7 +120,7 @@ describe('an answer cut off by a full context window', () => {
       return jsonResponse(sent.length === 1 ? { message: { content: '{"blocks":[{"box":[1,2' }, done_reason: 'length', prompt_eval_count: 8100, eval_count: 90 } : { message: { content: '{"blocks":[]}' }, done_reason: 'stop', eval_count: 10 });
     };
     const p = new OpenAICompatibleProvider({ ...configFromPreset('ollama', 'qwen3.5:9b'), numCtx: 8192 }, f as any);
-    const r = await p.complete({ messages: [{ role: 'user', content: 'x' }], json: true });
+    const r = await p.complete({ system: '', messages: [{ role: 'user', content: 'x' }], json: true });
     expect(sent).toEqual([8192, 16384]);
     expect(r.text).toBe('{"blocks":[]}');
   });
