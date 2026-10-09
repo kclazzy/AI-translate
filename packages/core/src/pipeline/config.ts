@@ -39,6 +39,8 @@ export interface PipelineConfig {
   inpaintExpand?: number;
   /** Redo text over artwork with LaMa in the local engine (when it runs). */
   lamaEngine?: boolean;
+  /** Where LaMa runs: the local engine, or the browser (needs `inpaint` in the pipeline deps). */
+  lama?: 'engine' | 'browser';
   /** «Сверка»: other translators to compare with and the judge (keys filled in memory only). */
   crossCheck?: {
     checkers: (CheckerConfig & { apiKey?: string; provider?: ProviderConfig })[];
@@ -96,7 +98,7 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     bubblesOnly: s.bubblesOnly || undefined,
     onlySourceLang: (s.onlySourceLang && s.sourceLang !== 'auto') || undefined,
     inpaintExpand: s.inpaintExpand,
-    lamaEngine: s.lamaEngine || undefined,
+    lama: (s.lamaMode ?? (s.lamaEngine ? 'engine' : 'off')) === 'off' ? undefined : (s.lamaMode ?? 'engine') as 'engine' | 'browser',
     crossCheck: crossCheckConfig(s),
   };
 }
@@ -121,7 +123,7 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     bo: c.bubblesOnly ? 1 : undefined,
     osl: c.onlySourceLang ? 1 : undefined,
     ie: c.inpaintExpand,
-    lama: c.lamaEngine ? 1 : undefined,
+    lama: c.lama ?? (c.lamaEngine ? 'engine' : undefined),
     cc: c.crossCheck ? [c.crossCheck.mode, c.crossCheck.judge?.model ?? null, c.crossCheck.checkers.map((x) => [x.kind, x.provider?.model ?? x.url ?? ''])] : undefined,
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);

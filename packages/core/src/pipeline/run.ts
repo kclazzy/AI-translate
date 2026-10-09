@@ -5,7 +5,7 @@ import { DEFAULT_STYLE_DEFAULTS, type StyleDefaults } from '../render/style';
 import type { PageResult, TextBlock, Usage } from '../types';
 import type { PipelineConfig } from './config';
 import { runEnginePipeline } from './engine';
-import { runStandalonePipeline, type PipelineOutput, type PipelineRequest } from './standalone';
+import { runStandalonePipeline, type PipelineOutput, type PipelineRequest, type StandaloneDeps } from './standalone';
 import { createProvider } from '../llm/presets';
 import { assertPrivacy } from '../llm/privacy';
 import { qaPage } from '../translate/qa';
@@ -15,7 +15,7 @@ import type { PromptInput } from '../translate/prompt';
 import type { TranslationContext } from '../translate/context';
 import type { LlmProvider } from '../llm/types';
 
-export async function runPipeline(req: PipelineRequest, deps: { backend: ImageBackend; fetchImpl?: FetchLike }): Promise<PipelineOutput> {
+export async function runPipeline(req: PipelineRequest, deps: StandaloneDeps): Promise<PipelineOutput> {
   const out = req.config.mode === 'engine' ? await runEnginePipeline(req, deps) : await runStandalonePipeline(req, deps);
   const mode = req.config.qa ?? 'off';
   if (mode !== 'off' && !req.generic && out.page.blocks.length) {

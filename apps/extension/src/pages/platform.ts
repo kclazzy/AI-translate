@@ -1,3 +1,4 @@
+import { deleteLama, downloadLama, lamaDownloaded } from '../offscreen/lama';
 import { browserBackend, TranslateService } from '@ait/core';
 import { downloadFile, type StudioPlatform } from '@ait/studio';
 import { db, loadSettings, saveSettings, secrets } from '../shared/store';
@@ -13,6 +14,7 @@ export function extensionPlatform(): StudioPlatform {
     loadSettings,
     saveSettings,
     saveFile: downloadFile,
+    lama: { downloaded: lamaDownloaded, download: (p) => downloadLama(p), remove: deleteLama },
     notifyResultChanged: (key) => void chrome.runtime.sendMessage({ type: 'result-changed', key }).catch(() => undefined),
     version: chrome.runtime.getManifest().version,
     installUpdate: installExtensionUpdate,

@@ -138,6 +138,8 @@ export interface AppSettings {
   inpaintExpand?: number;
   /** Text over artwork: redo the background with LaMa in the local engine when it is running. */
   lamaEngine?: boolean;
+  /** Text over artwork redrawn by LaMa: in the local engine or right in the browser (model downloaded once). */
+  lamaMode?: 'off' | 'engine' | 'browser';
   /** models.json fetched from the repository (recommended local models, family settings). */
   modelCatalog?: import('./llm/catalog').ModelCatalog;
   modelCatalogCheckedAt?: string;

@@ -193,6 +193,61 @@ function ProfileEditor({ p, onChange }: { p: PromptProfile; onChange: (p: Prompt
 }
 
 /** How much space the app takes on this device, with buttons to free it. */
+/** Text over artwork: redraw the background with LaMa — off, in the local engine, or in this browser. */
+function LamaChoice({ settings: s, update }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void }) {
+  const platform = usePlatform();
+  const mode = s.lamaMode ?? (s.lamaEngine ? 'engine' : 'off');
+  const [have, setHave] = useState<boolean | null>(null);
+  const [pct, setPct] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    void platform.lama?.downloaded().then(setHave);
+  }, [platform]);
+  return (
+    <div style={{ display: 'grid', gap: 6 }} data-testid="lama">
+      <label className="ait-field">
+        <span>{tr('Дорисовка фона под текстом на рисунке (нейросеть LaMa)')}</span>
+        <select className="ait-select" value={mode} onChange={(e) => update({ lamaMode: e.target.value as AppSettings['lamaMode'], lamaEngine: undefined })}>
+          <option value="off">{tr('Выключена — простая заливка')}</option>
+          <option value="engine">{tr('В локальном движке')}</option>
+          {platform.lama ? <option value="browser">{tr('Прямо в браузере (видеокарта, модель ~200 МБ)')}</option> : null}
+        </select>
+      </label>
+      {mode === 'browser' && platform.lama ? (
+        <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {have ? <span className="ait-badge ok">{tr('Модель скачана')}</span> : <span className="ait-badge">{tr('Модель не скачана — пока работает простая заливка')}</span>}
+          {pct !== null ? (
+            <span className="ait-progress" style={{ flex: 1, minWidth: 120 }} role="progressbar" aria-valuenow={Math.round(pct * 100)} aria-valuemin={0} aria-valuemax={100}>
+              <i style={{ width: `${Math.round(pct * 100)}%` }} />
+            </span>
+          ) : have ? (
+            <button className="ait-btn small danger" onClick={async () => { await platform.lama!.remove(); setHave(false); }}>{tr('Удалить модель')}</button>
+          ) : (
+            <button
+              className="ait-btn small"
+              onClick={async () => {
+                setErr(null);
+                setPct(0);
+                try {
+                  await platform.lama!.download(setPct);
+                  setHave(true);
+                } catch (e) {
+                  setErr(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setPct(null);
+                }
+              }}
+            >
+              {tr('Скачать модель (~200 МБ)')}
+            </button>
+          )}
+          {err ? <small style={{ color: 'var(--err)' }}>{tr('Не удалось скачать: {0}', err)}</small> : null}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 const CHECKER_KINDS: CheckerKind[] = ['deepl', 'google', 'yandex', 'libre', 'llm'];
 
 /** «Сверка»: which translators to compare with, their keys, who judges, what to do with mistakes. */
@@ -512,7 +567,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               </label>
             </div>
             <div style={{ marginTop: 8 }}>
-              <Switch checked={!!s.lamaEngine} onChange={(lamaEngine) => update({ lamaEngine })} label={tr('Текст поверх рисунка дорисовывать нейросетью LaMa (нужен локальный движок с LaMa)')} />
+              <LamaChoice settings={s} update={update} />
             </div>
             <div style={{ marginTop: 8 }}>
               <Segmented label={tr('Страницы главы в редакторе')} value={s.editorPageList ?? 'bottom'} onChange={(editorPageList) => update({ editorPageList })} options={[{ value: 'bottom', label: tr('Снизу') }, { value: 'right', label: tr('Справа') }]} />

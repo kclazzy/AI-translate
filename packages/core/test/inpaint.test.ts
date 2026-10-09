@@ -55,7 +55,7 @@ describe('erasing text over artwork', () => {
     };
     const config: any = {
       mode: 'standalone', privacy: 'local', sourceLang: 'en', targetLang: 'ru', quality: 'balanced', profile: DEFAULT_PROFILES[0], glossary: [], translateSfx: true, sfxStyle: 'translated',
-      vision: { ...configFromPreset('lmstudio', 'vlm'), vision: true }, translator: null, lamaEngine: true, engine: { url: 'http://127.0.0.1:8765', token: 't', options: {} },
+      vision: { ...configFromPreset('lmstudio', 'vlm'), vision: true }, translator: null, lama: 'engine', engine: { url: 'http://127.0.0.1:8765', token: 't', options: {} },
     };
     const out = await runStandalonePipeline({ bytes, config }, { backend: napiBackend, fetchImpl: fetchImpl as any });
     if (process.env.DEBUG) console.log(calls, out.page.blocks.map((b) => [b.bbox, b.textType, b.bubble]));

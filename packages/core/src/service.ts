@@ -11,6 +11,7 @@ import { emptyContext, type TranslationContext } from './translate/context';
 import type { PageResult, StageEvent, TextBlock, Usage } from './types';
 import { sha256Hex, sniffImageMime } from './util/bytes';
 import { tr } from './i18n';
+import type { Inpainter } from './pipeline/standalone';
 import { CHECKER_LABELS, checkerIsCloud, machineTranslate } from './translate/crosscheck';
 import { translateBlocks } from './translate/translator';
 import { createProvider } from './llm/presets';
@@ -88,6 +89,8 @@ export function seriesKeyFromUrl(url: string | undefined): string | undefined {
  * extension (offscreen document) and the mobile app use this class.
  */
 export class TranslateService {
+  /** LaMa in this browser (set by the extension when the model is downloaded). */
+  inpainter?: Inpainter;
   constructor(
     private db: IdbStore,
     private secrets: SecretStore,
@@ -153,7 +156,7 @@ export class TranslateService {
     }
     const context = opts.generic ? undefined : await this.getContext(seriesKey);
     try {
-      const out = await this.runFitting(config, opts, (cfg) => runPipeline({ bytes, mime: realMime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic }, { backend: this.backend, fetchImpl: this.fetchImpl }));
+      const out = await this.runFitting(config, opts, (cfg) => runPipeline({ bytes, mime: realMime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter }));
       opts.onStage?.({ stage: 'rendering' });
       const rendered = await renderOutput(this.backend, out, styleDefaultsFor(config, settings.fonts));
       const cleanedTiles = await Promise.all(out.cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') })));

@@ -19,6 +19,8 @@ export interface StudioPlatform {
   installUpdate?(info: UpdateInfo, progress: (text: string, pct?: number) => void): Promise<void>;
   /** Optional: the setup helper finished; continue what the user started (params of the page URL). */
   setupReady?(params: URLSearchParams): void;
+  /** Optional: LaMa running in this browser (download the model once, then it redraws art under text). */
+  lama?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void> };
 }
 
 export const PlatformContext = createContext<StudioPlatform | null>(null);

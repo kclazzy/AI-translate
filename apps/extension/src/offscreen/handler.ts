@@ -4,6 +4,7 @@ import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@a
 import type { StageEvent } from '@ait/core';
 import type { FromOffscreen, JobStatus, RenderedTiles, SpeedStats, ToOffscreen } from '../shared/messages';
 import { db, loadSettings, secrets } from '../shared/store';
+import { lamaDownloaded, lamaInpainter } from './lama';
 import { setUiLang, tr } from '@ait/core/i18n';
 
 /**
@@ -93,6 +94,11 @@ async function autoSave(r: StoredResult, pageUrl: string, title: string, src: st
   emit({ source: 'offscreen', type: 'save', tabId, url, filename: `AI Translate/${folders.join('/')}/${name}.png` });
 }
 
+/** LaMa in the browser, when chosen in the settings and downloaded. */
+async function browserLama(mode: string | undefined) {
+  return mode === 'browser' && (await lamaDownloaded()) ? lamaInpainter : undefined;
+}
+
 export function toRendered(r: StoredResult, cached: boolean): RenderedTiles {
   return {
     key: r.key,
@@ -131,6 +137,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
     case 'run':
     case 'crop-run': {
       const settings = await loadSettings();
+      service.inpainter = await browserLama(settings.lamaMode);
       // This document can live for days: follow a language changed since it opened.
       setUiLang(settings.interfaceLang, false);
       // Local servers (Ollama, LM Studio) answer one request at a time: running two pages at once
@@ -193,6 +200,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
     }
     case 'run-strip': {
       const settings = await loadSettings();
+      service.inpainter = await browserLama(settings.lamaMode);
       setUiLang(settings.interfaceLang, false);
       const vision = settings.providers.find((p) => p.id === settings.visionProviderId);
       const local = settings.pipeline !== 'engine' && (!vision || isLocalProvider(vision));

@@ -1,6 +1,6 @@
 import { familyFor } from '../llm/catalog';
 import { AppError } from '../errors';
-import type { ImageBackend } from '../image/backend';
+import type { ImageBackend, PixelData } from '../image/backend';
 import { cleanBlock, findLeftoverText, findTextRegions, luminance, parseHex, type Lettering, type LeftoverProbe } from '../image/clean';
 import { boxToPolygon, clampBox, expandBox, overlapRatio, TiledImage } from '../image/tiled';
 import { detectScript } from '../languages';
@@ -40,6 +40,8 @@ export interface PipelineOutput {
 export interface StandaloneDeps {
   backend: ImageBackend;
   fetchImpl?: FetchLike;
+  /** LaMa running in this browser (extension), used when the settings say so. */
+  inpaint?: Inpainter;
 }
 
 const MAX_SIDE: Record<PipelineConfig['quality'], number> = { fast: 1280, balanced: 1568, best: 2048 };
@@ -110,12 +112,42 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
   );
 }
 
-/**
- * Text over artwork is smudged away with a simple fill first; when the local engine runs, LaMa
- * redraws those areas properly (hair, backgrounds). Any failure keeps the simple result.
- */
-export async function lamaViaEngine(original: TiledImage, cleaned: TiledImage, masks: { box: Box; mask: Uint8Array }[], engine: { url: string; token: string }, deps: StandaloneDeps, signal?: AbortSignal): Promise<number> {
+/** A LaMa-like inpainter: picture region (RGBA) and its mask (1 = redraw) → the redrawn region. */
+export type Inpainter = (img: PixelData, mask: Uint8Array, signal?: AbortSignal) => Promise<PixelData>;
+
+/** The local engine's /v1/inpaint as an inpainter. */
+export function engineInpainter(engine: { url: string; token: string }, deps: StandaloneDeps): Inpainter {
   const client = new EngineClient(engine.url, engine.token, deps.fetchImpl);
+  return async (img, mask, signal) => {
+    const { width: w, height: h } = img;
+    const c = deps.backend.createCanvas(w, h);
+    const ctx = c.getContext('2d');
+    const id = ctx.createImageData(w, h);
+    id.data.set(img.data);
+    ctx.putImageData(id, 0, 0);
+    const mc = deps.backend.createCanvas(w, h);
+    const mctx = mc.getContext('2d');
+    const md = mctx.createImageData(w, h);
+    for (let i = 0; i < w * h; i++) {
+      const v = mask[i] ? 255 : 0;
+      md.data[i * 4] = md.data[i * 4 + 1] = md.data[i * 4 + 2] = v;
+      md.data[i * 4 + 3] = 255;
+    }
+    mctx.putImageData(md, 0, 0);
+    const out = await client.inpaint(await deps.backend.encode(c, 'image/png'), await deps.backend.encode(mc, 'image/png'), signal);
+    const dec = await deps.backend.decode(out, 'image/png');
+    const oc = deps.backend.createCanvas(w, h);
+    oc.getContext('2d').drawImage(dec.source, 0, 0, w, h);
+    dec.close?.();
+    return oc.getContext('2d').getImageData(0, 0, w, h);
+  };
+}
+
+/**
+ * Text over artwork is smudged away with a simple fill first; LaMa (in the local engine or in the
+ * browser) then redraws those areas properly (hair, backgrounds). Any failure keeps the simple fill.
+ */
+export async function redrawArt(original: TiledImage, cleaned: TiledImage, masks: { box: Box; mask: Uint8Array }[], inpaint: Inpainter, signal?: AbortSignal): Promise<number> {
   let done = 0;
   for (const m of masks.slice(0, 12)) {
     try {
@@ -124,42 +156,25 @@ export async function lamaViaEngine(original: TiledImage, cleaned: TiledImage, m
       const area = clampBox([m.box[0] - pad, m.box[1] - pad, m.box[2] + pad * 2, m.box[3] + pad * 2], original.width, original.height);
       const [ax, ay, aw, ah] = area;
       const img = original.getRegion(ax, ay, aw, ah);
-      const c = deps.backend.createCanvas(aw, ah);
-      const ctx = c.getContext('2d');
-      const id = ctx.createImageData(aw, ah);
-      id.data.set(img.data);
-      ctx.putImageData(id, 0, 0);
-      const mc = deps.backend.createCanvas(aw, ah);
-      const mctx = mc.getContext('2d');
-      const md = mctx.createImageData(aw, ah);
       const inMask = new Uint8Array(aw * ah);
       for (let y = 0; y < m.box[3]; y++) {
         for (let x = 0; x < m.box[2]; x++) {
           if (!m.mask[y * m.box[2] + x]) continue;
           const px = m.box[0] - ax + x;
           const py = m.box[1] - ay + y;
-          if (px < 0 || py < 0 || px >= aw || py >= ah) continue;
-          const i = py * aw + px;
-          inMask[i] = 1;
-          md.data[i * 4] = md.data[i * 4 + 1] = md.data[i * 4 + 2] = 255;
+          if (px >= 0 && py >= 0 && px < aw && py < ah) inMask[py * aw + px] = 1;
         }
       }
-      for (let i = 0; i < aw * ah; i++) md.data[i * 4 + 3] = 255;
-      mctx.putImageData(md, 0, 0);
-      const out = await client.inpaint(await deps.backend.encode(c, 'image/png'), await deps.backend.encode(mc, 'image/png'), signal);
-      const dec = await deps.backend.decode(out, 'image/png');
-      const oc = deps.backend.createCanvas(aw, ah);
-      oc.getContext('2d').drawImage(dec.source, 0, 0, aw, ah);
-      dec.close?.();
-      const res = oc.getContext('2d').getImageData(0, 0, aw, ah);
+      const res = await inpaint(img, inMask, signal);
+      if (res.width !== aw || res.height !== ah) continue;
       // Only the masked pixels change; everything else stays exactly as cleaned.
       const cur = cleaned.getRegion(ax, ay, aw, ah);
       for (let i = 0; i < inMask.length; i++) if (inMask[i]) for (let k = 0; k < 3; k++) cur.data[i * 4 + k] = res.data[i * 4 + k];
       cleaned.putRegion(cur, ax, ay);
       done++;
     } catch (e) {
-      if ((e as { code?: string }).code === 'CANCELLED') throw e;
-      break; // the engine is not there or has no LaMa: keep the simple fill
+      if ((e as { code?: string }).code === 'CANCELLED' || (e as Error)?.name === 'AbortError') throw e;
+      break; // the inpainter is not there: keep the simple fill
     }
   }
   return done;
@@ -605,8 +620,12 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   }
   blocks = mergeSharedBubbles(blocks, closedBubble);
   separateAreas(blocks);
-  // The picture goes to the engine: only to one on this computer / network unless the cloud is allowed.
-  if (config.lamaEngine && config.engine?.url && artMasks.length && (config.privacy === 'cloud' || isLocalUrl(config.engine.url))) await lamaViaEngine(original, cleaned, artMasks, config.engine, deps, signal);
+  if (artMasks.length && config.lama) {
+    // The engine gets the picture only on this computer / network, unless the cloud is allowed.
+    const viaEngine = config.lama === 'engine' && config.engine?.url && (config.privacy === 'cloud' || isLocalUrl(config.engine.url));
+    const inpaint = viaEngine ? engineInpainter(config.engine!, deps) : config.lama === 'browser' ? deps.inpaint : undefined;
+    if (inpaint) await redrawArt(original, cleaned, artMasks, inpaint, signal);
+  }
   tCleaned = performance.now();
   return finish();
 

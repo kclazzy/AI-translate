@@ -33,7 +33,7 @@ def auth(origin: str | None = EXT) -> dict[str, str]:
 def test_health_is_public_but_details_need_token(env):
     client, _ = env
     r = client.get("/v1/health")
-    assert r.status_code == 200 and r.json() == {"status": "ok", "version": "0.5.5", "paired": False}
+    assert r.status_code == 200 and r.json() == {"status": "ok", "version": "0.6.0", "paired": False}
     r = client.get("/v1/health", headers=auth())
     body = r.json()
     assert body["paired"] is True and "detectors" in body

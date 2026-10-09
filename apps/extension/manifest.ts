@@ -32,7 +32,7 @@ export function buildManifest(target: 'chrome' | 'firefox', version: string): Re
       'select-area': { suggested_key: { default: 'Alt+Shift+A' }, description: '__MSG_cmdSelectArea__' },
       'toggle-original': { suggested_key: { default: 'Alt+Shift+O' }, description: '__MSG_cmdToggle__' },
     },
-    content_security_policy: { extension_pages: "script-src 'self'; object-src 'self'" },
+    content_security_policy: { extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'" },
   };
   if (target === 'chrome') {
     base.background = { service_worker: 'background.js', type: 'module' };
