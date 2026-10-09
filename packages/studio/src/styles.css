@@ -310,3 +310,7 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   pointer-events: none;
   z-index: 3;
 }
+
+.ait-box.multi { outline: 2px dashed var(--magenta); }
+.ait-copy { float: right; margin-top: -22px; border: 0; background: none; cursor: pointer; color: var(--ink-2, inherit); font-size: 14px; }
+.ait-font-preview { margin-top: 6px; padding: 6px 8px; border: 1px dashed var(--rule); border-radius: 6px; font-size: 20px; line-height: 1.2; background: var(--paper); overflow-wrap: anywhere; }

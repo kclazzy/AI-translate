@@ -1,5 +1,5 @@
 import { AppError, base64ToBytes, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type StoredResult } from '@ait/core';
-import { loadBundledFonts } from '@ait/studio/fonts';
+import { loadBundledFonts, loadUserFonts } from '@ait/studio/fonts';
 import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
 import type { StageEvent } from '@ait/core';
 import type { FromOffscreen, JobStatus, RenderedTiles, SpeedStats, ToOffscreen } from '../shared/messages';
@@ -101,7 +101,7 @@ async function cropScreenshot(screenshot: string, rect: { x: number; y: number; 
 }
 
 export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen) => void): Promise<unknown> {
-  fontsReady ??= loadBundledFonts();
+  fontsReady ??= loadBundledFonts().then(() => loadUserFonts(db)).then(() => undefined);
   await fontsReady;
   if (!pruned) {
     pruned = true;

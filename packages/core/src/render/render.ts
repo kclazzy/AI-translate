@@ -86,8 +86,20 @@ export function spansFromRows(rows: BubbleRows, box: Box, pad: number): (top: nu
   };
 }
 
+/** Letter spacing widens every measured run by (letters − 1) × spacing × font size. */
+function spaced(m: Measurer, spacing: number | undefined): Measurer {
+  if (!spacing) return m;
+  return {
+    measure(text, font) {
+      const size = Number(/(\d+(?:\.\d+)?)px/.exec(font)?.[1] ?? 16);
+      return m.measure(text, font) + Math.max(0, [...text].length - 1) * spacing * size;
+    },
+  };
+}
+
 function layoutBlockIn(measurer: Measurer, block: TextBlock, d: StyleDefaults, box: Box, shape: 'rect' | 'ellipse', minSize?: number): LayoutResult {
   const style = resolveStyle(block, d);
+  measurer = spaced(measurer, style.letterSpacing);
   const rows = !block.textBox && block.bubble?.rows && !style.vertical ? block.bubble.rows : undefined;
   const pad = Math.max(3, (block.bubble?.box[2] ?? 0) * 0.06);
   const cap = block.fontSizeEstimate > 0 ? Math.max(14, block.fontSizeEstimate * 1.3) : undefined;
@@ -125,19 +137,46 @@ export function drawBlock(ctx: any, block: TextBlock, layout: LayoutResult, d: S
   ctx.lineJoin = 'round';
   ctx.miterLimit = 2;
   const strokeW = style.strokeColor && style.strokeWidth > 0 ? Math.max(1, (style.strokeWidth * layout.fontSize) / 18) : 0;
+  if (style.letterSpacing && 'letterSpacing' in ctx) ctx.letterSpacing = `${(style.letterSpacing * layout.fontSize).toFixed(2)}px`;
   if (style.shadow) {
     ctx.shadowColor = 'rgba(0,0,0,0.45)';
     ctx.shadowBlur = layout.fontSize * 0.15;
     ctx.shadowOffsetX = layout.fontSize * 0.06;
     ctx.shadowOffsetY = layout.fontSize * 0.06;
   }
+  // Gradient fill: from the colour at the top of the text to the second colour at its bottom.
+  let fill: unknown = style.color;
+  if (style.gradient) {
+    const ys = layout.vertical ? layout.glyphs.map((g) => g.y) : layout.lines.map((l) => l.y);
+    const top = Math.min(...ys) - layout.fontSize * 0.85;
+    const bottom = Math.max(...ys) + layout.fontSize * 0.2;
+    if (Number.isFinite(top) && Number.isFinite(bottom) && bottom > top) {
+      const g = ctx.createLinearGradient(0, top, 0, bottom);
+      g.addColorStop(0, style.color);
+      g.addColorStop(1, style.gradient);
+      fill = g;
+    }
+  }
+  const glowW = style.glow ? Math.max(1, ((style.glowSize ?? 6) * layout.fontSize) / 18) : 0;
   const paint = (text: string, x: number, y: number) => {
+    if (glowW) {
+      // Glow: a soft blurred halo of the glow colour under the letters.
+      ctx.save();
+      ctx.shadowColor = style.glow;
+      ctx.shadowBlur = glowW * 2;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+      ctx.strokeStyle = style.glow;
+      ctx.lineWidth = glowW;
+      ctx.strokeText(text, x, y);
+      ctx.restore();
+    }
     if (strokeW) {
       ctx.strokeStyle = style.strokeColor;
       ctx.lineWidth = strokeW * 2;
       ctx.strokeText(text, x, y);
     }
-    ctx.fillStyle = style.color;
+    ctx.fillStyle = fill;
     ctx.fillText(text, x, y);
   };
   if (layout.vertical) {

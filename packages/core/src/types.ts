@@ -32,6 +32,13 @@ export interface TextStyle {
   lineHeight: number;
   /** Write the translation in capitals (the original lettering is all caps). */
   uppercase?: boolean;
+  /** Glow around the letters: its colour (null = none) and size in px at an 18 px font. */
+  glow?: string | null;
+  glowSize?: number;
+  /** Second colour: letters go from `color` at the top to this at the bottom. */
+  gradient?: string | null;
+  /** Extra space between letters, as a share of the font size (0.05 = 5 %). */
+  letterSpacing?: number;
 }
 
 export interface BubbleInfo {

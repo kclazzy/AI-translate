@@ -21,7 +21,8 @@ import {
   type TiledImage,
   QA_LABELS,
 } from '@ait/core';
-import { registerUserFont } from '../fonts';
+import { loadUserFonts, registerUserFont, saveUserFont } from '../fonts';
+import { exportTexts, importTexts } from './texts';
 import { usePlatform } from '../platform';
 import { ErrorBox, Field, Switch, toast, useAction } from '../ui';
 import { tr } from '@ait/core/i18n';
@@ -68,6 +69,14 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   const [overflow, setOverflow] = useState<Set<string>>(new Set());
   const [fonts, setFonts] = useState<string[]>(BASE_FONTS);
   const [dirty, setDirty] = useState(false);
+  /** Blocks selected together with `selected` (Ctrl/Shift+click): style changes apply to all of them. */
+  const [multi, setMulti] = useState<Set<string>>(new Set());
+  const [styleClip, setStyleClip] = useState<Partial<TextStyle> | null>(null);
+  const [fontQuery, setFontQuery] = useState('');
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const toolRef = useRef(tool);
+  toolRef.current = tool;
   const undoStack = useRef<HistoryItem[]>([]);
   const redoStack = useRef<HistoryItem[]>([]);
   const [, forceHistory] = useState(0);
@@ -153,9 +162,82 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
 
   const sel = blocks.find((b) => b.id === selected) ?? null;
   const updateBlock = (id: string, patch: Partial<TextBlock>) => commitBlocks(blocks.map((b) => (b.id === id ? { ...b, ...patch, edited: true } : b)));
+  /** The selected block and the others picked with Ctrl/Shift+click. */
+  const targets = selected ? new Set([selected, ...multi]) : new Set(multi);
   const updateStyle = (id: string, patch: Partial<TextStyle>) => {
-    const b = blocks.find((x) => x.id === id);
-    if (b) updateBlock(id, { style: { ...(b.style ?? {}), ...patch } });
+    const ids = id === selected ? targets : new Set([id]);
+    commitBlocks(blocks.map((b) => (ids.has(b.id) ? { ...b, style: { ...(b.style ?? {}), ...patch }, edited: true } : b)));
+  };
+  const pick = (id: string, add: boolean) => {
+    if (add && selected && selected !== id) {
+      const next = new Set(multi);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      setMulti(next);
+      return;
+    }
+    setMulti(new Set());
+    setSelected(id);
+  };
+  const copyText = (text: string) => {
+    void navigator.clipboard?.writeText(text).then(() => toast(tr('Скопировано')), () => toast(tr('Не удалось скопировать')));
+  };
+
+  // User fonts saved earlier.
+  useEffect(() => {
+    void loadUserFonts(platform.db).then((names) => names.length && setFonts((f) => [...new Set([...f, ...names.map((n) => `"${n}"`)])]));
+  }, [platform.db]);
+
+  // Ctrl+wheel: zoom to the point under the cursor. Shift+wheel with a brush: brush size.
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const inner = innerRef.current;
+        if (!inner) return;
+        const r = inner.getBoundingClientRect();
+        const z = zoomRef.current;
+        const px = (e.clientX - r.left) / z;
+        const py = (e.clientY - r.top) / z;
+        const nz = Math.max(0.1, Math.min(6, +(z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)).toFixed(3)));
+        setZoom(nz);
+        requestAnimationFrame(() => {
+          const r2 = inner.getBoundingClientRect();
+          el.scrollLeft += r2.left + px * nz - e.clientX;
+          el.scrollTop += r2.top + py * nz - e.clientY;
+        });
+      } else if (e.shiftKey && toolRef.current !== 'select' && toolRef.current !== 'ocr') {
+        e.preventDefault();
+        setBrush((b) => Math.max(1, Math.min(100, b + (e.deltaY < 0 ? 2 : -2))));
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  /** Middle mouse button: drag the page around. */
+  const pan = (e: RPointerEvent) => {
+    const el = stageRef.current;
+    if (!el) return;
+    e.preventDefault();
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const sl = el.scrollLeft;
+    const st0 = el.scrollTop;
+    el.style.cursor = 'grabbing';
+    const move = (ev: PointerEvent) => {
+      el.scrollLeft = sl - (ev.clientX - sx);
+      el.scrollTop = st0 - (ev.clientY - sy);
+    };
+    const up = () => {
+      el.style.cursor = '';
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   };
 
   useEffect(() => {
@@ -169,10 +251,19 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       } else if (mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
         e.preventDefault();
         redo();
+      } else if (mod && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        setSelected(blocks[0]?.id ?? null);
+        setMulti(new Set(blocks.slice(1).map((b) => b.id)));
+      } else if (e.key === 'Escape') {
+        setMulti(new Set());
+      } else if (e.key === '[' || e.key === ']') {
+        setBrush((b) => Math.max(1, Math.min(100, b + (e.key === ']' ? 4 : -4))));
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
         e.preventDefault();
-        commitBlocks(blocks.filter((b) => b.id !== selected));
+        commitBlocks(blocks.filter((b) => !targets.has(b.id)));
         setSelected(null);
+        setMulti(new Set());
       } else if (selected && e.key.startsWith('Arrow')) {
         e.preventDefault();
         const b = blocks.find((x) => x.id === selected);
@@ -197,9 +288,14 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   };
 
   const startDrag = (e: RPointerEvent, b: TextBlock, mode: 'move' | 'resize' | 'rotate') => {
-    if (tool !== 'select') return;
+    if (tool !== 'select' || e.button === 1) return;
     e.stopPropagation();
     e.preventDefault();
+    if (mode === 'move' && (e.ctrlKey || e.shiftKey || e.metaKey)) {
+      pick(b.id, true);
+      return;
+    }
+    if (b.id !== selected) setMulti(new Set());
     setSelected(b.id);
     const before = blocks;
     const box = targetBox(b, defaults);
@@ -253,8 +349,10 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   });
 
   const onStagePointerDown = (e: RPointerEvent) => {
+    if (e.button === 1) return pan(e);
     if (tool === 'select') {
       setSelected(null);
+      setMulti(new Set());
       return;
     }
     e.preventDefault();
@@ -366,7 +464,9 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
 
   const addFont = async (file: File) => {
     const name = file.name.replace(/\.[^.]+$/, '').replace(/[^\w\- ]/g, '').slice(0, 40) || 'Custom';
-    await registerUserFont(name, await file.arrayBuffer());
+    const bytes = await file.arrayBuffer();
+    await registerUserFont(name, bytes);
+    await saveUserFont(platform.db, name, bytes).catch(() => undefined);
     setFonts((f) => [...f, `"${name}"`]);
     if (sel) updateStyle(sel.id, { fontFamily: `"${name}", sans-serif` });
     toast(tr('Шрифт «{0}» добавлен', name));
@@ -456,7 +556,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                     return (
                       <div
                         key={b.id}
-                        className={`ait-box ${b.id === selected ? 'selected' : ''} ${overflow.has(b.id) ? 'overflow' : ''}`}
+                        className={`ait-box ${b.id === selected ? 'selected' : multi.has(b.id) ? 'selected multi' : ''} ${overflow.has(b.id) ? 'overflow' : ''}`}
                         style={{ left: box[0], top: box[1], width: box[2], height: box[3], transform: rot ? `rotate(${rot}deg)` : undefined, borderWidth: 1.5 / zoom }}
                         onPointerDown={(e) => startDrag(e, b, 'move')}
                         title={b.translatedText}
@@ -517,17 +617,27 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                   ) : null}
                 </div>
               ) : null}
+              {multi.size ? <p className="ait-notice" data-testid="multi-note">{tr('Выбрано блоков: {0}. Стиль меняется у всех выбранных (Esc — снять выбор).', multi.size + 1)}</p> : null}
               <Field label={tr('Перевод')}>
+                <button className="ait-copy" onClick={() => copyText(sel.translatedText)} title={tr('Копировать перевод')} aria-label={tr('Копировать перевод')}>⧉</button>
                 <textarea className="ait-textarea" value={sel.translatedText} onFocus={() => (editStart.current = blocks)} onChange={(e) => setBlocks(blocks.map((b) => (b.id === sel.id ? { ...b, translatedText: e.target.value, edited: true } : b)))} onBlur={endTextEdit} />
               </Field>
               <div style={{ marginTop: 8 }}>
                 <Field label={tr('Оригинал')}>
+                  <button className="ait-copy" onClick={() => copyText(sel.originalText)} title={tr('Копировать оригинал')} aria-label={tr('Копировать оригинал')}>⧉</button>
                   <input className="ait-input" value={sel.originalText} onFocus={() => (editStart.current = blocks)} onChange={(e) => setBlocks(blocks.map((b) => (b.id === sel.id ? { ...b, originalText: e.target.value } : b)))} onBlur={endTextEdit} />
                 </Field>
               </div>
               <div className="ait-row" style={{ marginTop: 8 }}>
                 <button className="ait-btn small" onClick={() => void retr.run()} disabled={retr.busy}>{retr.busy ? tr('Перевожу…') : tr('Перевести заново')}</button>
                 <button className="ait-btn small" onClick={() => fitText(sel)} title={tr('Подобрать размер текста под бабл')}>{tr('Вписать текст')}</button>
+              </div>
+              <div className="ait-row" style={{ marginTop: 6, flexWrap: 'wrap' }}>
+                <button className="ait-btn small" onClick={() => { setStyleClip({ ...(sel.style ?? {}) }); toast(tr('Стиль скопирован')); }}>{tr('Копировать стиль')}</button>
+                <button className="ait-btn small" disabled={!styleClip} onClick={() => styleClip && commitBlocks(blocks.map((b) => (targets.has(b.id) ? { ...b, style: { ...(b.style ?? {}), ...styleClip }, edited: true } : b)))}>{tr('Вставить стиль')}</button>
+                <button className="ait-btn small" title={tr('Применить стиль этого блока ко всем блокам того же типа')} onClick={() => commitBlocks(blocks.map((b) => (b.textType === sel.textType && b.id !== sel.id ? { ...b, style: { ...(b.style ?? {}), ...(sel.style ?? {}), fontSize: b.style?.fontSize ?? null }, edited: true } : b)))}>
+                  {tr('Стиль ко всем {0}', sel.textType)}
+                </button>
               </div>
               <ErrorBox error={retr.error} />
               {overflow.has(sel.id) ? <p className="ait-notice" style={{ marginTop: 8 }}>{tr('Текст не помещается: уменьшите кегль, сократите перевод или растяните рамку.')}</p> : null}
@@ -542,11 +652,15 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                 </Field>
                 <div style={{ gridColumn: '1 / -1' }}>
                   <Field label={tr('Шрифт')}>
+                    <input className="ait-input" type="search" placeholder={tr('Поиск шрифта')} value={fontQuery} onChange={(e) => setFontQuery(e.target.value)} aria-label={tr('Поиск шрифта')} style={{ marginBottom: 4 }} />
                     <select className="ait-select" value={sel.style?.fontFamily ?? ''} onChange={(e) => updateStyle(sel.id, { fontFamily: e.target.value || undefined })}>
                       <option value="">{tr('По типу текста')}</option>
-                      {fonts.map((f) => <option key={f} value={`${f}, sans-serif`}>{f.replace(/"/g, '')}</option>)}
+                      {fonts.filter((f) => !fontQuery || f.toLowerCase().includes(fontQuery.toLowerCase()) || `${f}, sans-serif` === sel.style?.fontFamily).map((f) => <option key={f} value={`${f}, sans-serif`} style={{ fontFamily: f }}>{f.replace(/"/g, '')}</option>)}
                     </select>
                   </Field>
+                  <div className="ait-font-preview" style={{ fontFamily: st.fontFamily, fontWeight: st.bold ? 700 : 400, color: st.color, WebkitTextStroke: st.strokeColor && st.strokeWidth ? `${Math.min(2, st.strokeWidth / 3)}px ${st.strokeColor}` : undefined }}>
+                    {(st.uppercase ? sel.translatedText.toUpperCase() : sel.translatedText).slice(0, 60) || tr('Пример текста')}
+                  </div>
                   <label className="ait-hint" style={{ display: 'block' }}>
                     {tr('Свой шрифт (TTF/OTF/WOFF2):')}{' '}<input type="file" accept=".ttf,.otf,.woff,.woff2" onChange={(e) => e.target.files?.[0] && void addFont(e.target.files[0])} />
                   </label>
@@ -580,6 +694,22 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                 <Switch checked={st.vertical} onChange={(v) => updateStyle(sel.id, { vertical: v })} label={tr('Вертикальный текст')} />
                 <Switch checked={st.bold} onChange={(v) => updateStyle(sel.id, { bold: v })} label={tr('Жирный')} />
                 <Switch checked={st.shadow} onChange={(v) => updateStyle(sel.id, { shadow: v })} label={tr('Тень')} />
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Switch checked={!!st.glow} onChange={(v) => updateStyle(sel.id, { glow: v ? st.glow ?? '#ffffff' : null })} label={tr('Свечение')} />
+                  {st.glow ? (
+                    <>
+                      <input type="color" value={st.glow} onChange={(e) => updateStyle(sel.id, { glow: e.target.value })} aria-label={tr('Цвет свечения')} />
+                      <input type="range" min={1} max={20} value={st.glowSize ?? 6} onChange={(e) => updateStyle(sel.id, { glowSize: Number(e.target.value) })} aria-label={tr('Размер свечения')} />
+                    </>
+                  ) : null}
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <Switch checked={!!st.gradient} onChange={(v) => updateStyle(sel.id, { gradient: v ? st.gradient ?? '#c8205f' : null })} label={tr('Градиент')} />
+                  {st.gradient ? <input type="color" value={st.gradient} onChange={(e) => updateStyle(sel.id, { gradient: e.target.value })} aria-label={tr('Второй цвет градиента')} /> : null}
+                </div>
+                <Field label={tr('Межбуквенный интервал: {0}%', Math.round((st.letterSpacing ?? 0) * 100))}>
+                  <input type="range" min={-0.05} max={0.4} step={0.01} value={st.letterSpacing ?? 0} onChange={(e) => updateStyle(sel.id, { letterSpacing: Number(e.target.value) || undefined })} />
+                </Field>
                 <Switch checked={sel.translate} onChange={(v) => updateBlock(sel.id, { translate: v })} label={tr('Показывать перевод')} />
               </div>
               <button className="ait-btn small danger" style={{ marginTop: 12 }} onClick={() => { commitBlocks(blocks.filter((b) => b.id !== sel.id)); setSelected(null); }}>
@@ -592,9 +722,29 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
 
           <div className="ait-panel">
             <h2 style={{ fontSize: 14 }}>{tr('Блоки (')}{blocks.length})</h2>
+            <div className="ait-row" style={{ flexWrap: 'wrap', marginBottom: 6 }} data-testid="texts-io">
+              <button className="ait-btn small" onClick={() => void platform.saveFile(`${(title || 'page').slice(0, 60)}.txt`, new TextEncoder().encode(exportTexts(blocks, title, 'txt')), 'text/plain')}>{tr('Тексты → .txt')}</button>
+              <button className="ait-btn small" onClick={() => void platform.saveFile(`${(title || 'page').slice(0, 60)}.json`, new TextEncoder().encode(exportTexts(blocks, title, 'json')), 'application/json')}>JSON</button>
+              <label className="ait-btn small" style={{ cursor: 'pointer' }}>
+                {tr('Загрузить тексты')}
+                <input
+                  type="file"
+                  accept=".txt,.json"
+                  hidden
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!f) return;
+                    const { blocks: next, changed } = importTexts(blocks, await f.text());
+                    if (changed) commitBlocks(next);
+                    toast(tr('Обновлено переводов: {0}', changed));
+                  }}
+                />
+              </label>
+            </div>
             <div className="ait-blocklist">
               {blocks.map((b, i) => (
-                <button key={b.id} aria-pressed={b.id === selected} onClick={() => { setSelected(b.id); setTool('select'); }}>
+                <button key={b.id} aria-pressed={b.id === selected || multi.has(b.id)} onClick={(e) => { pick(b.id, e.ctrlKey || e.shiftKey || e.metaKey); setTool('select'); }}>
                   {i + 1}. {b.translatedText.slice(0, 40) || <em className="ait-muted">{tr('пусто')}</em>} {overflow.has(b.id) ? '⚠' : ''}
                   {b.qa?.issues.length ? <span title={b.qa.issues.map((q) => `${QA_LABELS[q.kind]}: ${q.note}`).join('\n')}> 🔍{b.qa.issues.length}</span> : null}
                 </button>

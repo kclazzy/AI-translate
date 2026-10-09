@@ -69,3 +69,35 @@ export async function registerUserFont(name: string, bytes: ArrayBuffer): Promis
   await face.load();
   ((globalThis as unknown as { fonts?: FontFaceSet }).fonts ?? document.fonts).add(face);
 }
+
+/** Fonts the user added are kept in the database ("font:<name>") and loaded in every window. */
+export async function saveUserFont(db: { put(store: 'kv', key: string, v: unknown): Promise<unknown> }, name: string, bytes: ArrayBuffer): Promise<void> {
+  await db.put('kv', `font:${name}`, new Uint8Array(bytes));
+}
+
+let userFontsLoaded: Promise<string[]> | null = null;
+export function loadUserFonts(db: { entries<T>(store: 'kv'): Promise<[string, T][]> }): Promise<string[]> {
+  userFontsLoaded ??= (async () => {
+    const names: string[] = [];
+    try {
+      for (const [k, v] of await db.entries<Uint8Array>('kv')) {
+        if (!k.startsWith('font:')) continue;
+        const name = k.slice(5);
+        try {
+          await registerUserFont(name, (v as Uint8Array).slice().buffer as ArrayBuffer);
+          names.push(name);
+        } catch {
+          /* a broken file is skipped */
+        }
+      }
+    } catch {
+      /* no database here */
+    }
+    return names;
+  })();
+  return userFontsLoaded;
+}
+
+export async function deleteUserFont(db: { delete(store: 'kv', key: string): Promise<unknown> }, name: string): Promise<void> {
+  await db.delete('kv', `font:${name}`);
+}
