@@ -100,9 +100,19 @@ export class OpenAICompatibleProvider implements LlmProvider {
     if (req.json) body.format = 'json';
     const { signal, dispose } = timeoutSignal(this.config.timeoutMs ?? 600_000, req.signal);
     try {
-      const res = await safeFetch(this.fetchImpl, ollamaUrl(this.config.baseUrl, 'api/chat'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal }, this.config.label);
-      if (!res.ok) throw await httpError(res, this.config.label, this.config.baseUrl, this.config.model);
-      const json = (await res.json()) as { message?: { content?: string }; prompt_eval_count?: number; eval_count?: number; eval_duration?: number; model?: string };
+      const ask = async () => {
+        const res = await safeFetch(this.fetchImpl, ollamaUrl(this.config.baseUrl, 'api/chat'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal }, this.config.label);
+        if (!res.ok) throw await httpError(res, this.config.label, this.config.baseUrl, this.config.model);
+        return (await res.json()) as { message?: { content?: string }; prompt_eval_count?: number; eval_count?: number; eval_duration?: number; model?: string; done_reason?: string };
+      };
+      let json = await ask();
+      // The picture and the prompt filled the context window, so the answer was cut off mid-way:
+      // ask once more with a window twice as large (the memory fallback handles a card that is too small).
+      const opts = body.options as { num_ctx: number; num_predict: number };
+      if (json.done_reason === 'length' && (json.eval_count ?? 0) < opts.num_predict * 0.9 && opts.num_ctx < 32768) {
+        opts.num_ctx *= 2;
+        json = await ask();
+      }
       const text = stripThinking(json.message?.content ?? '');
       if (!text) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: tr('Модель вернула пустой ответ') });
       const tps = json.eval_count && json.eval_duration ? json.eval_count / (json.eval_duration / 1e9) : undefined;

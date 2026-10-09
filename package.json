@@ -1,7 +1,7 @@
 {
   "name": "ai-translate",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "AI translator for manga, manhwa, webtoons and comics — browser extension, local engine and mobile app",
   "license": "MIT",
   "packageManager": "pnpm@10.28.0",

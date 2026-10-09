@@ -3,6 +3,58 @@ import type { TextType } from '../types';
 import { TEXT_TYPES } from '../types';
 
 /** Extract the first JSON object from a model answer (tolerates code fences and chatter). */
+/**
+ * Mend a JSON answer that was cut off or has raw control characters in strings: escape line
+ * breaks inside strings, drop the unfinished last element and close what is still open.
+ * Returns null when nothing usable is left.
+ */
+export function repairJson(src: string): unknown | null {
+  let out = '';
+  const stack: string[] = [];
+  let inStr = false;
+  let esc = false;
+  // The last point where everything so far forms complete values: [length of `out`, open brackets].
+  let safe: [number, string[]] | null = null;
+  for (const c of src) {
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      if (inStr && (c === '\n' || c === '\r' || c === '\t')) {
+        out += c === '\n' ? '\\n' : c === '\r' ? '' : ' ';
+        continue;
+      }
+      out += c;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{' || c === '[') stack.push(c);
+    else if (c === '}' || c === ']') {
+      stack.pop();
+      out += c;
+      // A complete object inside an array (a whole block): a good place to cut.
+      if (c === '}' && stack[stack.length - 1] === '[') safe = [out.length, [...stack]];
+      if (!stack.length) break;
+      continue;
+    }
+    out += c;
+  }
+  const close = (st: string[]) => st.reverse().map((b) => (b === '{' ? '}' : ']')).join('');
+  const tries: string[] = [];
+  // Best: everything up to the last whole element; else close what is open.
+  if (safe) tries.push(out.slice(0, safe[0]).replace(/,\s*$/, '') + close([...safe[1]]));
+  if (inStr) tries.push(out + '"' + close([...stack]));
+  tries.push(out + close([...stack]));
+  for (const t of tries) {
+    try {
+      return JSON.parse(t.replace(/,\s*([}\]])/g, '$1'));
+    } catch {
+      /* next */
+    }
+  }
+  return null;
+}
+
 export function extractJson(text: string): unknown {
   let s = text.trim();
   const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(s);
@@ -43,6 +95,10 @@ export function extractJson(text: string): unknown {
     try {
       return JSON.parse(candidate.replace(/,\s*([}\]])/g, '$1'));
     } catch (e) {
+      // The answer was cut off (the model ran out of room) or has raw line breaks in a string:
+      // keep everything complete before the cut instead of losing the whole page.
+      const fixed = repairJson(candidate);
+      if (fixed !== null) return fixed;
       throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: `Invalid JSON: ${(e as Error).message}` });
     }
   }

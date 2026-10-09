@@ -129,3 +129,15 @@ describe('translateBlocks', () => {
     expect(r.translations.get('b1')!.text).toBe('Танака, подожди');
   });
 });
+
+describe('answers that were cut off', () => {
+  it('keeps every complete block before the cut', async () => {
+    const { extractJson } = await import('../src/translate/parse');
+    const cut = '{"blocks":[{"box":[1,2,3,4],"text":"WAIT","translation":"ЖДИ"},{"box":[5,6,7,8],"text":"I AM COM';
+    expect(extractJson(cut)).toEqual({ blocks: [{ box: [1, 2, 3, 4], text: 'WAIT', translation: 'ЖДИ' }] });
+    // A raw line break inside a string.
+    expect(extractJson('{"text":"WAIT\nFOR ME","translation":"ЖДИ"}')).toEqual({ text: 'WAIT\nFOR ME', translation: 'ЖДИ' });
+    // Cut inside the very first block: nothing usable, but no crash.
+    expect(() => extractJson('{"blocks":[{"box":[1,2,3')).not.toThrow();
+  });
+});
