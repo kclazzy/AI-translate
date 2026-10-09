@@ -19,7 +19,7 @@ export interface RenderedTiles {
   width: number;
   height: number;
   tiles: { y: number; h: number; dataUrl: string }[];
-  page: Pick<PageResult, 'blocks' | 'timings' | 'usage' | 'pipeline'>;
+  page: Pick<PageResult, 'blocks' | 'timings' | 'usage' | 'pipeline' | 'stripLang'>;
   cached: boolean;
 }
 

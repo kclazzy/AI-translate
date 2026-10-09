@@ -57,7 +57,7 @@ function main() {
   };
   let targetLang = 'ru';
   let stitch = true;
-  const langsOf = (r: RenderedTiles) => ({ source: nativeName(dominantLanguage(r.page.blocks.map((b) => b.language)) ?? 'auto') || tr('Оригинал'), target: nativeName(targetLang) });
+  const langsOf = (r: RenderedTiles) => ({ source: nativeName(dominantLanguage(r.page.blocks.map((b) => b.language)) ?? r.page.stripLang ?? 'auto') || tr('Оригинал'), target: nativeName(targetLang) });
   let originalsShown = false;
   let seq = 0;
 
@@ -436,7 +436,9 @@ function main() {
     for (let i = 0; i < 400 && chapter === c; i++) {
       const col = chapterColumn(scanPage(Math.min(minSize, 120)));
       const bottom = col.length ? Math.max(...col.map((x) => x.el.getBoundingClientRect().bottom + scrollY)) : document.documentElement.scrollHeight;
-      const target = Math.min(scrollY + innerHeight * 0.9, Math.max(0, bottom - innerHeight * 0.5));
+      // A page shorter than the window cannot scroll: never aim past the real end.
+      const maxScroll = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+      const target = Math.min(scrollY + innerHeight * 0.9, Math.max(0, bottom - innerHeight * 0.5), maxScroll);
       if (Math.abs(target - scrollY) < 4) {
         // At the end of the column: wait a little for late pictures, then stop.
         if (bottom === last && ++still >= 4) break;

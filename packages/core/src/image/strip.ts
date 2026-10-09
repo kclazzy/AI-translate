@@ -1,4 +1,5 @@
 import type { Box, PageResult, TextBlock } from '../types';
+import { dominantLanguage } from '../languages';
 import type { ImageBackend } from './backend';
 import { rowBusyness } from './slice';
 import { TiledImage } from './tiled';
@@ -131,5 +132,5 @@ export function pageForSpan(page: PageResult, span: PartSpan, index: number): Pa
     const cy = box[1] + box[3] / 2;
     return cy >= span.y && cy < span.y + span.h;
   });
-  return { ...page, pageId: `${page.pageId}~${index}`, height: span.h, blocks: blocks.map((b) => shiftBlock(b, span.y)), usage: index === 0 ? page.usage : [] };
+  return { ...page, stripLang: dominantLanguage(page.blocks.map((b) => b.language)), pageId: `${page.pageId}~${index}`, height: span.h, blocks: blocks.map((b) => shiftBlock(b, span.y)), usage: index === 0 ? page.usage : [] };
 }

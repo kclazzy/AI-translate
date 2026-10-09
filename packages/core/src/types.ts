@@ -116,6 +116,8 @@ export interface PageResult {
   pipeline: { version: 1; hash: string; mode: 'engine' | 'standalone' };
   /** Short summary of the page produced by the model, used for chapter context. */
   summary?: string;
+  /** A picture cut out of a glued strip: the language of the whole strip (its own part may have no text). */
+  stripLang?: string;
   createdAt: string;
 }
 

@@ -52,7 +52,7 @@ export function toRendered(r: StoredResult, cached: boolean): RenderedTiles {
     width: r.page.width,
     height: r.page.height,
     tiles: r.rendered.map((t) => ({ y: t.y, h: t.h, dataUrl: bytesToDataUrl(t.bytes, r.mime) })),
-    page: { blocks: r.page.blocks, timings: r.page.timings, usage: r.page.usage, pipeline: r.page.pipeline },
+    page: { blocks: r.page.blocks, timings: r.page.timings, usage: r.page.usage, pipeline: r.page.pipeline, stripLang: r.page.stripLang },
     cached,
   };
 }
