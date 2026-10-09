@@ -32,6 +32,9 @@ import {
 import { FoldPanel } from './ui';
 import { tr, uiLocale } from '@ait/core/i18n';
 
+/** Ollama settings that save video memory (Windows command line). */
+export const OLLAMA_MEMORY_ENV = 'setx OLLAMA_FLASH_ATTENTION 1 && setx OLLAMA_KV_CACHE_TYPE q8_0 && setx OLLAMA_NUM_PARALLEL 1 && setx OLLAMA_MAX_LOADED_MODELS 1';
+
 /**
  * Model selector with a refresh button: asks LM Studio / Ollama / any OpenAI-compatible
  * server which models it has and whether they read images.
@@ -444,6 +447,12 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
           <small className="ait-muted">{tr('Flash attention: быстрее и меньше памяти на длинные запросы. В новых версиях Ollama включается сама, если видеокарта поддерживает.')}</small>
           <code style={{ userSelect: 'all' }}>setx OLLAMA_KV_CACHE_TYPE q8_0</code>
           <small className="ait-muted">{tr('Сжатый кэш: модель с картинкой занимает меньше видеопамяти и реже вылезает в обычную память. Работает только вместе с flash attention.')}</small>
+          <code style={{ userSelect: 'all' }}>setx OLLAMA_NUM_PARALLEL 1</code>
+          <small className="ait-muted">{tr('Одна задача за раз: Ollama не резервирует память под несколько параллельных запросов.')}</small>
+          <code style={{ userSelect: 'all' }}>setx OLLAMA_MAX_LOADED_MODELS 1</code>
+          <small className="ait-muted">{tr('В видеопамяти держится только одна модель: другая выгружается, прежде чем загрузится нужная.')}</small>
+          <small>{tr('Всё сразу одной строкой:')}</small>
+          <code style={{ userSelect: 'all', wordBreak: 'break-all' }}>{OLLAMA_MEMORY_ENV}</code>
           <small>{tr('Главное для скорости — чтобы модель целиком помещалась в видеокарту: если в окне расширения появилось «не помещается в видеопамять», выберите модель на ступень меньше.')}</small>
         </div>
       </details>

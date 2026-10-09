@@ -5,6 +5,7 @@ import { tr } from './i18n';
  */
 export type ErrorCode =
   | 'OCR_FAILED'
+  | 'OUT_OF_MEMORY'
   | 'DETECTION_FAILED'
   | 'PROVIDER_UNAVAILABLE'
   | 'INVALID_API_KEY'
@@ -72,6 +73,7 @@ export function toAppError(err: unknown): AppError {
 type Lang = 'ru' | 'en';
 
 const MESSAGES: Record<ErrorCode, Record<Lang, string>> = {
+  OUT_OF_MEMORY: { ru: 'Модели не хватило видеопамяти.', en: 'The model ran out of video memory.' },
   OCR_FAILED: { ru: 'Не удалось распознать текст. Попробовать ещё раз?', en: 'Could not recognise the text. Try again?' },
   DETECTION_FAILED: { ru: 'Не удалось найти текст на изображении.', en: 'Could not find text in the image.' },
   PROVIDER_UNAVAILABLE: { ru: 'Сервис перевода сейчас недоступен. Попробовать ещё раз?', en: 'The translation service is unavailable. Try again?' },

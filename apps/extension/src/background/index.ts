@@ -274,6 +274,13 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       readyCache = null;
       await offerSetup(tabId, true);
       return null;
+    case 'free-memory': {
+      // Unload every local model from video memory; the next picture loads only the one it needs.
+      const s = await loadSettings();
+      const urls = new Set(s.providers.filter((p) => isOllama(p)).map((p) => p.baseUrl));
+      for (const u of urls) await ollamaUnloadAll(u).catch(() => undefined);
+      return { ok: true };
+    }
     case 'open-editor':
       await chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?key=${encodeURIComponent(msg.key)}${msg.chapter?.length ? `&chapter=${msg.chapter.map(encodeURIComponent).join(',')}` : ''}`), index: (sender.tab?.index ?? 0) + 1 });
       return null;

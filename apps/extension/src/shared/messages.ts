@@ -34,6 +34,7 @@ export type ContentToBackground =
   | { type: 'get-result'; key: string }
   | { type: 'status'; ids: string[] }
   | { type: 'open-setup' }
+  | { type: 'free-memory' }
   | { type: 'build-download'; keys: string[]; title: string; format: ChapterFormat };
 
 /** Time per translated page (kv 'speed'), written by the worker, shown in the popup. */

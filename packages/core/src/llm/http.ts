@@ -30,6 +30,8 @@ function shortBody(body: string): string {
   return body.slice(0, 200);
 }
 
+export const OUT_OF_MEMORY_RE = /out of memory|cudaMalloc|failed to allocate|requires more system memory|insufficient memory|not enough memory|unable to allocate|memory allocation|OOM\b/i;
+
 /** Map an HTTP failure from any provider to a stable error code with a hint the user can act on. */
 export async function httpError(res: Response, providerLabel: string, url = '', model = ''): Promise<AppError> {
   const provider = tr(providerLabel);
@@ -50,6 +52,10 @@ export async function httpError(res: Response, providerLabel: string, url = '', 
           ? tr('Ollama отклоняет запросы расширения. Задайте переменную OLLAMA_ORIGINS=chrome-extension://*,moz-extension://* (setx в командной строке) и перезапустите Ollama.')
           : tr('{0} отклоняет запросы расширения (HTTP 403). Включите CORS в настройках сервера.', name),
     });
+  }
+  // Ollama / LM Studio / llama.cpp: the model did not fit (CUDA, Metal or system memory).
+  if (res.status >= 400 && OUT_OF_MEMORY_RE.test(msg)) {
+    return new AppError('OUT_OF_MEMORY', { retryable: true, detail: tr('{0}: {1}. Закройте другие модели и программы, занимающие видеокарту, или выберите модель поменьше.', provider, msg) });
   }
   if (res.status === 401 || res.status === 403) return new AppError('INVALID_API_KEY', { detail: `${provider}: ${msg || `HTTP ${res.status}`}` });
   if (res.status === 429) {

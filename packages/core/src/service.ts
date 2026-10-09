@@ -11,6 +11,9 @@ import { emptyContext, type TranslationContext } from './translate/context';
 import type { PageResult, StageEvent, Usage } from './types';
 import { sha256Hex, sniffImageMime } from './util/bytes';
 import { tr } from './i18n';
+import { isLocalProvider } from './llm/privacy';
+import { isOllama } from './llm/openai';
+import { ollamaUnloadAll } from './llm/discover';
 import { cropRows, pageForSpan, planChunks, stitchParts, type StripPart } from './image/strip';
 
 export interface StoredResult {
@@ -130,7 +133,7 @@ export class TranslateService {
     }
     const context = opts.generic ? undefined : await this.getContext(seriesKey);
     try {
-      const out = await runPipeline({ bytes, mime: realMime, config, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic }, { backend: this.backend, fetchImpl: this.fetchImpl });
+      const out = await this.runFitting(config, opts, (cfg) => runPipeline({ bytes, mime: realMime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic }, { backend: this.backend, fetchImpl: this.fetchImpl }));
       opts.onStage?.({ stage: 'rendering' });
       const rendered = await renderOutput(this.backend, out, styleDefaultsFor(config, settings.fonts));
       const cleanedTiles = await Promise.all(out.cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') })));
@@ -228,6 +231,31 @@ export class TranslateService {
     }
     await this.db.put('results', parent.key, { ...parent, parts: out.map((r) => r.key) });
     return out;
+  }
+
+  /**
+   * A local model that ran out of video memory gets three more tries, each lighter than the last:
+   * other models unloaded, then a smaller context, then a smaller context and picture.
+   */
+  private async runFitting<T>(config: PipelineConfig, opts: TranslateOptions, run: (cfg: PipelineConfig) => Promise<T>): Promise<T> {
+    let cfg = config;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await run(cfg);
+      } catch (e) {
+        const err = toAppError(e);
+        const vision = cfg.vision;
+        if (err.code !== 'OUT_OF_MEMORY' || attempt >= 3 || !vision || !isLocalProvider(vision) || opts.signal?.aborted) throw err;
+        opts.onStage?.({ stage: 'detecting', message: tr('Не хватило видеопамяти — освобождаю память и пробую ещё раз ({0} из 3)', attempt + 1) });
+        if (attempt === 0) {
+          if (isOllama(vision)) await ollamaUnloadAll(vision.baseUrl, this.fetchImpl).catch(() => undefined);
+        } else {
+          const numCtx = attempt === 1 ? 8192 : 4096;
+          const lighter = <P extends PipelineConfig['vision']>(p: P): P => (p ? { ...p, numCtx: Math.min(p.numCtx ?? 16384, numCtx) } : p);
+          cfg = { ...cfg, vision: lighter(cfg.vision), translator: lighter(cfg.translator), quality: attempt === 2 ? 'fast' : cfg.quality };
+        }
+      }
+    }
   }
 
   async getResult(key: string): Promise<StoredResult | undefined> {

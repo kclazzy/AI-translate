@@ -35,7 +35,8 @@ export async function withRetry<T>(fn: (attempt: number) => Promise<T>, opts: Re
       return await fn(attempt);
     } catch (raw) {
       const err = toAppError(raw);
-      const retry = opts.shouldRetry ? opts.shouldRetry(err) : err.retryable;
+      // Out of memory: the same request fails the same way; the service retries it lighter instead.
+      const retry = err.code !== 'OUT_OF_MEMORY' && (opts.shouldRetry ? opts.shouldRetry(err) : err.retryable);
       if (!retry || attempt >= retries || err.code === 'CANCELLED') throw err;
       const exp = Math.min(max, base * 2 ** attempt);
       const delay = err.retryAfterMs ? Math.min(max * 3, err.retryAfterMs) : Math.round(exp / 2 + Math.random() * exp / 2);

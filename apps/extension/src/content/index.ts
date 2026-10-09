@@ -327,6 +327,11 @@ function main() {
           break;
         }
         it.status = 'error';
+        if (msg.error.code === 'OUT_OF_MEMORY') {
+          const c = it.cand;
+          it.overlay.error(errorMessage(msg.error), msg.error.detail, [tr('Освободить и повторить'), () => void send({ type: 'free-memory' }).finally(() => void translate(c, { priority: 50, force: true }))]);
+          break;
+        }
         if (msg.error.code === 'SETUP_NEEDED') {
           it.overlay.error(errorMessage(msg.error), msg.error.detail, [tr('Установить и запустить'), () => void send({ type: 'open-setup' })]);
           break;
