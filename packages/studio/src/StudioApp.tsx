@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { emptyContext, type AppSettings, type TranslationContext } from '@ait/core';
 import { CachedPageEditor } from './editor/EditorHost';
+import { WelcomePanel } from './panels/WelcomePanel';
 import { loadBundledFonts } from './fonts';
 import { PlatformContext, usePlatform, type StudioPlatform } from './platform';
 import { ContextEditor, GlossaryEditor } from './panels/GlossaryPanel';
@@ -12,7 +13,7 @@ import { SetupWizard } from './panels/SetupWizard';
 import { Icon, ToastHost } from './ui';
 import { applyUiLangFromSettings, tr } from '@ait/core/i18n';
 
-export type View = 'quick' | 'projects' | 'glossary' | 'settings' | 'privacy' | 'history' | 'editor';
+export type View = 'quick' | 'projects' | 'glossary' | 'settings' | 'privacy' | 'history' | 'editor' | 'welcome';
 
 export interface StudioAppProps {
   platform: StudioPlatform;
@@ -138,6 +139,7 @@ export function StudioApp({ platform, initialView, resultKey, chapterKeys, share
     privacy: tr('Приватность'),
     history: tr('История'),
     editor: tr('Редактор'),
+    welcome: tr('Добро пожаловать'),
   };
 
   return (
@@ -178,6 +180,15 @@ export function StudioApp({ platform, initialView, resultKey, chapterKeys, share
                 <GlossaryEditor title={tr('Общий глоссарий')} entries={settings.glossary} onChange={(glossary) => update({ glossary })} />
                 <SeriesContexts />
               </>
+            ) : null}
+            {view === 'welcome' ? (
+              <WelcomePanel
+                onSetup={() => {
+                  history.replaceState(null, '', '?view=settings&setup=1');
+                  location.reload();
+                }}
+                onCloud={() => setView('settings')}
+              />
             ) : null}
             {view === 'settings' ? <SettingsPanel settings={settings} update={update} /> : null}
             {view === 'privacy' ? <PrivacyPanel settings={settings} /> : null}

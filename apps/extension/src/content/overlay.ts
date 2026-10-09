@@ -183,6 +183,21 @@ export class Overlay {
   }
 
   /** Translation check result: a small button that opens the editor with the report. */
+  /** «ⓘ»: how this page was translated (time, tokens, cost, model). */
+  setInfo(details: string): void {
+    this.bar.querySelector('[data-info]')?.remove();
+    const b = document.createElement('button');
+    b.dataset.info = '1';
+    b.textContent = 'ⓘ';
+    b.title = details;
+    b.setAttribute('aria-label', details);
+    b.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    this.bar.append(b);
+  }
+
   setQa(count: number, details: string): void {
     if (!count) return;
     const b = document.createElement('button');

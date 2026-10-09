@@ -483,6 +483,8 @@ void installOllamaOriginRule();
 chrome.runtime.onStartup?.addListener(() => void installOllamaOriginRule());
 
 chrome.runtime.onInstalled.addListener((details) => {
+  // First install: a short welcome page with the first steps.
+  if (details.reason === 'install') void chrome.tabs.create({ url: chrome.runtime.getURL('studio.html?view=welcome') });
   // After an in-app update: show the settings page with a confirmation.
   if (details.reason === 'update') {
     void chrome.storage.local.get('justUpdated').then(({ justUpdated }) => {
