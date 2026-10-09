@@ -94,7 +94,7 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
   const system = buildSystemPrompt(promptInput(config, context));
   const instruction = withTranslation ? visionFullInstruction(dw, dh) : visionOcrInstruction(dw, dh);
   return withRetry(
-    async () => {
+    async (attempt) => {
       const res = await provider.complete({
         system,
         messages: [{ role: 'user', content: [{ type: 'image', mime: 'image/jpeg', base64: bytesToBase64(jpeg) }, { type: 'text', text: instruction }] }],
@@ -102,7 +102,8 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
         signal,
         maxTokens: 6000,
       });
-      const answer = parseVisionAnswer(res.text, withTranslation);
+      // A cut-off answer is asked again first; only the last try keeps what can be mended.
+      const answer = parseVisionAnswer(res.text, withTranslation, attempt >= 2);
       // Some families answer in pixels of the picture they got: bring them to 0–1000.
       if (family?.coords === 'pixels') for (const b of answer.blocks) b.box = [(b.box[0] / dw) * 1000, (b.box[1] / dh) * 1000, (b.box[2] / dw) * 1000, (b.box[3] / dh) * 1000];
       return { answer, usage: usageFrom(provider, res.model, res.inputTokens, res.outputTokens) };

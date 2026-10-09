@@ -43,12 +43,13 @@ export async function translateBlocks(
   const user = textTranslateInstruction(blocks, hintStrings);
   const usage: Usage[] = [];
 
+  const retries = opts.retries ?? 2;
   return withRetry(
-    async () => {
+    async (attempt) => {
       const messages: ChatMessage[] = [{ role: 'user', content: user }];
       const first = await provider.complete({ system, messages, json: true, signal: opts.signal, maxTokens: Math.min(8192, 400 + blocks.length * 160) });
       usage.push(usageFrom(provider, first.model, first.inputTokens, first.outputTokens));
-      let answer = parseTranslationAnswer(first.text, blocks);
+      let answer = parseTranslationAnswer(first.text, blocks, attempt >= retries);
       let problems = collectProblems(answer.translations, hitsByBlock, answer.missing);
       if (problems.length) {
         messages.push({ role: 'assistant', content: first.text }, { role: 'user', content: repairInstruction(problems) });
@@ -72,7 +73,7 @@ export async function translateBlocks(
       }
       return { translations: answer.translations, entities: answer.entities, summary: answer.summary, usage };
     },
-    { retries: opts.retries ?? 2, signal: opts.signal },
+    { retries, signal: opts.signal },
   );
 }
 

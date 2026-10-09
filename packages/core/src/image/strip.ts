@@ -23,7 +23,11 @@ export interface PartSpan {
 
 /** A chunk is cut here at the latest, and preferably once it is this tall at a calm seam. */
 export const STRIP_MAX = 8000;
-export const STRIP_MIN = 3500;
+/**
+ * Glue only where something is drawn across the seam (a bubble cut by the site): every calm seam is
+ * a cut. Big glued chunks made the model read more at once and the translation got worse.
+ */
+export const STRIP_MIN = 0;
 
 /**
  * Group consecutive pictures (by height, at the common width) into chunks. A chunk ends once it

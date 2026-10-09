@@ -55,7 +55,11 @@ export function repairJson(src: string): unknown | null {
   return null;
 }
 
-export function extractJson(text: string): unknown {
+/**
+ * The JSON object in a model answer. `repair` mends a cut-off answer (keeping whole blocks): used
+ * on the last try only — a fresh answer is better than a mended one.
+ */
+export function extractJson(text: string, opts: { repair?: boolean } = {}): unknown {
   let s = text.trim();
   const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(s);
   if (fence) s = fence[1].trim();
@@ -97,7 +101,7 @@ export function extractJson(text: string): unknown {
     } catch (e) {
       // The answer was cut off (the model ran out of room) or has raw line breaks in a string:
       // keep everything complete before the cut instead of losing the whole page.
-      const fixed = repairJson(candidate);
+      const fixed = opts.repair === false ? null : repairJson(candidate);
       if (fixed !== null) return fixed;
       throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: `Invalid JSON: ${(e as Error).message}` });
     }
@@ -139,8 +143,8 @@ export interface VisionAnswer {
 
 export const MAX_BLOCKS_PER_PAGE = 200;
 
-export function parseVisionAnswer(raw: string, expectTranslation: boolean): VisionAnswer {
-  const json = extractJson(raw) as Record<string, unknown>;
+export function parseVisionAnswer(raw: string, expectTranslation: boolean, repair = true): VisionAnswer {
+  const json = extractJson(raw, { repair }) as Record<string, unknown>;
   const arr = Array.isArray(json.blocks) ? json.blocks : Array.isArray(json) ? (json as unknown[]) : null;
   if (!arr) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'Missing "blocks" array' });
   const blocks: VisionBlock[] = [];
@@ -188,8 +192,8 @@ export function limitLength(translation: string, original: string): string {
   return translation.length > max ? translation.slice(0, max) : translation;
 }
 
-export function parseTranslationAnswer(raw: string, expected: { id: string; text: string }[]): TranslationAnswer {
-  const json = extractJson(raw) as Record<string, unknown>;
+export function parseTranslationAnswer(raw: string, expected: { id: string; text: string }[], repair = true): TranslationAnswer {
+  const json = extractJson(raw, { repair }) as Record<string, unknown>;
   const arr = Array.isArray(json) ? (json as unknown[]) : Array.isArray(json.translations) ? (json.translations as unknown[]) : Array.isArray(json.blocks) ? (json.blocks as unknown[]) : null;
   if (!arr) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'Missing "translations" array' });
   const byId = new Map(expected.map((e) => [e.id, e.text]));
