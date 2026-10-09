@@ -12,7 +12,10 @@ import {
   isOllama,
   isSameModel,
   isThinkingModel,
-  MODEL_TIERS,
+  modelTiers,
+  setCatalog,
+  fetchCatalog,
+  betterModel,
   modelCheckKey,
   ollamaDelete,
   ollamaPull,
@@ -264,8 +267,10 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
   const cfg = existing ?? configFromPreset('ollama', 'ollama');
   const [gpu] = useState(detectGpu);
   const vram = settings.gpuVramGb ?? gpu.vramGb;
+  setCatalog(settings.modelCatalog);
   const tier = tierForVram(vram);
   const [status, setStatus] = useState<OllamaStatus | null>(null);
+  const [upgrade, setUpgrade] = useState<string | null>(null);
   const [vision, setVision] = useState<Record<string, boolean | undefined>>({});
   const [pull, setPull] = useState<{ model: string; status: string; completed?: number; total?: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -293,6 +298,13 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Once a day: the list of recommended models from the repository (models.json).
+  useEffect(() => {
+    const at = latest.current.modelCatalogCheckedAt;
+    if (at && Date.now() - Date.parse(at) < 86_400_000) return;
+    void fetchCatalog().then((c) => update({ modelCatalogCheckedAt: new Date().toISOString(), ...(c ? { modelCatalog: c } : {}) }));
+  }, [update]);
 
   const current = providerById(settings, settings.visionProviderId);
   const isCurrent = (model: string) => !!current && isOllama(current) && isSameModel(current.model, model);
@@ -328,6 +340,36 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
       }
     },
     [cfg.baseUrl, use, refresh, run],
+  );
+
+  /** «Есть модель лучше»: download, check, switch only if it works, then offer to delete the old one. */
+  const better = current && isOllama(current) && vram ? betterModel(current.model, modelTiers(), vram) : undefined;
+  const switchTo = useCallback(
+    async (model: string, old: string) => {
+      setError(null);
+      setUpgrade(tr('Скачиваю {0}…', model));
+      abort.current = new AbortController();
+      try {
+        if (!has(model)) await ollamaPull(cfg.baseUrl, model, (p) => setPull({ model, ...p }), abort.current.signal);
+        setPull(null);
+        setUpgrade(tr('Проверяю {0}…', model));
+        const r = await run({ ...cfg, model, vision: true, jsonMode: 'json_object' });
+        if (r.level === 'fail') {
+          setUpgrade(tr('{0} не прошла проверку — оставляю {1}. {2}', model, old, r.message));
+          return;
+        }
+        use(model);
+        await refresh();
+        setUpgrade(tr('Готово: теперь используется {0}.', model));
+        if (confirm(tr('Новая модель {0} работает. Удалить старую {1} с диска, чтобы освободить место?', model, old))) await ollamaDelete(cfg.baseUrl, old).catch(() => undefined);
+        await refresh();
+      } catch (e) {
+        setPull(null);
+        setUpgrade(null);
+        if ((e as { code?: string }).code !== 'CANCELLED' && (e as Error).name !== 'AbortError') setError(`${errorMessage(e)} ${(e as { detail?: string }).detail ?? (e as Error).message ?? ''}`.trim());
+      }
+    },
+    [cfg, run, use, refresh], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const remove = useCallback(
@@ -457,8 +499,22 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
         </div>
       </details>
 
+      {better && current ? (
+        <div data-testid="better-model" style={{ display: 'grid', gap: 6, padding: '8px 10px', border: '1px solid var(--magenta)', borderRadius: 6 }}>
+          <span>
+            <b>{tr('Есть модель лучше')}</b>{' '}
+            {tr('для вашей видеокарты: {0} ({1} ГБ, качество: {2}). Сейчас: {3}.', better.model, better.sizeGb, tr(better.quality), current.model)}
+          </span>
+          <small className="ait-muted">{tr('Новая модель скачается и пройдёт проверку; переключение — только если проверка прошла.')}</small>
+          <button className="ait-btn small" style={{ justifySelf: 'start' }} disabled={!!pull || !!upgrade?.endsWith('…')} onClick={() => void switchTo(better.model, current.model)}>
+            {tr('Скачать и проверить')}
+          </button>
+        </div>
+      ) : null}
+      {upgrade ? <small data-testid="upgrade-status">{upgrade}</small> : null}
+
       <div style={{ display: 'grid', gap: 6 }}>
-        {MODEL_TIERS.map((t) => {
+        {modelTiers().map((t) => {
           const rec = t.model === tier.model;
           const tooBig = vram !== undefined && t.vramGb > vram;
           const inst = has(t.model);
@@ -797,7 +853,7 @@ export function LocalSetup({ settings, update, getKey, onReady }: { settings: Ap
                   {tr('Скачать')}{' '}{suggested}
                 </button>
                 <small className="ait-muted">
-                  {MODEL_TIERS.find((t) => t.model === suggested) ? tr('{0} ГБ, подобрана {1}. ', MODEL_TIERS.find((t) => t.model === suggested)!.sizeGb, gpu.name ? tr('под {0}', gpu.name) : tr('под видеокарту')) : ''}{tr('Другую можно выбрать в «Локальных моделях» ниже.')}
+                  {modelTiers().find((t) => t.model === suggested) ? tr('{0} ГБ, подобрана {1}. ', modelTiers().find((t) => t.model === suggested)!.sizeGb, gpu.name ? tr('под {0}', gpu.name) : tr('под видеокарту')) : ''}{tr('Другую можно выбрать в «Локальных моделях» ниже.')}
                 </small>
               </>
             )

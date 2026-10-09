@@ -1,3 +1,4 @@
+import { activeCatalog } from './catalog';
 import { httpError, joinUrl, safeFetch } from './http';
 import type { FetchLike, ProviderConfig } from './types';
 import { tr } from '../i18n';
@@ -95,10 +96,16 @@ export const MODEL_TIERS: ModelTier[] = [
   { vramGb: 16, model: 'qwen3.5:9b-q8_0', sizeGb: 10, quality: tr('лучшее для домашних видеокарт'), secondsPerPage: '10–20' },
 ];
 
+/** The recommended models: from the downloaded models.json if there is one, else built in. */
+export function modelTiers(): ModelTier[] {
+  return activeCatalog()?.tiers ?? MODEL_TIERS;
+}
+
 export function tierForVram(vramGb: number | undefined): ModelTier {
   const v = vramGb ?? 12;
-  let best = MODEL_TIERS[0];
-  for (const t of MODEL_TIERS) if (t.vramGb <= v) best = t;
+  const tiers = modelTiers();
+  let best = tiers[0];
+  for (const t of tiers) if (t.vramGb <= v) best = t;
   return best;
 }
 

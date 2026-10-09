@@ -1,3 +1,4 @@
+import { familyFor, setCatalog } from '../llm/catalog';
 import type { PrivacyMode } from '../llm/privacy';
 import type { ProviderConfig } from '../llm/types';
 import type { AppSettings, EngineOptions, PipelineMode, Quality } from '../settings';
@@ -33,7 +34,10 @@ export interface PipelineConfig {
 
 function withKeepAlive(p: ProviderConfig | undefined, s: AppSettings): ProviderConfig | null {
   // Bigger context only with plenty of video memory: on 8 GB it would push the model partly into RAM.
-  return p ? { ...p, keepAliveMin: s.gpuKeepAliveMin ?? DEFAULT_KEEP_ALIVE_MIN, numCtx: (s.gpuVramGb ?? 12) >= 16 ? 16384 : 8192 } : null;
+  if (!p) return null;
+  // Settings of the model's family from models.json (or the built-in rules).
+  const fam = familyFor(p.model);
+  return { ...p, noThinking: p.noThinking ?? (isLocalProvider(p) ? fam?.noThinking : undefined), keepAliveMin: s.gpuKeepAliveMin ?? DEFAULT_KEEP_ALIVE_MIN, numCtx: fam?.numCtx ?? ((s.gpuVramGb ?? 12) >= 16 ? 16384 : 8192) };
 }
 
 /** Fast mode applies when the picture is read by a model on this computer / network. */
@@ -46,6 +50,7 @@ export function fastLocalActive(s: AppSettings): boolean {
 export const DEFAULT_KEEP_ALIVE_MIN = 5;
 
 export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): PipelineConfig {
+  setCatalog(s.modelCatalog);
   return {
     mode: s.pipeline,
     privacy: s.privacy,

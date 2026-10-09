@@ -1,3 +1,4 @@
+import { familyFor } from '../llm/catalog';
 import { AppError } from '../errors';
 import type { ImageBackend } from '../image/backend';
 import { cleanBlock, findLeftoverText, findTextRegions, luminance, parseHex, type Lettering, type LeftoverProbe } from '../image/clean';
@@ -77,7 +78,8 @@ interface Located {
 }
 
 async function readView(provider: LlmProvider, image: TiledImage, view: View, config: PipelineConfig, context: TranslationContext | undefined, withTranslation: boolean, deps: StandaloneDeps, signal?: AbortSignal): Promise<{ answer: VisionAnswer; usage: Usage }> {
-  const maxSide = MAX_SIDE[config.quality];
+  const family = familyFor(provider.config.model);
+  const maxSide = Math.min(MAX_SIDE[config.quality], family?.maxSide ?? Infinity);
   const scale = Math.min(1, maxSide / Math.max(image.width, view.h));
   const dw = Math.max(1, Math.round(image.width * scale));
   const dh = Math.max(1, Math.round(view.h * scale));
@@ -97,7 +99,10 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
         signal,
         maxTokens: 6000,
       });
-      return { answer: parseVisionAnswer(res.text, withTranslation), usage: usageFrom(provider, res.model, res.inputTokens, res.outputTokens) };
+      const answer = parseVisionAnswer(res.text, withTranslation);
+      // Some families answer in pixels of the picture they got: bring them to 0–1000.
+      if (family?.coords === 'pixels') for (const b of answer.blocks) b.box = [(b.box[0] / dw) * 1000, (b.box[1] / dh) * 1000, (b.box[2] / dw) * 1000, (b.box[3] / dh) * 1000];
+      return { answer, usage: usageFrom(provider, res.model, res.inputTokens, res.outputTokens) };
     },
     // A local model that timed out will time out again: report it instead of waiting 3× longer.
     { retries: 2, signal, shouldRetry: (e) => e.retryable && !(e.code === 'TIMEOUT' && isLocalProvider(config.vision!)) },

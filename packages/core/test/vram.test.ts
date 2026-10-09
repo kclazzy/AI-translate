@@ -31,3 +31,27 @@ describe('a local model that runs out of video memory', () => {
     expect(e.code).toBe('OUT_OF_MEMORY');
   });
 });
+
+describe('models.json', () => {
+  it('the file in the repository is valid and matches the built-in list', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { validCatalog, MODEL_TIERS } = await import('../src');
+    const c = JSON.parse(readFileSync(new URL('../../../models.json', import.meta.url), 'utf8'));
+    expect(validCatalog(c)).toBe(true);
+    expect(c.tiers.map((t: any) => t.model)).toEqual(MODEL_TIERS.map((t) => t.model));
+  });
+
+  it('a better model is offered only when it really is better', async () => {
+    const { betterModel, MODEL_TIERS, setCatalog, tierForVram } = await import('../src');
+    expect(betterModel('qwen3.5:4b-q4_K_M', MODEL_TIERS, 12)?.model).toBe('qwen3.5:9b-q4_K_M');
+    expect(betterModel('qwen3.5:9b-q4_K_M', MODEL_TIERS, 12)).toBeUndefined();
+    expect(betterModel('qwen3.5:9b-q8_0', MODEL_TIERS, 12)).toBeUndefined(); // bigger than recommended: user's choice
+    expect(betterModel('qwen2.5vl:7b', MODEL_TIERS, 12)?.model).toBe('qwen3.5:9b-q4_K_M'); // older family
+    // A downloaded list replaces the built-in one; a broken one is ignored.
+    expect(setCatalog({ version: 1, updated: 'x', tiers: [{ vramGb: 2, model: 'next-vl:3b', sizeGb: 2, quality: 'q', secondsPerPage: '1' }], families: [] } as any)).toBe(true);
+    expect(tierForVram(12).model).toBe('next-vl:3b');
+    expect(setCatalog({ version: 2 } as any)).toBe(false);
+    setCatalog(null);
+    expect(tierForVram(12).model).toBe('qwen3.5:9b-q4_K_M');
+  });
+});

@@ -1,0 +1,64 @@
+{
+ "version": 1,
+ "updated": "2026-10-09",
+ "tiers": [
+  {
+   "vramGb": 2,
+   "model": "qwen3.5:0.8b",
+   "sizeGb": 1.3,
+   "quality": "базовое: может путать японский в баблах",
+   "secondsPerPage": "20–40"
+  },
+  {
+   "vramGb": 4,
+   "model": "qwen3.5:2b-q4_K_M",
+   "sizeGb": 1.9,
+   "quality": "приемлемое",
+   "secondsPerPage": "20–40"
+  },
+  {
+   "vramGb": 6,
+   "model": "qwen3.5:4b-q4_K_M",
+   "sizeGb": 3.3,
+   "quality": "хорошее",
+   "secondsPerPage": "15–30"
+  },
+  {
+   "vramGb": 8,
+   "model": "qwen3.5:4b-q8_0",
+   "sizeGb": 5.2,
+   "quality": "хорошее, точнее читает мелкий текст",
+   "secondsPerPage": "15–25"
+  },
+  {
+   "vramGb": 12,
+   "model": "qwen3.5:9b-q4_K_M",
+   "sizeGb": 6.6,
+   "quality": "очень хорошее",
+   "secondsPerPage": "10–20"
+  },
+  {
+   "vramGb": 16,
+   "model": "qwen3.5:9b-q8_0",
+   "sizeGb": 10,
+   "quality": "лучшее для домашних видеокарт",
+   "secondsPerPage": "10–20"
+  }
+ ],
+ "families": [
+  {
+   "match": "qwen3\\.5|qwen3-vl|qwen3vl",
+   "noThinking": true,
+   "coords": "norm1000",
+   "note": "Qwen3.5 / Qwen3-VL: thinking off, boxes 0–1000"
+  },
+  {
+   "match": "qwen2\\.5-?vl",
+   "noThinking": true
+  },
+  {
+   "match": "gemma3",
+   "coords": "norm1000"
+  }
+ ]
+}

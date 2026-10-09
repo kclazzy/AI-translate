@@ -73,6 +73,9 @@ export interface AppSettings {
   twoStepTranslation?: boolean;
   /** Translate neighbouring pictures of one webtoon strip together (default on). */
   stitchStrips?: boolean;
+  /** models.json fetched from the repository (recommended local models, family settings). */
+  modelCatalog?: import('./llm/catalog').ModelCatalog;
+  modelCatalogCheckedAt?: string;
   /** Interface language: "auto" (default) follows the browser / Windows language. */
   interfaceLang?: string;
 }
