@@ -49,11 +49,13 @@ const llm = createServer((req, res) => {
 });
 await new Promise((r) => llm.listen(18150, '127.0.0.1', r));
 
+const cdp = !!process.env.E2E_CDP_EXTENSIONS;
 const browser = await puppeteer.launch({
   env: { ...process.env, LANG: 'ru_RU.UTF-8', LANGUAGE: 'ru' },
   executablePath: CHROME,
   headless: false,
-  args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, '--no-sandbox', '--lang=ru', '--no-first-run', '--disable-gpu'],
+  ...(cdp ? { pipe: true, enableExtensions: [ext] } : {}),
+  args: [...(cdp ? [] : [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`]), '--no-sandbox', '--lang=ru', '--no-first-run', '--disable-gpu'],
   defaultViewport: { width: 1000, height: 1000 },
 });
 // The welcome tab opened on install would take the focus from the pages under test.
