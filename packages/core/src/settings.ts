@@ -124,6 +124,8 @@ export interface AppSettings {
   autoSave?: boolean;
   /** Named sets of model settings to switch between quickly. */
   presets?: ModelPreset[];
+  /** Where the editor shows the other pages of a chapter. */
+  editorPageList?: 'bottom' | 'right';
   /** models.json fetched from the repository (recommended local models, family settings). */
   modelCatalog?: import('./llm/catalog').ModelCatalog;
   modelCatalogCheckedAt?: string;

@@ -340,6 +340,9 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
             <div style={{ marginTop: 8 }}>
               <Switch checked={!!s.autoSave} onChange={(autoSave) => update({ autoSave })} label={tr('Сохранять каждую переведённую картинку в Загрузки/AI Translate/<сайт>')} />
             </div>
+            <div style={{ marginTop: 8 }}>
+              <Segmented label={tr('Страницы главы в редакторе')} value={s.editorPageList ?? 'bottom'} onChange={(editorPageList) => update({ editorPageList })} options={[{ value: 'bottom', label: tr('Снизу') }, { value: 'right', label: tr('Справа') }]} />
+            </div>
           </Field>
           <Field label={tr('Звуки (SFX)')}>
             <div style={{ display: 'grid', gap: 8 }}>

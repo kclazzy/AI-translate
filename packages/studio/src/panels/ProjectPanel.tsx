@@ -167,8 +167,44 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
 
   if (editing && project) {
     const fresh = project.pages.find((p) => p.id === editing.id) ?? editing;
-    return <ProjectPageEditor store={store} project={project} page={fresh} settings={settings} onClose={() => setEditing(null)} onSaved={(p) => setProject(p)} />;
+    const side = settings.editorPageList === 'right';
+    const done = project.pages.filter((p) => p.status === 'done');
+    // The other pages of the chapter next to the editor: bottom (default) or right.
+    return (
+      <div className={`ait-editor-with-pages ${side ? 'side' : ''}`}>
+        <div style={{ minWidth: 0 }}>
+          <ProjectPageEditor store={store} project={project} page={fresh} settings={settings} onClose={() => setEditing(null)} onSaved={(p) => setProject(p)} />
+        </div>
+        {done.length > 1 ? (
+          <nav className="ait-filmstrip" aria-label={tr('Страницы главы')} data-testid="filmstrip">
+            {done.map((p) => (
+              <button key={p.id} aria-current={p.id === fresh.id ? 'page' : undefined} title={p.name} onClick={() => p.id !== fresh.id && setEditing(p)}>
+                <Thumb store={store} project={project} page={p} />
+                <span>{p.index + 1}</span>
+              </button>
+            ))}
+          </nav>
+        ) : null}
+      </div>
+    );
   }
+
+  const movePage = async (id: string, dir: -1 | 1) => {
+    if (!project) return;
+    const pages = [...project.pages];
+    const i = pages.findIndex((p) => p.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= pages.length) return;
+    [pages[i], pages[j]] = [pages[j], pages[i]];
+    setProject(await store.save({ ...project, pages: pages.map((p, k) => ({ ...p, index: k })) }));
+  };
+  const deletePage = async (id: string) => {
+    if (!project) return;
+    const page = project.pages.find((p) => p.id === id);
+    if (!page || !confirm(tr('Удалить страницу «{0}» из проекта?', page.name))) return;
+    await store.removePage(project, id);
+    setProject(await store.save({ ...project, pages: project.pages.filter((p) => p.id !== id).map((p, k) => ({ ...p, index: k })) }));
+  };
 
   if (!project) {
     return (
@@ -268,6 +304,11 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
                   <input type="checkbox" aria-label={tr('Выбрать {0}', p.name)} checked={selection.has(p.id)} onClick={(e) => e.stopPropagation()} onChange={(e) => { const s = new Set(selection); if (e.target.checked) s.add(p.id); else s.delete(p.id); setSelection(s); }} />
                 ) : null}
                 <Thumb store={store} project={project} page={p} />
+                <div className="ait-page-tools" onClick={(e) => e.stopPropagation()}>
+                  <button aria-label={tr('Раньше')} title={tr('Переместить раньше')} disabled={p.index === 0} onClick={() => void movePage(p.id, -1)}>◀</button>
+                  <button aria-label={tr('Позже')} title={tr('Переместить позже')} disabled={p.index === project.pages.length - 1} onClick={() => void movePage(p.id, 1)}>▶</button>
+                  <button aria-label={tr('Удалить страницу {0}', p.name)} title={tr('Удалить страницу')} onClick={() => void deletePage(p.id)}>✕</button>
+                </div>
                 <div className="meta">
                   <span>{p.index + 1}. {p.name}</span>
                   <span className={`ait-badge ${p.status === 'done' ? 'ok' : p.status === 'error' ? 'err' : ''}`}>{STATUS[p.status]}</span>

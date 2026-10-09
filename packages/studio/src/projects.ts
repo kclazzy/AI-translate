@@ -51,6 +51,10 @@ export class ProjectStore {
     await this.db.delete('projects', p.id);
   }
 
+  async removePage(p: Project, pageId: string): Promise<void> {
+    await this.db.delete('assets', assetKey(p.id, pageId));
+  }
+
   assets(projectId: string, pageId: string): Promise<StoredAssets | undefined> {
     return this.db.get<StoredAssets>('assets', assetKey(projectId, pageId));
   }
