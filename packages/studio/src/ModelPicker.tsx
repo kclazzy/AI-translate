@@ -300,9 +300,11 @@ export function LocalModels({ settings, update, getKey, autoStart }: { settings:
   }, [refresh]);
 
   // Once a day: the list of recommended models from the repository (models.json).
+  const catalogAsked = useRef(false);
   useEffect(() => {
     const at = latest.current.modelCatalogCheckedAt;
-    if (at && Date.now() - Date.parse(at) < 86_400_000) return;
+    if (catalogAsked.current || (at && Date.now() - Date.parse(at) < 86_400_000)) return;
+    catalogAsked.current = true;
     void fetchCatalog().then((c) => update({ modelCatalogCheckedAt: new Date().toISOString(), ...(c ? { modelCatalog: c } : {}) }));
   }, [update]);
 

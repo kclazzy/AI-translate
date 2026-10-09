@@ -63,6 +63,7 @@ try {
     if (u.startsWith('https://api.github.com/repos/kclazzy/AI-translate/releases/latest')) {
       return req.respond({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ tag_name: 'v9.9.9', html_url: 'https://github.com/kclazzy/AI-translate/releases/tag/v9.9.9', body: 'notes', assets: [{ name: 'ai-translate-desktop-v9.9.9.zip', browser_download_url: ASSET, size: zipBytes.length }, { name: 'ai-translate-android-v9.9.9.apk', browser_download_url: 'https://x/a.apk' }] }) });
     }
+    if (process.env.CATALOG && u.includes('raw.githubusercontent.com')) return req.respond({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: readFileSync(new URL('../models.json', import.meta.url)) });
     if (u === ASSET) return req.respond({ status: 200, contentType: 'application/zip', headers: { 'access-control-allow-origin': '*', 'content-length': String(zipBytes.length) }, body: zipBytes });
     return req.continue();
   });
