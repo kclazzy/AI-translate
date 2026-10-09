@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { cropRows, pageForSpan, shiftBlock, tilesToImage, TiledImage, type AppSettings, type PageResult, type TextBlock, type Project, type ProjectPage } from '@ait/core';
 import { usePlatform } from '../platform';
-import { loadOriginalImage, rerenderProjectPage, type ProjectStore } from '../projects';
+import { cropProjectPage, loadOriginalImage, rerenderProjectPage, type ProjectStore } from '../projects';
 import { ErrorBox } from '../ui';
 import { Editor } from './Editor';
 import { tr } from '@ait/core/i18n';
@@ -167,7 +167,7 @@ export function ProjectPageEditor({ store, project, page, settings, onClose, onS
   if (!data) return <p className="ait-muted">{tr('Загрузка страницы…')}</p>;
   return (
     <Editor
-      key={page.id}
+      key={`${page.id}:${data.page.width}x${data.page.height}`}
       title={page.name}
       page={data.page}
       original={data.original}
@@ -175,6 +175,10 @@ export function ProjectPageEditor({ store, project, page, settings, onClose, onS
       settings={settings}
       onClose={onClose}
       chapterTexts={async (current) => project.pages.map((p) => (p.id === page.id ? current : p.result?.blocks ?? []))}
+      onCrop={async (rect, blocks) => {
+        const fresh = (await store.get(project.id)) ?? project;
+        onSaved(await cropProjectPage(store, platform.backend, settings, fresh, page, { ...data.page, blocks }, data.original, data.cleaned, rect));
+      }}
       onSave={async (result, cleaned, pixels) => {
         const fresh = (await store.get(project.id)) ?? project;
         onSaved(await rerenderProjectPage(store, platform.backend, settings, fresh, page, result, pixels ? cleaned : undefined));

@@ -31,7 +31,7 @@ import { usePlatform } from '../platform';
 import { ErrorBox, Field, Switch, toast, useAction } from '../ui';
 import { tr } from '@ait/core/i18n';
 
-type Tool = 'select' | 'brush' | 'eraser' | 'inpaint' | 'ocr' | 'picker';
+type Tool = 'select' | 'brush' | 'eraser' | 'inpaint' | 'ocr' | 'picker' | 'crop';
 
 type HistoryItem =
   | { kind: 'blocks'; before: TextBlock[]; after: TextBlock[] }
@@ -51,6 +51,8 @@ export interface EditorProps {
   toolbarExtra?: React.ReactNode;
   /** Texts of every translated page of the chapter, in reading order (for «Скачать весь текст с главы»). */
   chapterTexts?: (current: TextBlock[]) => Promise<TextBlock[][]>;
+  /** Pages of a project can be cut to a frame (pictures on a site cannot: they must keep their size). */
+  onCrop?: (rect: Box, blocks: TextBlock[]) => Promise<void>;
 }
 
 const BASE_FONTS = ['"AIT Lettering"', '"AIT Comic"', '"AIT Narration"', '"AIT SFX"', 'Arial', '"Comic Sans MS"', '"Times New Roman"', 'Georgia', 'Impact'];
@@ -60,7 +62,7 @@ function clonePixels(p: PixelData): PixelData {
   return { width: p.width, height: p.height, data: new Uint8ClampedArray(p.data) };
 }
 
-export function Editor({ page, original, cleaned, settings, onSave, onClose, title, marks, toolbarExtra, chapterTexts }: EditorProps) {
+export function Editor({ page, original, cleaned, settings, onSave, onClose, title, marks, toolbarExtra, chapterTexts, onCrop }: EditorProps) {
   const platform = usePlatform();
   const [blocks, setBlocks] = useState<TextBlock[]>(page.blocks);
   const [selected, setSelected] = useState<string | null>(page.blocks[0]?.id ?? null);
@@ -318,6 +320,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       else if (e.key === 'b') setTool('brush');
       else if (e.key === 'e') setTool('eraser');
       else if (e.key === 'i') setTool('picker');
+      else if (e.key === 'c' && onCrop && !mod) setTool('crop');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -430,7 +433,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     octx.clearRect(0, 0, overlay.width, overlay.height);
     const drawPreview = () => {
       octx.clearRect(0, 0, overlay.width, overlay.height);
-      if (tool === 'ocr') {
+      if (tool === 'ocr' || tool === 'crop') {
         // The frame being stretched is drawn on top of the page (see .ait-ocr-frame).
         const [x0, y0] = pts[0];
         const [x1, y1] = pts[pts.length - 1];
@@ -455,6 +458,16 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       octx.clearRect(0, 0, overlay.width, overlay.height);
+      if (tool === 'crop') {
+        setOcrFrame(null);
+        const [x0, y0] = pts[0];
+        const [x1, y1] = pts[pts.length - 1];
+        const rect: Box = [Math.round(Math.min(x0, x1)), Math.round(Math.min(y0, y1)), Math.round(Math.abs(x1 - x0)), Math.round(Math.abs(y1 - y0))];
+        if (rect[2] > 16 && rect[3] > 16 && onCrop && (!dirty || confirm(tr('Несохранённые правки будут сохранены вместе с обрезкой. Продолжить?'))) && confirm(tr('Обрезать страницу по рамке {0}×{1}? Тексты за рамкой будут убраны.', rect[2], rect[3]))) {
+          void onCrop(rect, blocks).then(() => setTool('select'));
+        }
+        return;
+      }
       if (tool === 'ocr') {
         setOcrFrame(null);
         const [x0, y0] = pts[0];
@@ -594,6 +607,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           {toolBtn('eraser', '⌫', tr('Ластик'), 'E')}
           {toolBtn('inpaint', '◍', tr('Заливка фона'))}
           {toolBtn('ocr', 'OCR', tr('Ручной OCR'))}
+          {onCrop ? toolBtn('crop', '⛶', tr('Обрезать страницу: обведите, что оставить'), 'C') : null}
           {toolBtn('picker', '⊙', tr('Пипетка: взять цвет для кисти с картинки (Alt+щелчок кистью)'), 'I')}
           <input className="ait-pal-color" type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} aria-label={tr('Цвет кисти')} title={tr('Цвет кисти')} data-testid="brush-color" />
           {painting ? (
@@ -638,7 +652,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           <div ref={innerRef} className="ait-stage-inner" style={{ width: page.width * zoom, height: page.height * zoom }}>
             {marks?.map((y) => <div key={`m${y}`} className="ait-page-mark" style={{ top: y * zoom }} aria-hidden />)}
             {ocrFrame ? (
-              <div className="ait-ocr-frame" data-testid="ocr-frame" style={{ left: ocrFrame[0] * zoom, top: ocrFrame[1] * zoom, width: ocrFrame[2] * zoom, height: ocrFrame[3] * zoom }}>
+              <div className={`ait-ocr-frame ${tool === 'crop' ? 'crop' : ''}`} data-testid="ocr-frame" style={{ left: ocrFrame[0] * zoom, top: ocrFrame[1] * zoom, width: ocrFrame[2] * zoom, height: ocrFrame[3] * zoom }}>
                 <span>{Math.round(ocrFrame[2])}×{Math.round(ocrFrame[3])}</span>
               </div>
             ) : null}

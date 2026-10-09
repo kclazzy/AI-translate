@@ -22,6 +22,7 @@ import {
   type ProviderConfig,
 } from '@ait/core';
 import { buildReport } from '../report';
+import { settingsFromFile, settingsToFile } from '../settingsFile';
 import { LocalModels, LocalSetup, ModelCheckCard, ModelPicker, UpdateCheck } from '../ModelPicker';
 import { usePlatform } from '../platform';
 import { ErrorBox, Field, FoldPanel, NumberInput, Segmented, Switch, toast, useAction } from '../ui';
@@ -724,6 +725,36 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
         <StorageLine />
         <div style={{ marginTop: 14 }}>
           <span id="ait-update"><UpdateCheck current={platform.version} install={platform.installUpdate} autoCheck={params.get('update') === '1'} /></span>
+        </div>
+        <div style={{ marginTop: 14, display: 'grid', gap: 6 }} data-testid="settings-file">
+          <b>{tr('Настройки в файл')}</b>
+          <small className="ait-muted">{tr('Чтобы перенести модели, профили, глоссарий и наборы на другой компьютер. Ключи API в файл не попадают — их нужно ввести там заново.')}</small>
+          <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="ait-btn small" onClick={() => void platform.saveFile(`ai-translate-settings-${new Date().toISOString().slice(0, 10)}.json`, new TextEncoder().encode(settingsToFile(s, platform.version)), 'application/json')}>
+              {tr('Сохранить настройки')}
+            </button>
+            <label className="ait-btn small" style={{ cursor: 'pointer' }}>
+              {tr('Загрузить настройки')}
+              <input
+                type="file"
+                accept=".json"
+                hidden
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = '';
+                  if (!f) return;
+                  try {
+                    const next = settingsFromFile(await f.text(), s);
+                    if (!confirm(tr('Заменить текущие настройки настройками из файла?'))) return;
+                    update(next);
+                    toast(tr('Настройки загружены. Введите ключи API, если они нужны.'));
+                  } catch {
+                    toast(tr('Это не файл настроек AI Translate'));
+                  }
+                }}
+              />
+            </label>
+          </span>
         </div>
         <div style={{ marginTop: 14, display: 'grid', gap: 6 }} data-testid="report">
           <b>{tr('Сообщить о проблеме')}</b>

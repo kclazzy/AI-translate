@@ -374,3 +374,5 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   padding: 4px 6px; border-radius: 4px; white-space: nowrap;
 }
 .ait-panel-soft { padding: 8px 10px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper); }
+.ait-ocr-frame.crop { border-color: #c8205f; background: transparent; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .45); }
+.ait-ocr-frame.crop span { background: #c8205f; }

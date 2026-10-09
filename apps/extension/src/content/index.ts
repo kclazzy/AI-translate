@@ -104,6 +104,26 @@ function main() {
     it.overlay.position();
   }
 
+  /** The whole chapter (or page): pictures, model time, tokens and cost — shown when it is done. */
+  function chapterStats(list: Item[]): string {
+    let ms = 0, tokens = 0, cost = 0, cached = 0;
+    for (const it of list) {
+      const r = it.result;
+      if (!r) continue;
+      if (r.cached) cached++;
+      else ms += r.page.timings.totalMs ?? 0;
+      for (const u of r.page.usage) {
+        tokens += u.inputTokens + u.outputTokens;
+        cost += u.costUsd;
+      }
+    }
+    const min = ms / 60000;
+    const time = min >= 1 ? tr('{0} мин', fmtNumber(min, { maximumFractionDigits: 1 })) : tr('{0} с', fmtNumber(ms / 1000, { maximumFractionDigits: 0 }));
+    const parts = [tr('время модели {0}', time), tr('токенов {0}', fmtNumber(tokens)), fmtUsd(cost)];
+    if (cached) parts.push(tr('из кэша {0}', cached));
+    return parts.join(' · ');
+  }
+
   /** Time, tokens and cost of one page, for the «ⓘ» button. */
   function pageInfo(r: RenderedTiles): string {
     const u = r.page.usage;
@@ -177,7 +197,7 @@ function main() {
   }
 
   // ---- translate one candidate -------------------------------------------------------------
-  async function translate(c: Candidate, opts: { priority?: number; force?: boolean } = {}) {
+  async function translate(c: Candidate, opts: { priority?: number; force?: boolean; redraw?: boolean } = {}) {
     dismissed.delete(c.el);
     const id = idFor(c.el);
     const existing = items.get(id);
@@ -195,11 +215,11 @@ function main() {
       const priority = opts.priority ?? priorityOf(c.el);
       if (stitch && c.kind === 'img') {
         // Wait a moment for the neighbours: pictures of one strip go to the model together.
-        strip.push({ item, image, priority, force: opts.force });
+        strip.push({ item, image, priority, force: opts.force, redraw: opts.redraw });
         if (!stripTimer) stripTimer = setTimeout(flushStrip, 300);
         return;
       }
-      await send({ type: 'translate', image, pageUrl: location.href, title: document.title, priority, force: opts.force });
+      await send({ type: 'translate', image, pageUrl: location.href, title: document.title, priority, force: opts.force, redraw: opts.redraw });
       item.sentAt = Date.now();
       startWatch();
     } catch (e) {
@@ -211,7 +231,7 @@ function main() {
   }
 
   // ---- strips: pictures a site cut out of one long webtoon strip --------------------------
-  type Pending = { item: Item; image: ImageRef; priority: number; force?: boolean };
+  type Pending = { item: Item; image: ImageRef; priority: number; force?: boolean; redraw?: boolean };
   let strip: Pending[] = [];
   let stripTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -240,10 +260,11 @@ function main() {
     for (const g of stripGroups(list)) {
       const priority = Math.min(...g.map((p) => p.priority));
       const force = g.some((p) => p.force);
+      const redraw = g.every((p) => p.redraw) || undefined;
       const msg: ContentToBackground =
         g.length > 1
-          ? { type: 'translate-strip', images: g.map((p) => p.image), pageUrl: location.href, title: document.title, priority, force }
-          : { type: 'translate', image: g[0].image, pageUrl: location.href, title: document.title, priority, force };
+          ? { type: 'translate-strip', images: g.map((p) => p.image), pageUrl: location.href, title: document.title, priority, force, redraw }
+          : { type: 'translate', image: g[0].image, pageUrl: location.href, title: document.title, priority, force, redraw };
       const group = g.length > 1 ? g.map((p) => p.item.cand) : undefined;
       for (const p of g) p.item.group = group;
       try {
@@ -406,7 +427,7 @@ function main() {
             it.overlay.destroy();
             items.delete(it.id);
           }
-          for (const it of done) void translate(it.cand, { priority: 10 });
+          for (const it of done) void translate(it.cand, { priority: 10, redraw: true });
           break;
         }
         if (!enabled && msg.command !== 'toggle-original' && msg.command !== 'set-auto') {
@@ -566,7 +587,9 @@ function main() {
       try {
         const r = await send<{ ok: boolean; name: string; pages: number; error?: { detail?: string } }>({ type: 'build-download', keys, title: document.title, format: c.format });
         if (!r?.ok) throw new Error(r?.error?.detail ?? tr('не удалось собрать файл'));
-        c.text.textContent = tr('Скачано: {0}{1}', r.name, failed ? tr(' (без {0} непереведённых картинок)', failed) : '');
+        c.text.textContent = `${tr('Скачано: {0}{1}', r.name, failed ? tr(' (без {0} непереведённых картинок)', failed) : '')}
+${chapterStats(list)}`;
+        c.text.style.whiteSpace = 'pre-line';
       } catch (e) {
         c.text.textContent = tr('Не удалось собрать файл: {0}', e instanceof Error ? e.message : String(e));
       }
@@ -654,14 +677,16 @@ function main() {
     const left = total - done - failed;
     p.text.textContent = left
       ? tr('Перевожу страницу: {0} из {1}{2}', done, total, failed ? tr(', ошибок: {0}', failed) : '')
-      : tr('Готово: переведено {0} из {1}{2}', done, total, failed ? tr(', ошибок: {0}', failed) : '');
+      : `${tr('Готово: переведено {0} из {1}{2}', done, total, failed ? tr(', ошибок: {0}', failed) : '')}
+${chapterStats(list)}`;
+    p.text.style.whiteSpace = 'pre-line';
     // Until the first picture is ready the bar just runs; then it shows the share done.
     const share = total ? (done + failed) / total : 0;
     p.bar.classList.toggle('busy', share === 0 && left > 0);
     p.bar.style.width = `${Math.round(share * 100)}%`;
     if (!left && total) {
       clearInterval(p.timer);
-      setTimeout(() => progress === p && hidePageProgress(), 4000);
+      setTimeout(() => progress === p && hidePageProgress(), 9000);
     }
   }
 

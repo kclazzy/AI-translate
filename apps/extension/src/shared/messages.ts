@@ -25,8 +25,8 @@ export interface RenderedTiles {
 
 // content → background
 export type ContentToBackground =
-  | { type: 'translate'; image: ImageRef; pageUrl: string; title: string; priority: number; force?: boolean }
-  | { type: 'translate-strip'; images: ImageRef[]; pageUrl: string; title: string; priority: number; force?: boolean }
+  | { type: 'translate'; image: ImageRef; pageUrl: string; title: string; priority: number; force?: boolean; redraw?: boolean }
+  | { type: 'translate-strip'; images: ImageRef[]; pageUrl: string; title: string; priority: number; force?: boolean; redraw?: boolean }
   | { type: 'cancel'; id: string }
   | { type: 'capture-area'; image: ImageRef; pageUrl: string; title: string }
   | { type: 'get-page-state'; host: string }

@@ -1,4 +1,5 @@
 import {
+  clampBox,
   exportProjectZip,
   importProjectZip,
   newProject,
@@ -11,6 +12,8 @@ import {
   toAppError,
   TiledImage,
   type AppSettings,
+  type Box,
+  type TextBlock,
   type IdbStore,
   type ImageBackend,
   type PageAssets,
@@ -141,6 +144,47 @@ export async function rerenderProjectPage(store: ProjectStore, backend: ImageBac
   await store.putAssets(project.id, page.id, { ...assets, cleaned: cleanedTiles, rendered: rendered.tiles });
   const pages = project.pages.map((p) => (p.id === page.id ? { ...p, result: rendered.page, status: 'done' as const } : p));
   return store.save({ ...project, pages });
+}
+
+/** Move a block's coordinates by (−dx, −dy): into a cropped page. */
+function moveBlock(b: TextBlock, dx: number, dy: number): TextBlock {
+  const mv = (x: Box): Box => [x[0] - dx, x[1] - dy, x[2], x[3]];
+  const out: TextBlock = { ...b, bbox: mv(b.bbox), polygon: b.polygon.map(([x, y]) => [x - dx, y - dy] as [number, number]) };
+  if (b.textBox) out.textBox = mv(b.textBox);
+  if (b.bubble) out.bubble = { ...b.bubble, box: mv(b.bubble.box), safeArea: mv(b.bubble.safeArea), rows: b.bubble.rows ? { ...b.bubble.rows, y: b.bubble.rows.y - dy, l: b.bubble.rows.l.map((v) => v - dx), r: b.bubble.rows.r.map((v) => v - dx) } : undefined };
+  return out;
+}
+
+function cropImage(backend: ImageBackend, img: TiledImage, [x, y, w, h]: Box): TiledImage {
+  const out = new TiledImage(backend, w, h);
+  for (const t of out.tiles) img.drawRegion(t.canvas.getContext('2d'), x, y + t.y, w, t.h, w, t.h);
+  return out;
+}
+
+/**
+ * «Обрезать»: cut a project page to `rect` — the original, the cleaned picture and the texts move
+ * with it (texts outside the frame are dropped), then the page is drawn again.
+ */
+export async function cropProjectPage(store: ProjectStore, backend: ImageBackend, settings: AppSettings, project: Project, page: ProjectPage, result: PageResult, original: TiledImage, cleaned: TiledImage, rect: Box): Promise<Project> {
+  const [x, y, w, h] = clampBox(rect.map(Math.round) as Box, result.width, result.height);
+  if (w < 16 || h < 16) return project;
+  const assets = await store.assets(project.id, page.id);
+  if (!assets) return project;
+  const o = cropImage(backend, original, [x, y, w, h]);
+  const c = backend.createCanvas(w, h);
+  o.drawRegion(c.getContext('2d'), 0, 0, w, h, w, h);
+  const originalBytes = await backend.encode(c, 'image/png');
+  const cl = cropImage(backend, cleaned, [x, y, w, h]);
+  const inside = (b: TextBlock) => {
+    const box = b.bubble?.box ?? b.bbox;
+    const cx = box[0] + box[2] / 2;
+    const cy = box[1] + box[3] / 2;
+    return cx >= x && cx < x + w && cy >= y && cy < y + h;
+  };
+  const next: PageResult = { ...result, width: w, height: h, blocks: result.blocks.filter(inside).map((b) => moveBlock(b, x, y)) };
+  await store.putAssets(project.id, page.id, { ...assets, original: { bytes: originalBytes, mime: 'image/png' } });
+  const fresh = (await store.get(project.id)) ?? project;
+  return rerenderProjectPage(store, backend, settings, fresh, page, next, cl);
 }
 
 export async function loadOriginalImage(backend: ImageBackend, assets: StoredAssets): Promise<TiledImage> {

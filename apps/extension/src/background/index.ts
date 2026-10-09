@@ -160,7 +160,8 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
         sendToTab(tabId, { type: 'job-error', id: msg.image.id, error: OFF_ERROR().toJSON() });
         return { queued: false };
       }
-      const ready = await readiness();
+      // Redrawing pictures already translated (new text size) comes from the cache: no model needed.
+      const ready = msg.redraw ? { ok: true as const } : await readiness();
       if (!ready.ok) {
         sendToTab(tabId, { type: 'job-error', id: msg.image.id, error: new AppError('SETUP_NEEDED', { retryable: false, detail: readinessText(ready) }).toJSON() });
         void offerSetup(tabId);
@@ -196,9 +197,9 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
     }
     case 'translate-strip': {
       // Neighbouring pictures of one strip: fetch them all and translate them as one page.
-      const one = (image: ImageRef) => handleContent({ type: 'translate', image, pageUrl: msg.pageUrl, title: msg.title, priority: msg.priority, force: msg.force }, sender);
+      const one = (image: ImageRef) => handleContent({ type: 'translate', image, pageUrl: msg.pageUrl, title: msg.title, priority: msg.priority, force: msg.force, redraw: msg.redraw }, sender);
       const settings = await loadSettings();
-      if (settings.enabled === false || !(await readiness()).ok || msg.images.length < 2) {
+      if (settings.enabled === false || (!msg.redraw && !(await readiness()).ok) || msg.images.length < 2) {
         for (const image of msg.images) void one(image);
         return { queued: false };
       }
