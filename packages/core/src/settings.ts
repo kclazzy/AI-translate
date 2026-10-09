@@ -132,6 +132,8 @@ export interface AppSettings {
   presets?: ModelPreset[];
   /** Where the editor shows the other pages of a chapter. */
   editorPageList?: 'bottom' | 'right';
+  /** «Сверка с другими переводчиками» (keys are in the secret store as checker:<id>). */
+  crossCheck?: import('./translate/crosscheck').CrossCheckSettings;
   /** How far past the letters the original text is erased, px (default 3). */
   inpaintExpand?: number;
   /** Text over artwork: redo the background with LaMa in the local engine when it is running. */

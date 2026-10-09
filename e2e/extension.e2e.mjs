@@ -246,6 +246,14 @@ try {
     await ed.mouse.move(sb.x + 130, sb.y + 125);
     const eraserOutline = await ed.$('.ait-brush-cursor.eraser');
     check('the eraser shows its outline on the page', !!eraserOutline);
+    // Hold the right button and pull: the eraser grows to the pointer.
+    const sizeBefore = await ed.$eval('.ait-pal-range', (el) => Number(el.value));
+    await ed.mouse.move(sb.x + 200, sb.y + 200);
+    await ed.mouse.down({ button: 'right' });
+    await ed.mouse.move(sb.x + 290, sb.y + 200, { steps: 6 });
+    await ed.mouse.up({ button: 'right' });
+    const sizeAfter = await ed.$eval('.ait-pal-range', (el) => Number(el.value));
+    check('holding the right button and pulling makes the eraser bigger', sizeAfter > sizeBefore + 50, `${sizeBefore} → ${sizeAfter}`);
     await ed.click('[aria-label="Ручной OCR"]');
     await ed.mouse.move(sb.x + 60, sb.y + 60);
     await ed.mouse.down();

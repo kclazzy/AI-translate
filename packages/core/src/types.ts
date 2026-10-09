@@ -88,6 +88,8 @@ export interface TextBlock {
   speakerGender?: 'male' | 'female' | 'unknown';
   /** Result of the translation check (linguistic + semantic QA). */
   qa?: import('./translate/qa').BlockQa;
+  /** «Сверка»: the translation compared with other translators. */
+  check?: import('./translate/crosscheck').BlockCheck;
   overflow?: boolean;
   /** Set when the user edited this block by hand. */
   edited?: boolean;

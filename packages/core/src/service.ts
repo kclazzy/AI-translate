@@ -3,14 +3,17 @@ import type { ImageBackend, ImageMime } from './image/backend';
 import { TiledImage } from './image/tiled';
 import type { FetchLike } from './llm/types';
 import { pipelineConfigFromSettings, pipelineHash, type PipelineConfig } from './pipeline/config';
-import { renderOutput, runPipeline, styleDefaultsFor, type RenderedPage } from './pipeline/run';
+import { renderOutput, runCrossCheck, runPipeline, styleDefaultsFor, type RenderedPage } from './pipeline/run';
 import type { AppSettings } from './settings';
 import type { IdbStore } from './storage/idb';
 import type { SecretStore } from './storage/secrets';
 import { emptyContext, type TranslationContext } from './translate/context';
-import type { PageResult, StageEvent, Usage } from './types';
+import type { PageResult, StageEvent, TextBlock, Usage } from './types';
 import { sha256Hex, sniffImageMime } from './util/bytes';
 import { tr } from './i18n';
+import { CHECKER_LABELS, checkerIsCloud, machineTranslate } from './translate/crosscheck';
+import { translateBlocks } from './translate/translator';
+import { createProvider } from './llm/presets';
 import { isLocalProvider } from './llm/privacy';
 import { isOllama } from './llm/openai';
 import { ollamaUnloadAll } from './llm/discover';
@@ -97,7 +100,10 @@ export class TranslateService {
   async settingsWithKeys(): Promise<AppSettings> {
     const s = await this.getSettings();
     const providers = await Promise.all(s.providers.map(async (p) => ({ ...p, apiKey: p.apiKey || (await this.secrets.get(`provider:${p.id}`)) })));
-    return { ...s, providers };
+    const crossCheck = s.crossCheck
+      ? { ...s.crossCheck, checkers: await Promise.all(s.crossCheck.checkers.map(async (c) => ({ ...c, apiKey: await this.secrets.get(`checker:${c.id}`) }))) }
+      : undefined;
+    return { ...s, providers, crossCheck };
   }
 
   async config(seriesKey?: string): Promise<{ settings: AppSettings; config: PipelineConfig }> {
@@ -283,6 +289,45 @@ export class TranslateService {
         }
       }
     }
+  }
+
+  /**
+   * «Сверить страницу» from the editor: compare these blocks with the translators chosen in the
+   * settings. Returns new blocks (with `check`) and the translators that did not answer.
+   */
+  async crossCheck(blocks: TextBlock[], targetLang: string, signal?: AbortSignal): Promise<{ blocks: TextBlock[]; errors: string[] }> {
+    const { config } = await this.config();
+    if (!config.crossCheck) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: tr('Включите сверку и выберите переводчиков в настройках.') });
+    const copy: TextBlock[] = blocks.map((b) => ({ ...b, check: undefined }));
+    const errors: string[] = [];
+    const usage = await runCrossCheck(copy, { ...config, targetLang }, { fetchImpl: this.fetchImpl }, { signal, onError: (label, e) => errors.push(`${label}: ${toAppError(e).detail ?? toAppError(e).message}`) });
+    await this.recordUsage(usage);
+    return { blocks: copy, errors };
+  }
+
+  /**
+   * Back translation for the editor: our translation translated back (into the original's language,
+   * or English when that is unknown) to see whether the meaning survived. Uses the first machine
+   * translator of «Сверка» allowed by the privacy mode, else the model that translates.
+   */
+  async backTranslate(texts: string[], from: string, to: string, signal?: AbortSignal): Promise<{ texts: string[]; by: string }> {
+    const { config } = await this.config();
+    const target = to && to !== 'auto' && to !== 'und' ? to : 'en';
+    const fetchImpl: FetchLike = this.fetchImpl ?? ((u, i) => fetch(u, i));
+    for (const c of config.crossCheck?.checkers ?? []) {
+      if (c.kind === 'llm' || (config.privacy === 'local' && checkerIsCloud(c))) continue;
+      try {
+        return { texts: await machineTranslate(c, c.apiKey, texts, from, target, fetchImpl, signal), by: CHECKER_LABELS[c.kind] };
+      } catch (e) {
+        if (toAppError(e).code === 'CANCELLED') throw e;
+      }
+    }
+    const cfg = config.translator ?? config.vision;
+    if (!cfg) throw new AppError('NOT_CONFIGURED', { retryable: false });
+    const provider = createProvider(cfg, this.fetchImpl);
+    const res = await translateBlocks(provider, { sourceLang: from, targetLang: target, profile: { ...config.profile, customPrompt: 'Translate literally, keep the meaning exactly.' }, glossary: [], translateSfx: true }, texts.map((text, i) => ({ id: `t${i}`, type: 'DIALOGUE', text })), { signal });
+    await this.recordUsage(res.usage);
+    return { texts: texts.map((_, i) => res.translations.get(`t${i}`)?.text ?? ''), by: cfg.model };
   }
 
   async getResult(key: string): Promise<StoredResult | undefined> {

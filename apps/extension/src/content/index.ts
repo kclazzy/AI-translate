@@ -97,6 +97,8 @@ function main() {
     it.result = { ...result, tiles: [] };
     it.overlay.setOriginal(originalsShown);
     const qa = result.page.blocks.flatMap((b) => (b.qa?.issues ?? []).map((q) => `• ${q.code ? tr(q.code, ...(q.args ?? [])) : q.note}${b.qa?.before !== undefined ? tr(' (исправлено)') : ''}`));
+    // «Сверка»: lines that differ from the other translators count as remarks too.
+    for (const b of result.page.blocks) if (b.check?.verdict === 'differs') qa.push(`⚖ ${b.check.note ?? tr('Расходится с другими переводчиками')}${b.check.before !== undefined ? tr(' (исправлено)') : ''}`);
     it.overlay.setQa(qa.length, qa.slice(0, 8).join('\n'));
     it.overlay.setInfo(pageInfo(result));
     it.overlay.position();

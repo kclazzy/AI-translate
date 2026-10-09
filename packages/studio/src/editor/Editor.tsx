@@ -93,6 +93,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   const wrapRef = useRef<HTMLDivElement>(null);
   /** Where the brush outline is drawn (inside the editor frame), or nowhere. */
   const [cursorAt, setCursorAt] = useState<[number, number] | null>(null);
+  const resizing = useRef(false);
   /** Manual OCR: the frame being stretched, in page pixels. */
   const [ocrFrame, setOcrFrame] = useState<Box | null>(null);
   const fitZoom = useCallback(() => {
@@ -228,12 +229,34 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
         });
       } else if (e.shiftKey && toolRef.current !== 'select' && toolRef.current !== 'ocr') {
         e.preventDefault();
-        setBrush((b) => Math.max(1, Math.min(100, b + (e.deltaY < 0 ? 2 : -2))));
+        setBrush((b) => Math.max(1, Math.min(200, b + (e.deltaY < 0 ? 2 : -2))));
       }
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
+
+  /** Hold the right button and move: the brush outline stays at the press point, its edge follows the pointer. */
+  const resizeBrush = (e: RPointerEvent) => {
+    e.preventDefault();
+    const r = wrapRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const cx = e.clientX;
+    const cy = e.clientY;
+    setCursorAt([cx - r.left, cy - r.top]);
+    const move = (ev: PointerEvent) => {
+      const d = Math.hypot(ev.clientX - cx, ev.clientY - cy);
+      setBrush(Math.max(1, Math.min(200, Math.round((d * 2) / zoomRef.current))));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      resizing.current = false;
+    };
+    resizing.current = true;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
 
   /** Middle mouse button: drag the page around. */
   const pan = (e: RPointerEvent) => {
@@ -276,7 +299,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       } else if (e.key === 'Escape') {
         setMulti(new Set());
       } else if (e.key === '[' || e.key === ']') {
-        setBrush((b) => Math.max(1, Math.min(100, b + (e.key === ']' ? 4 : -4))));
+        setBrush((b) => Math.max(1, Math.min(200, b + (e.key === ']' ? 4 : -4))));
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
         e.preventDefault();
         commitBlocks(blocks.filter((b) => !targets.has(b.id)));
@@ -386,6 +409,8 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
 
   const onStagePointerDown = (e: RPointerEvent) => {
     if (e.button === 1) return pan(e);
+    // Right button held with a brush / eraser: the circle grows to where the pointer is.
+    if (e.button === 2 && (tool === 'brush' || tool === 'eraser' || tool === 'inpaint')) return resizeBrush(e);
     // Pipette (or Alt+click with the brush): take the brush colour from the picture.
     if (tool === 'picker' || (tool === 'brush' && e.altKey)) {
       e.preventDefault();
@@ -479,6 +504,21 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   };
 
   // ---- actions -----------------------------------------------------------------------------
+  /** «Сверить страницу»: compare every block with the translators chosen in the settings. */
+  const check = useAction(async () => {
+    const res = await platform.service.crossCheck(blocks, page.targetLang);
+    const byId = new Map(res.blocks.map((b) => [b.id, b]));
+    commitBlocks(blocks.map((b) => (byId.get(b.id) ? { ...b, check: byId.get(b.id)!.check, translatedText: byId.get(b.id)!.translatedText } : b)));
+    const differs = res.blocks.filter((b) => b.check?.verdict === 'differs').length;
+    toast(res.errors.length ? tr('Сверка: расхождений {0}. Не ответили: {1}', differs, res.errors.join('; ')) : tr('Сверка: расхождений {0}', differs));
+  });
+  const [back, setBack] = useState<{ id: string; text: string; by: string } | null>(null);
+  const backTr = useAction(async () => {
+    if (!sel) return;
+    const r = await platform.service.backTranslate([sel.translatedText], page.targetLang, page.source.lang);
+    setBack({ id: sel.id, text: r.texts[0] ?? '', by: r.by });
+  });
+
   const retr = useAction(async () => {
     if (!sel) return;
     const { config } = await platform.service.config();
@@ -558,8 +598,8 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           <input className="ait-pal-color" type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} aria-label={tr('Цвет кисти')} title={tr('Цвет кисти')} data-testid="brush-color" />
           {painting ? (
             <div className="ait-pal-group" aria-label={tr('Размер кисти')}>
-              <button className="ait-pal-btn" onClick={() => setBrush((b) => Math.min(100, b + 4))} title={tr('Больше ( ] )')} aria-label={tr('Кисть больше')}>+</button>
-              <input className="ait-pal-range" type="range" min={1} max={100} value={brush} onChange={(e) => setBrush(Number(e.target.value))} aria-label={tr('Размер кисти')} />
+              <button className="ait-pal-btn" onClick={() => setBrush((b) => Math.min(200, b + 4))} title={tr('Больше ( ] ). Или зажмите правую кнопку мыши и тяните')} aria-label={tr('Кисть больше')}>+</button>
+              <input className="ait-pal-range" type="range" min={1} max={200} value={brush} onChange={(e) => setBrush(Number(e.target.value))} aria-label={tr('Размер кисти')} />
               <span className="ait-pal-val">{brush}</span>
               <button className="ait-pal-btn" onClick={() => setBrush((b) => Math.max(1, b - 4))} title={tr('Меньше ( [ )')} aria-label={tr('Кисть меньше')}>−</button>
             </div>
@@ -587,7 +627,10 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           onPointerDown={onStagePointerDown}
           onPointerMove={(e) => {
             const r = wrapRef.current?.getBoundingClientRect();
-            if (r && painting) setCursorAt([e.clientX - r.left, e.clientY - r.top]);
+            if (r && painting && !resizing.current) setCursorAt([e.clientX - r.left, e.clientY - r.top]);
+          }}
+          onContextMenu={(e) => {
+            if (painting) e.preventDefault();
           }}
           onPointerLeave={() => setCursorAt(null)}
           style={{ cursor: tool === 'select' ? 'default' : tool === 'picker' ? 'copy' : painting ? 'none' : 'crosshair' }}
@@ -693,6 +736,30 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
         <div className="ait-props">
           {sel && st ? (
             <div className="ait-panel">
+              {sel.check?.refs.length ? (
+                <div className={sel.check.verdict === 'differs' ? 'ait-notice' : 'ait-panel-soft'} data-testid="check-report" style={{ display: 'grid', gap: 4, marginBottom: 8 }}>
+                  <b>{sel.check.verdict === 'differs' ? tr('⚖ Сверка: есть расхождение') : tr('⚖ Сверка: совпадает по смыслу')}</b>
+                  {sel.check.note ? <small>{sel.check.note}</small> : null}
+                  {sel.check.better ? (
+                    <small>
+                      {tr('Вариант судьи: «{0}»', sel.check.better)}{' '}
+                      {sel.check.better !== sel.translatedText ? <button className="pp-link" onClick={() => updateBlock(sel.id, { translatedText: sel.check!.better! })}>{tr('Взять')}</button> : null}
+                    </small>
+                  ) : null}
+                  {sel.check.refs.map((r) => (
+                    <small key={r.by}>
+                      <b>{r.by}:</b> {r.text}{' '}
+                      {r.text !== sel.translatedText ? <button className="pp-link" onClick={() => updateBlock(sel.id, { translatedText: r.text })}>{tr('Взять')}</button> : null}
+                    </small>
+                  ))}
+                  {sel.check.before !== undefined && sel.check.before !== sel.translatedText ? (
+                    <small>
+                      {tr('Исправлено сверкой. Было: «{0}»', sel.check.before)}{' '}
+                      <button className="pp-link" onClick={() => updateBlock(sel.id, { translatedText: sel.check!.before! })}>{tr('Вернуть')}</button>
+                    </small>
+                  ) : null}
+                </div>
+              ) : null}
               {sel.qa && (sel.qa.issues.length || sel.qa.before !== undefined) ? (
                 <div className="ait-notice" data-testid="qa-report" style={{ display: 'grid', gap: 4, marginBottom: 8 }}>
                   <b>{tr('Проверка перевода')}</b>
@@ -725,7 +792,14 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
               <div className="ait-row" style={{ marginTop: 8 }}>
                 <button className="ait-btn small" onClick={() => void retr.run()} disabled={retr.busy}>{retr.busy ? tr('Перевожу…') : tr('Перевести заново')}</button>
                 <button className="ait-btn small" onClick={() => fitText(sel)} title={tr('Подобрать размер текста под бабл')}>{tr('Вписать текст')}</button>
+                <button className="ait-btn small" onClick={() => void backTr.run()} disabled={backTr.busy} title={tr('Перевести наш перевод обратно, чтобы проверить смысл')}>{backTr.busy ? tr('Перевожу…') : tr('Обратный перевод')}</button>
               </div>
+              {back && back.id === sel.id ? (
+                <small className="ait-muted" data-testid="back-translation" style={{ display: 'block', marginTop: 4 }}>
+                  ↩ {back.text} <i>({back.by})</i>
+                </small>
+              ) : null}
+              <ErrorBox error={backTr.error} />
               <div className="ait-row" style={{ marginTop: 6, flexWrap: 'wrap' }}>
                 <button className="ait-btn small" onClick={() => { setStyleClip({ ...(sel.style ?? {}) }); toast(tr('Стиль скопирован')); }}>{tr('Копировать стиль')}</button>
                 <button className="ait-btn small" disabled={!styleClip} onClick={() => styleClip && commitBlocks(blocks.map((b) => (targets.has(b.id) ? { ...b, style: { ...(b.style ?? {}), ...styleClip }, edited: true } : b)))}>{tr('Вставить стиль')}</button>
@@ -823,6 +897,12 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
 
           <div className="ait-panel">
             <h2 style={{ fontSize: 14 }}>{tr('Блоки (')}{blocks.length})</h2>
+            <div className="ait-row" style={{ flexWrap: 'wrap', marginBottom: 6 }}>
+              <button className="ait-btn small" data-testid="check-page" onClick={() => void check.run()} disabled={check.busy || !blocks.length} title={tr('Сравнить перевод страницы с другими переводчиками (Настройки → Сверка)')}>
+                {check.busy ? tr('Сверяю…') : tr('⚖ Сверить страницу')}
+              </button>
+            </div>
+            <ErrorBox error={check.error} />
             <div className="ait-row" style={{ flexWrap: 'wrap', marginBottom: 6 }} data-testid="texts-io">
               <button
                 className="ait-btn small"
@@ -859,6 +939,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
               {blocks.map((b, i) => (
                 <button key={b.id} aria-pressed={b.id === selected || multi.has(b.id)} onClick={(e) => { pick(b.id, e.ctrlKey || e.shiftKey || e.metaKey); setTool('select'); }}>
                   {i + 1}. {b.translatedText.slice(0, 40) || <em className="ait-muted">{tr('пусто')}</em>} {overflow.has(b.id) ? '⚠' : ''}
+                  {b.check?.verdict === 'differs' ? <span title={b.check.note ?? tr('Расходится с другими переводчиками')}> ⚖</span> : null}
                   {b.qa?.issues.length ? <span title={b.qa.issues.map((q) => `${QA_LABELS[q.kind]}: ${qaNote(q)}`).join('\n')}> 🔍{b.qa.issues.length}</span> : null}
                 </button>
               ))}

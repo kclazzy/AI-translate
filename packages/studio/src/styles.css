@@ -373,3 +373,4 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   position: absolute; left: 0; top: -22px; font: 600 11px/1 system-ui, sans-serif; color: #fff; background: #1c6ed8;
   padding: 4px 6px; border-radius: 4px; white-space: nowrap;
 }
+.ait-panel-soft { padding: 8px 10px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper); }
