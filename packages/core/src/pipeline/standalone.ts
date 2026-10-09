@@ -12,7 +12,7 @@ import { applyForbiddenFixes, findGlossaryHits, findViolations } from '../transl
 import { parseVisionAnswer, type VisionAnswer } from '../translate/parse';
 import { buildSystemPrompt, visionFullInstruction, visionOcrInstruction, type PromptInput } from '../translate/prompt';
 import { translateBlocks, usageFrom } from '../translate/translator';
-import type { Box, PageResult, StageEvent, TextBlock, TextStyle, Usage } from '../types';
+import type { Box, BubbleInfo, PageResult, StageEvent, TextBlock, TextStyle, Usage } from '../types';
 import { bytesToBase64, sha256Hex } from '../util/bytes';
 import { mapLimit } from '../util/queue';
 import { withRetry } from '../util/retry';
@@ -231,23 +231,128 @@ export function mergeSharedBubbles(blocks: TextBlock[], closed: Map<string, bool
       continue;
     }
     g.sort((a, b) => a.bbox[1] - b.bbox[1] || a.bbox[0] - b.bbox[0]);
-    const first = g[0];
-    let bbox = first.bbox;
-    for (const o of g.slice(1)) {
-      const x = Math.min(bbox[0], o.bbox[0]);
-      const y = Math.min(bbox[1], o.bbox[1]);
-      bbox = [x, y, Math.max(bbox[0] + bbox[2], o.bbox[0] + o.bbox[2]) - x, Math.max(bbox[1] + bbox[3], o.bbox[1] + o.bbox[3]) - y];
+    // Two bubbles drawn joined into one shape (one lobe per speech) flood as one bubble. Texts far
+    // apart are separate speeches: each keeps its own lobe instead of one text in the top part.
+    const clusters: TextBlock[][] = [[g[0]]];
+    for (const b of g.slice(1)) {
+      const prev = clusters[clusters.length - 1];
+      const p = prev[prev.length - 1];
+      const gap = b.bbox[1] - (p.bbox[1] + p.bbox[3]);
+      const h = Math.max(p.bbox[3], b.bbox[3]);
+      const width = g[0].bubble!.box[2];
+      const shift = Math.abs(b.bbox[0] + b.bbox[2] / 2 - (p.bbox[0] + p.bbox[2] / 2));
+      const separate = gap > h * 0.75 || (gap > 0 && shift > width * 0.2);
+      if (separate) clusters.push([b]);
+      else prev.push(b);
     }
-    out.push({
-      ...first,
-      bbox,
-      polygon: boxToPolygon(bbox),
-      originalText: g.map((x) => x.originalText).join('\n'),
-      translatedText: g.map((x) => x.translatedText.trim()).filter(Boolean).join(' '),
-      fontSizeEstimate: Math.min(...g.map((x) => x.fontSizeEstimate || Infinity)) || first.fontSizeEstimate,
-    });
+    const merged = clusters.map(mergeGroup);
+    if (merged.length > 1) splitBubble(merged);
+    out.push(...merged);
   }
   return out;
+}
+
+function mergeGroup(g: TextBlock[]): TextBlock {
+  if (g.length === 1) return g[0];
+  const first = g[0];
+  let bbox = first.bbox;
+  for (const o of g.slice(1)) {
+    const x = Math.min(bbox[0], o.bbox[0]);
+    const y = Math.min(bbox[1], o.bbox[1]);
+    bbox = [x, y, Math.max(bbox[0] + bbox[2], o.bbox[0] + o.bbox[2]) - x, Math.max(bbox[1] + bbox[3], o.bbox[1] + o.bbox[3]) - y];
+  }
+  return {
+    ...first,
+    bbox,
+    polygon: boxToPolygon(bbox),
+    originalText: g.map((x) => x.originalText).join('\n'),
+    translatedText: g.map((x) => x.translatedText.trim()).filter(Boolean).join(' '),
+    fontSizeEstimate: Math.min(...g.map((x) => x.fontSizeEstimate || Infinity)) || first.fontSizeEstimate,
+  };
+}
+
+/** Sentences (keeps the end marks): «Я... не знал. Прости!» → ["Я... не знал.", "Прости!"]. */
+export function sentences(text: string): string[] {
+  const parts = text.split(/(?<=[.!?…。！？])\s+/).map((x) => x.trim()).filter(Boolean);
+  // «Я... не знал»: an ellipsis followed by a lowercase word does not end the sentence.
+  const out: string[] = [];
+  for (const p of parts) {
+    const first = p[0] ?? '';
+    if (out.length && /(\.\.\.|…)$/.test(out[out.length - 1]) && first !== first.toUpperCase()) out[out.length - 1] += ` ${p}`;
+    else out.push(p);
+  }
+  return out;
+}
+
+/** Split `items` into `weights.length` contiguous non-empty runs, sizes following the weights. */
+function shareOut<T>(items: T[], weights: number[], size: (t: T) => number): T[][] {
+  const k = weights.length;
+  const total = items.reduce((a, t) => a + size(t), 0) || 1;
+  const wsum = weights.reduce((a, w) => a + w, 0) || 1;
+  const out: T[][] = [];
+  let i = 0;
+  let acc = 0;
+  let target = 0;
+  for (let g = 0; g < k; g++) {
+    target += (weights[g] / wsum) * total;
+    const run: T[] = [];
+    // Leave at least one item for every later group.
+    while (i < items.length - (k - g - 1) && (run.length === 0 || (g === k - 1) || acc + size(items[i]) / 2 <= target)) {
+      acc += size(items[i]);
+      run.push(items[i++]);
+    }
+    out.push(run);
+  }
+  return out;
+}
+
+export function splitByGroups(b: TextBlock, groups: Box[], lettering: Lettering | undefined, width: number, height: number): TextBlock[] {
+  const weights = groups.map((g) => g[2] * g[3]);
+  let tr = sentences(b.translatedText);
+  if (tr.length < groups.length) tr = b.translatedText.split(/\s+/).filter(Boolean);
+  if (tr.length < groups.length) return [b];
+  const join = (xs: string[]) => xs.join(' ');
+  const trParts = shareOut(tr, weights, (x) => x.length).map(join);
+  let orig = sentences(b.originalText);
+  if (orig.length < groups.length) orig = b.originalText.split(/\s+/).filter(Boolean);
+  const origParts = orig.length >= groups.length ? shareOut(orig, weights, (x) => x.length).map(join) : groups.map(() => b.originalText);
+  return groups.map((g, i) => {
+    const area = clampBox(expandBox(g, Math.round(g[3] * 0.12)), width, height);
+    const text = clampBox([g[0] - Math.round(g[2] * 0.12), g[1] - Math.round(g[3] * 0.12), Math.round(g[2] * 1.24), Math.round(g[3] * 1.24)], width, height);
+    return {
+      ...b,
+      id: i === 0 ? b.id : `${b.id}s${i + 1}`,
+      originalText: origParts[i],
+      translatedText: trParts[i],
+      bbox: g,
+      polygon: boxToPolygon(g),
+      textBox: text,
+      fontSizeEstimate: fontFromLettering(g, origParts[i], lettering),
+      bubble: b.bubble ? { ...b.bubble, box: area, safeArea: text, shape: 'rect', rows: undefined } : null,
+    };
+  });
+}
+
+/** One bubble shape shared by several speeches (top to bottom): cut it between the texts. */
+function splitBubble(parts: TextBlock[]): void {
+  const shared = parts[0].bubble!;
+  const top = shared.box[1];
+  const bottom = shared.box[1] + shared.box[3];
+  for (const [i, b] of parts.entries()) {
+    const y0 = i === 0 ? top : Math.round((parts[i - 1].bbox[1] + parts[i - 1].bbox[3] + b.bbox[1]) / 2);
+    const y1 = i === parts.length - 1 ? bottom : Math.round((b.bbox[1] + b.bbox[3] + parts[i + 1].bbox[1]) / 2);
+    const box: Box = [shared.box[0], y0, shared.box[2], Math.max(1, y1 - y0)];
+    const bubble: BubbleInfo = { ...shared, box, safeArea: intersectBox(shared.safeArea, box) ?? box, shape: 'rect' };
+    if (shared.rows) {
+      // Only the outline rows of this part, so the text follows its own lobe.
+      const r = shared.rows;
+      const a = Math.max(0, Math.floor((y0 - r.y) / r.step));
+      const z = Math.min(r.l.length, Math.ceil((y1 - r.y) / r.step));
+      bubble.rows = z > a ? { ...r, y: r.y + a * r.step, l: r.l.slice(a, z), r: r.r.slice(a, z) } : undefined;
+      if (!bubble.rows) delete bubble.rows;
+    }
+    b.bubble = bubble;
+  }
 }
 
 function intersectBox(a: Box, b: Box): Box | null {
@@ -445,8 +550,22 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       b.fontSizeEstimate = fontFromLettering(r.textBox, b.originalText, r.lettering);
     }
     b.style = { ...matchLettering(b, r.lettering), ...(b.style ?? {}) };
+    if (r.textGroups && b.textType !== 'SFX' && b.translate) groupsOf.set(b.id, { groups: r.textGroups, lettering: r.lettering });
   };
+  const groupsOf = new Map<string, { groups: Box[]; lettering?: Lettering }>();
   for (const b of blocks) cleanOne(b);
+  // One block whose lettering stands in separate groups far apart (two speeches in joined
+  // bubbles, read by the model as one): each group gets its share of the translation in place.
+  // Several blocks in that shape already: each is a speech of its own (see mergeSharedBubbles).
+  const shares = (b: TextBlock) => blocks.some((o) => o !== b && o.bubble && b.bubble && overlapRatio(o.bubble.box, b.bubble.box) > 0.6);
+  const spans = (b: TextBlock, groups: Box[]) => groups.filter((g) => intersects(g, b.bbox)).length;
+  if (groupsOf.size)
+    blocks = blocks.flatMap((b) => {
+      const info = groupsOf.get(b.id);
+      if (!info) return [b];
+      if (spans(b, info.groups) < 2 && shares(b)) return [b];
+      return splitByGroups(b, info.groups, info.lettering, original.width, original.height);
+    });
   if (!req.generic) {
     // The model sometimes skips text: a second remark in the same bubble, a line of a long one.
     // Lettering still standing on a bubble after cleaning is read again from just that part.

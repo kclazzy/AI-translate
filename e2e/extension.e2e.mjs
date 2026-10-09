@@ -238,6 +238,22 @@ try {
       });
     }, key);
     check('editor saves edits to the cached page', saved?.includes('Танака, стой!'), JSON.stringify(saved));
+    // Tools on the page: the eraser shows its outline, manual OCR shows the frame being stretched.
+    await ed.click('[aria-label="Ластик"]');
+    const stage = await ed.$('.ait-stage-inner');
+    const sb = await stage.boundingBox();
+    await ed.mouse.move(sb.x + 120, sb.y + 120);
+    await ed.mouse.move(sb.x + 130, sb.y + 125);
+    const eraserOutline = await ed.$('.ait-brush-cursor.eraser');
+    check('the eraser shows its outline on the page', !!eraserOutline);
+    await ed.click('[aria-label="Ручной OCR"]');
+    await ed.mouse.move(sb.x + 60, sb.y + 60);
+    await ed.mouse.down();
+    await ed.mouse.move(sb.x + 160, sb.y + 140, { steps: 5 });
+    const frame = await ed.$eval('[data-testid="ocr-frame"]', (el) => el.getBoundingClientRect().width).catch(() => 0);
+    await ed.screenshot({ path: join(OUT, 'e2e-ocr-frame.png') });
+    check('manual OCR shows the frame while it is stretched', frame > 80, `width=${frame}`);
+    await ed.mouse.up();
   }
 
   // Popup renders.

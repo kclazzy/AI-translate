@@ -362,3 +362,14 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 }
 .ait-brush-cursor.eraser { border: 1.5px dashed #1c6ed8; background: rgba(28, 110, 216, .08); }
 .ait-brush-cursor.inpaint { border-color: #c8205f; background: rgba(200, 32, 95, .08); }
+
+/* Manual OCR: the frame being stretched, always visible on light and dark art. */
+.ait-ocr-frame {
+  position: absolute; z-index: 7; pointer-events: none; box-sizing: border-box;
+  border: 2px dashed #1c6ed8; background: rgba(28, 110, 216, .12);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .9), inset 0 0 0 1px rgba(255, 255, 255, .9);
+}
+.ait-ocr-frame span {
+  position: absolute; left: 0; top: -22px; font: 600 11px/1 system-ui, sans-serif; color: #fff; background: #1c6ed8;
+  padding: 4px 6px; border-radius: 4px; white-space: nowrap;
+}

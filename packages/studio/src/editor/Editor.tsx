@@ -91,6 +91,8 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   const wrapRef = useRef<HTMLDivElement>(null);
   /** Where the brush outline is drawn (inside the editor frame), or nowhere. */
   const [cursorAt, setCursorAt] = useState<[number, number] | null>(null);
+  /** Manual OCR: the frame being stretched, in page pixels. */
+  const [ocrFrame, setOcrFrame] = useState<Box | null>(null);
   const fitZoom = useCallback(() => {
     const w = stageRef.current?.clientWidth ?? 900;
     return Math.max(0.1, Math.min(1, (w - 56) / page.width));
@@ -377,12 +379,10 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     const drawPreview = () => {
       octx.clearRect(0, 0, overlay.width, overlay.height);
       if (tool === 'ocr') {
+        // The frame being stretched is drawn on top of the page (see .ait-ocr-frame).
         const [x0, y0] = pts[0];
         const [x1, y1] = pts[pts.length - 1];
-        octx.strokeStyle = '#1c6ed8';
-        octx.lineWidth = 3 / zoom;
-        octx.setLineDash([8 / zoom, 6 / zoom]);
-        octx.strokeRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+        setOcrFrame([Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)]);
         return;
       }
       octx.strokeStyle = tool === 'brush' ? brushColor : tool === 'eraser' ? 'rgba(28,110,216,0.5)' : 'rgba(200,32,95,0.5)';
@@ -404,6 +404,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       window.removeEventListener('pointerup', up);
       octx.clearRect(0, 0, overlay.width, overlay.height);
       if (tool === 'ocr') {
+        setOcrFrame(null);
         const [x0, y0] = pts[0];
         const [x1, y1] = pts[pts.length - 1];
         const rect: Box = [Math.round(Math.min(x0, x1)), Math.round(Math.min(y0, y1)), Math.round(Math.abs(x1 - x0)), Math.round(Math.abs(y1 - y0))];
@@ -565,6 +566,11 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
         >
           <div ref={innerRef} className="ait-stage-inner" style={{ width: page.width * zoom, height: page.height * zoom }}>
             {marks?.map((y) => <div key={`m${y}`} className="ait-page-mark" style={{ top: y * zoom }} aria-hidden />)}
+            {ocrFrame ? (
+              <div className="ait-ocr-frame" data-testid="ocr-frame" style={{ left: ocrFrame[0] * zoom, top: ocrFrame[1] * zoom, width: ocrFrame[2] * zoom, height: ocrFrame[3] * zoom }}>
+                <span>{Math.round(ocrFrame[2])}×{Math.round(ocrFrame[3])}</span>
+              </div>
+            ) : null}
             <div style={{ position: 'absolute', left: 0, top: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: '0 0' }}>
               {cleaned.tiles.map((t, i) => (
                 <canvas

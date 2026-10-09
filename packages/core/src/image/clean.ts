@@ -109,6 +109,44 @@ export function countMask(mask: Uint8Array): number {
   return n;
 }
 
+/**
+ * Lettering that falls into groups with a wide empty band between them (more than two letter
+ * heights): two speeches inside one shape. Returns each group's box, or null for one group.
+ */
+export function letterGroups(mask: Uint8Array, width: number, height: number, letterHeight?: number): Box[] | null {
+  const b = maskBounds(mask, width, height);
+  if (!b || !letterHeight || letterHeight < 4) return null;
+  const rows: boolean[] = [];
+  for (let y = b[1]; y < b[1] + b[3]; y++) {
+    let any = false;
+    for (let x = b[0]; x < b[0] + b[2] && !any; x++) if (mask[y * width + x]) any = true;
+    rows.push(any);
+  }
+  const minGap = letterHeight * 2.2;
+  const bands: [number, number][] = [];
+  let start = -1;
+  let lastInk = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if (!rows[i]) continue;
+    if (start < 0) start = i;
+    else if (i - lastInk - 1 > minGap) {
+      bands.push([start, lastInk]);
+      start = i;
+    }
+    lastInk = i;
+  }
+  if (start >= 0) bands.push([start, lastInk]);
+  if (bands.length < 2) return null;
+  const out: Box[] = [];
+  for (const [a, z] of bands) {
+    let minX = width, maxX = -1;
+    for (let y = b[1] + a; y <= b[1] + z; y++) for (let x = b[0]; x < b[0] + b[2]; x++) if (mask[y * width + x]) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
+    // A stray mark is not a speech.
+    if (z - a + 1 >= letterHeight * 0.8 && maxX - minX >= letterHeight * 2) out.push([minX, b[1] + a, maxX - minX + 1, z - a + 1]);
+  }
+  return out.length >= 2 ? out : null;
+}
+
 export function maskBounds(mask: Uint8Array, width: number, height: number): Box | null {
   let minX = width, minY = height, maxX = -1, maxY = -1;
   for (let y = 0; y < height; y++) {
@@ -336,6 +374,8 @@ export interface CleanResult {
   lettering?: Lettering;
   /** Text over artwork that was smudged away (page coordinates and a mask of that box). */
   artMask?: { box: Box; mask: Uint8Array };
+  /** Lettering in separate groups far apart (two speeches in joined bubbles), top to bottom. */
+  textGroups?: Box[];
 }
 
 export interface Lettering {
@@ -792,7 +832,8 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       const base = textBox ? unionBox(textBox, bbox) : bbox;
       bubble = { box: base, fill: toHex(bg), safeArea: clampBox(expandBox(base, Math.round(base[2] * 0.08), Math.round(base[3] * 0.08)).map(Math.round) as Box, image.width, image.height), shape: 'rect' };
     }
-    result = { bubble, textBox, method, closed, lettering };
+    const groups = letterGroups(letterMask, img.width, img.height, lettering?.letterHeight);
+    result = { bubble, textBox, method, closed, lettering, ...(groups ? { textGroups: groups.map((g) => [g[0] + region[0], g[1] + region[1], g[2], g[3]] as Box) } : {}) };
   } else {
     // Text over artwork: letters are the extreme pixels (white/black fill and outline).
     const bgLum = luminance(...bg);
