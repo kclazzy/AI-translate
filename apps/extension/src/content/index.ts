@@ -43,7 +43,16 @@ function main() {
   const byElement = new WeakMap<Element, string>();
   let minSize = 200;
   let autoTranslate = false;
-  let enabled = true;
+  // Off until the extension says otherwise: no button flashes on pages while it is switched off.
+  let enabled = false;
+  /** False once the extension was updated or removed: this copy of the script is orphaned. */
+  const alive = () => {
+    try {
+      return !!chrome.runtime?.id;
+    } catch {
+      return false;
+    }
+  };
   let targetLang = 'ru';
   const langsOf = (r: RenderedTiles) => ({ source: nativeName(dominantLanguage(r.page.blocks.map((b) => b.language)) ?? 'auto') || tr('Оригинал'), target: nativeName(targetLang) });
   let originalsShown = false;
@@ -553,7 +562,14 @@ function main() {
       const now = performance.now();
       if (now - lastMove < 120) return;
       lastMove = now;
-      if (!enabled || e.composedPath().includes(hoverHost)) return;
+      if (!enabled || !alive()) {
+        // Switched off, or this script belongs to an old version of the extension: nothing to offer.
+        if (hoverBtn.style.display !== 'none') hoverBtn.style.display = 'none';
+        hoverCand = null;
+        if (!alive()) hoverHost.remove();
+        return;
+      }
+      if (e.composedPath().includes(hoverHost)) return;
       const c = candidateAt(e.clientX, e.clientY, minSize);
       const id = c ? byElement.get(c.el) : undefined;
       if (!c || (id && items.has(id))) {
@@ -575,7 +591,7 @@ function main() {
   hoverBtn.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (hoverCand) void translate(hoverCand, { priority: 30, force: true });
+    if (hoverCand && enabled) void translate(hoverCand, { priority: 30, force: true });
     hoverBtn.style.display = 'none';
   });
 
@@ -672,12 +688,22 @@ function main() {
     setTimeout(() => host.remove(), 3000);
   }
 
-  void send<{ autoTranslate: boolean; minImageSize: number; enabled: boolean; targetLang: string; ui?: UiStrings }>({ type: 'get-page-state', host: location.hostname }).then((s) => {
-    if (!s) return;
-    applyUi(s.ui);
-    minSize = s.minImageSize;
-    enabled = s.enabled;
-    targetLang = s.targetLang;
-    setAuto(s.autoTranslate);
-  });
+  // Ask for the state; the service worker may be waking up, so try a few times.
+  const loadState = (attempt = 0) => {
+    if (!alive()) return;
+    send<{ autoTranslate: boolean; minImageSize: number; enabled: boolean; targetLang: string; ui?: UiStrings }>({ type: 'get-page-state', host: location.hostname })
+      .then((s) => {
+        if (!s) throw new Error('no state');
+        applyUi(s.ui);
+        minSize = s.minImageSize;
+        enabled = s.enabled;
+        targetLang = s.targetLang;
+        if (!enabled) hoverBtn.style.display = 'none';
+        setAuto(s.autoTranslate);
+      })
+      .catch(() => {
+        if (attempt < 5) setTimeout(() => loadState(attempt + 1), 500 * (attempt + 1));
+      });
+  };
+  loadState();
 }
