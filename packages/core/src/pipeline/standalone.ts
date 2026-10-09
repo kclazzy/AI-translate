@@ -9,7 +9,7 @@ import { createProvider } from '../llm/presets';
 import type { FetchLike, LlmProvider } from '../llm/types';
 import { mergeContext, type TranslationContext } from '../translate/context';
 import { applyForbiddenFixes, findGlossaryHits, findViolations } from '../translate/glossary';
-import { parseVisionAnswer, type VisionAnswer } from '../translate/parse';
+import { isDegenerate, parseVisionAnswer, tameRuns, type VisionAnswer } from '../translate/parse';
 import { buildSystemPrompt, visionFullInstruction, visionOcrInstruction, type PromptInput } from '../translate/prompt';
 import { translateBlocks, usageFrom } from '../translate/translator';
 import type { Box, BubbleInfo, PageResult, StageEvent, TextBlock, TextStyle, Usage } from '../types';
@@ -533,7 +533,27 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       }
     }
   } else {
+    // The model got stuck on a drawn-out word («COOOME…» → «Хххххххх»): ask once more as text only.
+    const stuck = blocks.filter((b) => b.translate && isDegenerate(b.translatedText, b.originalText));
+    if (stuck.length) {
+      try {
+        const res = await translateBlocks(createProvider(config.vision!, deps.fetchImpl), promptInput(config, req.context), stuck.map((b) => ({ id: b.id, type: b.textType, text: b.originalText, speaker: b.speaker, gender: b.speakerGender })), { signal, retries: 1 });
+        usage.push(...res.usage);
+        for (const b of stuck) {
+          const t = res.translations.get(b.id);
+          if (t) b.translatedText = t.text;
+        }
+      } catch (e) {
+        if ((e as { code?: string }).code === 'CANCELLED') throw e;
+      }
+    }
     for (const b of blocks) {
+      if (b.translate && isDegenerate(b.translatedText, b.originalText)) {
+        b.translatedText = b.originalText;
+        b.lowConfidence = true;
+        continue;
+      }
+      b.translatedText = tameRuns(b.translatedText);
       const v = findViolations(b.translatedText, findGlossaryHits(b.originalText, config.glossary));
       if (v.length) b.translatedText = applyForbiddenFixes(b.translatedText, v);
     }

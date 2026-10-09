@@ -115,6 +115,27 @@ export function sanitizeText(value: unknown, maxLen = 2000): string {
   return value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F​-‏‪-‮⁦-⁩]/g, '').trim().slice(0, maxLen);
 }
 
+const letters = (s: string) => [...s.toLowerCase().replace(/[^\p{L}]+/gu, '')];
+
+/**
+ * A broken translation: the model got stuck on a drawn-out word (COOOME…, NOOO!) and wrote one or two
+ * letters over and over («Хххххххх…»), while the original has a real word in it.
+ */
+export function isDegenerate(translation: string, original: string): boolean {
+  const t = letters(translation);
+  if (t.length < 6) return false;
+  const o = letters(original);
+  // One or two letters only, where the original has a word.
+  if (new Set(t).size <= 2 && new Set(o).size >= 3) return true;
+  // A letter held 10+ times that the original does not hold that long (a scream «AAAAAAAAH» may).
+  return /(\p{L})\1{9,}/u.test(translation.toLowerCase()) && !/(\p{L})\1{4,}/u.test(original.toLowerCase());
+}
+
+/** Shorten letters held too long («Аааааааааааа!» → «Аааааа!»): they do not fit a bubble anyway. */
+export function tameRuns(text: string): string {
+  return text.replace(/(\p{L})\1{6,}/gu, (_m, c: string) => c.repeat(6));
+}
+
 export function normalizeType(value: unknown, fallback: TextType = 'DIALOGUE'): TextType {
   const v = typeof value === 'string' ? value.toUpperCase() : '';
   if ((TEXT_TYPES as string[]).includes(v)) return v as TextType;

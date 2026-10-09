@@ -141,3 +141,27 @@ describe('answers that were cut off', () => {
     expect(() => extractJson('{"blocks":[{"box":[1,2,3')).not.toThrow();
   });
 });
+
+describe('a model stuck on a drawn-out word', () => {
+  const provider = (fetchImpl: ReturnType<typeof mockOpenAi>['fetchImpl']) => new OpenAICompatibleProvider({ ...configFromPreset('lmstudio', 'lm'), jsonMode: 'json_object' }, fetchImpl);
+  const input = { sourceLang: 'en', targetLang: 'ru', profile: DEFAULT_PROFILES[0], glossary: [], translateSfx: true };
+  it('tells a run of one letter from a real word', async () => {
+    const { isDegenerate, tameRuns } = await import('../src/translate/parse');
+    expect(isDegenerate('Хххххххххххххххххххххххххх', 'COOOME...')).toBe(true);
+    expect(isDegenerate('Xxxxxxxxxxxxxxxx', 'COOOME...')).toBe(true);
+    expect(isDegenerate('Иди-и-и сюда...', 'COOOME...')).toBe(false);
+    expect(isDegenerate('Ааааааааааааа!', 'AAAAAAAAAAH!')).toBe(false);
+    expect(isDegenerate('Не-е-ет!', 'NOOO!')).toBe(false);
+    expect(isDegenerate('Ха-ха-ха!', 'HA HA HA!')).toBe(false);
+    expect(tameRuns('Аааааааааааааа!')).toBe('Ааааааа!');
+  });
+
+  it('asks again, and leaves no «Хххх» in the bubble if the model insists', async () => {
+    const one = [{ id: 'b1', type: 'DIALOGUE' as const, text: 'COOOME...' }];
+    const fixed = mockOpenAi((_b, call) => (call === 1 ? '{"translations":[{"id":"b1","text":"Хххххххххххххххххххх"}]}' : '{"translations":[{"id":"b1","text":"Иди-и-и..."}]}'));
+    expect((await translateBlocks(provider(fixed.fetchImpl), input, one)).translations.get('b1')!.text).toBe('Иди-и-и...');
+    expect(fixed.calls[1].body.messages.at(-1).content).toMatch(/not a translation of "COOOME/);
+    const stubborn = mockOpenAi(() => '{"translations":[{"id":"b1","text":"Хххххххххххххххххххх"}]}');
+    expect((await translateBlocks(provider(stubborn.fetchImpl), input, one)).translations.has('b1')).toBe(false);
+  });
+});

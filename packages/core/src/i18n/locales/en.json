@@ -552,6 +552,7 @@
  "Перевод пустой.": "The translation is empty.",
  "Перевод сильно отличается по длине — возможно, что-то потеряно или добавлено.": "The translation differs a lot in length — something may have been lost or added.",
  "Перевод сравнивается с DeepL, Google, Яндексом, LibreTranslate или другой моделью; расхождения видны в редакторе": "The translation is compared with DeepL, Google, Yandex, LibreTranslate or another model; differences are shown in the editor",
+ "Перевод — повтор одной буквы, а не слово.": "The translation is one letter repeated, not a word.",
  "Переводит мангу, манхву и комиксы на телефоне. Выберите, где будет работать модель — это можно поменять позже в настройках.": "Translates manga, manhwa and comics on your phone. Choose where the model will run — you can change this later in Settings.",
  "Переводит мангу, манхву, вебтуны и комиксы прямо на сайте: текст в баблах заменяется переводом.": "Translates manga, manhwa, webtoons and comics right on the site: text in speech bubbles is replaced with the translation.",
  "Переводит мангу, манхву, вебтуны и комиксы прямо на странице: распознаёт текст, убирает оригинал и вписывает перевод в баблы. Работает с локальными моделями.": "Translates manga, manhwa, webtoons and comics right on the page: recognizes the text, removes the original and writes the translation into the speech bubbles. Works with local models.",

@@ -4,7 +4,7 @@ import type { ChatMessage, LlmProvider } from '../llm/types';
 import type { TextType, Usage } from '../types';
 import { withRetry } from '../util/retry';
 import { applyForbiddenFixes, findGlossaryHits, findViolations, type GlossaryHit } from './glossary';
-import { parseTranslationAnswer } from './parse';
+import { isDegenerate, parseTranslationAnswer, tameRuns } from './parse';
 import { buildSystemPrompt, repairInstruction, textTranslateInstruction, type BlockForTranslation, type PromptInput } from './prompt';
 
 export interface TranslateBlocksResult {
@@ -50,7 +50,8 @@ export async function translateBlocks(
       const first = await provider.complete({ system, messages, json: true, signal: opts.signal, maxTokens: Math.min(8192, 400 + blocks.length * 160) });
       usage.push(usageFrom(provider, first.model, first.inputTokens, first.outputTokens));
       let answer = parseTranslationAnswer(first.text, blocks, attempt >= retries);
-      let problems = collectProblems(answer.translations, hitsByBlock, answer.missing);
+      const sources = new Map(blocks.map((b) => [b.id, b.text]));
+      let problems = collectProblems(answer.translations, hitsByBlock, answer.missing, sources);
       if (problems.length) {
         messages.push({ role: 'assistant', content: first.text }, { role: 'user', content: repairInstruction(problems) });
         try {
@@ -64,12 +65,19 @@ export async function translateBlocks(
           if (e instanceof AppError && e.code === 'CANCELLED') throw e;
           // Repair is best effort; fall through to deterministic fixes.
         }
-        problems = collectProblems(answer.translations, hitsByBlock, answer.missing);
+        problems = collectProblems(answer.translations, hitsByBlock, answer.missing, sources);
       }
       // Deterministic last resort for forbidden forms.
       for (const [id, t] of answer.translations) {
-        const v = findViolations(t.text, hitsByBlock.get(id) ?? []);
-        if (v.length) answer.translations.set(id, { ...t, text: applyForbiddenFixes(t.text, v) });
+        // Still a run of one letter: no translation is better than «Хххххх» in the bubble.
+        if (isDegenerate(t.text, sources.get(id) ?? '')) {
+          answer.translations.delete(id);
+          continue;
+        }
+        const text = tameRuns(t.text);
+        const v = findViolations(text, hitsByBlock.get(id) ?? []);
+        const fixed = v.length ? applyForbiddenFixes(text, v) : text;
+        if (fixed !== t.text) answer.translations.set(id, { ...t, text: fixed });
       }
       return { translations: answer.translations, entities: answer.entities, summary: answer.summary, usage };
     },
@@ -77,10 +85,12 @@ export async function translateBlocks(
   );
 }
 
-function collectProblems(translations: Map<string, { text: string }>, hitsByBlock: Map<string, GlossaryHit[]>, missing: string[]): string[] {
+function collectProblems(translations: Map<string, { text: string }>, hitsByBlock: Map<string, GlossaryHit[]>, missing: string[], sources?: Map<string, string>): string[] {
   const problems: string[] = [];
   if (missing.length) problems.push(`Missing translations for ids: ${missing.join(', ')}`);
   for (const [id, t] of translations) {
+    const src = sources?.get(id);
+    if (src && isDegenerate(t.text, src)) problems.push(`Block ${id}: "${t.text.slice(0, 24)}…" is not a translation of "${src}". Translate the word itself; a drawn-out word stays a word with a few repeated letters (e.g. "COOOME…" → the target word for "come" with one vowel drawn out, like "Иди-и-и…" in Russian).`);
     for (const v of findViolations(t.text, hitsByBlock.get(id) ?? [])) {
       problems.push(`Block ${id}: "${v.found}" is forbidden, use "${v.entry.target}" for "${v.entry.source}"`);
     }

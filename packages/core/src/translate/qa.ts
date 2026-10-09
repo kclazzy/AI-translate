@@ -3,7 +3,7 @@ import type { LlmProvider } from '../llm/types';
 import type { TextBlock, Usage } from '../types';
 import type { TranslationContext } from './context';
 import { findGlossaryHits, type GlossaryEntry } from './glossary';
-import { extractJson, sanitizeText } from './parse';
+import { extractJson, isDegenerate, sanitizeText } from './parse';
 import { usageFrom } from './translator';
 import { lazyStrings, tr, uiLang } from '../i18n';
 
@@ -65,6 +65,7 @@ export function ruleChecks(b: TextBlock, targetLang: string, glossary: GlossaryE
   const dst = b.translatedText.trim();
   if (!b.translate || !src) return issues;
   if (!dst) return [{ kind: 'untranslated', severity: 'major', note: tr('Перевод пустой.'), code: 'Перевод пустой.', by: 'rules' }];
+  if (isDegenerate(dst, src)) issues.push({ kind: 'untranslated', severity: 'major', note: tr('Перевод — повтор одной буквы, а не слово.'), code: 'Перевод — повтор одной буквы, а не слово.', by: 'rules' });
   const cjkTarget = ['ja', 'zh', 'zh-TW', 'ko'].includes(targetLang);
   if (!cjkTarget && CJK.test(dst)) issues.push({ kind: 'untranslated', severity: 'major', note: tr('В переводе остались иероглифы или кана.'), code: 'В переводе остались иероглифы или кана.', by: 'rules' });
   if (targetLang === 'ru' && LATIN.test(dst) && !/[А-Яа-яЁё]/.test(dst) && dst.length > 3) issues.push({ kind: 'untranslated', severity: 'major', note: tr('Текст не переведён на русский.'), code: 'Текст не переведён на русский.', by: 'rules' });

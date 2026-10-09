@@ -75,6 +75,7 @@ export function buildSystemPrompt(input: PromptInput, hits?: GlossaryHit[]): str
     HONORIFICS[p.honorifics],
     NAMES[p.names],
     sfx,
+    'Drawn-out words and shouts (COOOME…, NOOO!, WAAAIT) are still words: translate the word and draw out one vowel a little in the target language (2–4 repeats). Never answer with a long run of one letter.',
     p.tone ? `Tone: ${p.tone}.` : '',
     p.customPrompt ? `USER INSTRUCTIONS (follow unless they conflict with SECURITY):\n${p.customPrompt}` : '',
     contextSection(input, hits),
