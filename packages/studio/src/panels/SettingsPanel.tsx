@@ -297,6 +297,13 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
                 label={tr('Переводить отдельным шагом — точнее смысл и окончания слов, чуть дольше')}
               />
             </div>
+            <div style={{ marginTop: 8 }}>
+              <Switch
+                checked={s.stitchStrips !== false}
+                onChange={(stitchStrips) => update({ stitchStrips })}
+                label={tr('Склеивать соседние картинки ленты (вебтун) — баблы на стыке не теряются')}
+              />
+            </div>
           </Field>
           <Field label={tr('Звуки (SFX)')}>
             <div style={{ display: 'grid', gap: 8 }}>

@@ -11,6 +11,7 @@ import { emptyContext, type TranslationContext } from './translate/context';
 import type { PageResult, StageEvent, Usage } from './types';
 import { sha256Hex, sniffImageMime } from './util/bytes';
 import { tr } from './i18n';
+import { cropRows, pageForSpan, planChunks, stitchParts, type StripPart } from './image/strip';
 
 export interface StoredResult {
   key: string;
@@ -24,6 +25,10 @@ export interface StoredResult {
   seriesKey?: string;
   createdAt: string;
   lastHitAt: string;
+  /** A picture translated as part of a glued strip: where it lies in the parent result. */
+  strip?: { parent: string; index: number; y: number; h: number };
+  /** A glued strip: the keys of the pictures cut back out of it. */
+  parts?: string[];
 }
 
 export interface HistoryEntry {
@@ -157,6 +162,74 @@ export class TranslateService {
     }
   }
 
+  /**
+   * Translate neighbouring pictures of one strip together (see image/strip.ts). Each picture's
+   * result is reported through `onPart` as soon as its chunk is done.
+   */
+  async translateStrip(
+    parts: StripPart[],
+    opts: TranslateOptions & { onPart: (index: number, result: StoredResult, cached: boolean) => void; onChunk?: (indices: number[]) => void },
+  ): Promise<void> {
+    const seriesKey = opts.seriesKey ?? seriesKeyFromUrl(opts.sourceUrl);
+    const { settings, config } = await this.config(seriesKey);
+    // Pictures translated before (in any grouping) are taken from the cache.
+    const partKeys = await Promise.all(parts.map((p) => this.cacheKey(p.bytes, config, { generic: opts.generic, fonts: settings.fonts })));
+    const known: (StoredResult | undefined)[] = await Promise.all(
+      partKeys.map(async (k) => {
+        if (opts.force) return undefined;
+        const ref = await this.db.get<string>('kv', `strip:${k}`);
+        return ref ? this.getResult(ref) : undefined;
+      }),
+    );
+    const todo = parts.map((_, i) => i).filter((i) => !known[i]);
+    for (const [i, r] of known.entries()) if (r) opts.onPart(i, r, true);
+    if (!todo.length) return;
+    const stitched = await stitchParts(this.backend, todo.map((i) => parts[i]));
+    const chunks = planChunks(stitched.spans.map((s) => s.h), stitched.calmAfter);
+    for (const chunk of chunks) {
+      opts.onChunk?.(chunk.map((j) => todo[j]));
+      const top = stitched.spans[chunk[0]].y;
+      const last = stitched.spans[chunk[chunk.length - 1]];
+      const band = this.backend.createCanvas(stitched.image.width, last.y + last.h - top);
+      stitched.image.drawRegion(band.getContext('2d'), 0, top, stitched.image.width, last.y + last.h - top, stitched.image.width, last.y + last.h - top);
+      const bytes = await this.backend.encode(band, 'image/png');
+      const { result } = await this.translate(bytes, 'image/png', opts);
+      const spans = chunk.map((j) => ({ y: stitched.spans[j].y - top, h: stitched.spans[j].h }));
+      const derived = await this.deriveParts(result, spans, chunk.map((j) => parts[todo[j]]));
+      for (const [n, j] of chunk.entries()) {
+        await this.db.put('kv', `strip:${partKeys[todo[j]]}`, derived[n].key);
+        opts.onPart(todo[j], derived[n], false);
+      }
+    }
+  }
+
+  /** Cut a glued result back into its pictures and store each one. */
+  private async deriveParts(parent: StoredResult, spans: { y: number; h: number }[], originals?: StripPart[]): Promise<StoredResult[]> {
+    const rendered = await tilesToImage(this.backend, parent.page.width, parent.page.height, parent.rendered);
+    const cleaned = await tilesToImage(this.backend, parent.page.width, parent.page.height, parent.cleaned);
+    const encode = (img: TiledImage, mime: ImageMime) => Promise.all(img.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, mime) })));
+    const out: StoredResult[] = [];
+    for (const [i, s] of spans.entries()) {
+      const key = `${parent.key}~${i}`;
+      const prev = await this.getResult(key);
+      const original = originals?.[i] ? { bytes: originals[i].bytes, mime: originals[i].mime ?? 'image/png' } : prev?.original ?? parent.original;
+      const r: StoredResult = {
+        ...parent,
+        key,
+        page: pageForSpan(parent.page, s, i),
+        rendered: await encode(cropRows(rendered, s.y, s.h), parent.mime),
+        cleaned: await encode(cropRows(cleaned, s.y, s.h), 'image/png'),
+        original,
+        strip: { parent: parent.key, index: i, y: s.y, h: s.h },
+        parts: undefined,
+      };
+      await this.db.put('results', key, r);
+      out.push(r);
+    }
+    await this.db.put('results', parent.key, { ...parent, parts: out.map((r) => r.key) });
+    return out;
+  }
+
   async getResult(key: string): Promise<StoredResult | undefined> {
     return this.db.get<StoredResult>('results', key);
   }
@@ -172,6 +245,15 @@ export class TranslateService {
     const cleanedTiles = cleaned ? await Promise.all(cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') }))) : stored.cleaned;
     const next: StoredResult = { ...stored, page: rendered.page, rendered: rendered.tiles, cleaned: cleanedTiles, lastHitAt: new Date().toISOString() };
     await this.db.put('results', key, next);
+    // A glued strip: cut the edited result back into its pictures too.
+    if (stored.parts?.length) {
+      const spans = [];
+      for (const k of stored.parts) {
+        const p = await this.getResult(k);
+        if (p?.strip) spans.push({ y: p.strip.y, h: p.strip.h });
+      }
+      if (spans.length === stored.parts.length) await this.deriveParts({ ...next, parts: stored.parts }, spans);
+    }
     return next;
   }
 

@@ -19,6 +19,8 @@ export interface StudioAppProps {
   initialView?: View;
   /** Open a cached result in the editor (extension "Edit" button). */
   resultKey?: string;
+  /** All translated pictures of the chapter the page came from (whole-chapter editing). */
+  chapterKeys?: string[];
   /** Files handed over by the OS share sheet / file picker. */
   sharedFiles?: File[];
 }
@@ -69,7 +71,7 @@ function SeriesContexts() {
   );
 }
 
-export function StudioApp({ platform, initialView, resultKey, sharedFiles }: StudioAppProps) {
+export function StudioApp({ platform, initialView, resultKey, chapterKeys, sharedFiles }: StudioAppProps) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [view, setView] = useState<View>(initialView ?? (resultKey ? 'editor' : 'quick'));
   const [editKey, setEditKey] = useState<string | undefined>(resultKey);
@@ -180,7 +182,7 @@ export function StudioApp({ platform, initialView, resultKey, sharedFiles }: Stu
             {view === 'settings' ? <SettingsPanel settings={settings} update={update} /> : null}
             {view === 'privacy' ? <PrivacyPanel settings={settings} /> : null}
             {view === 'history' ? <HistoryPanel onOpen={(k) => { setEditKey(k); setView('editor'); }} /> : null}
-            {view === 'editor' ? (editKey ? <CachedPageEditor resultKey={editKey} settings={settings} onClose={() => setView('quick')} /> : <p className="ait-muted">{tr('Откройте страницу из истории или переведите картинку.')}</p>) : null}
+            {view === 'editor' ? (editKey ? <CachedPageEditor resultKey={editKey} chapterKeys={editKey === resultKey ? chapterKeys : undefined} settings={settings} onClose={() => setView('quick')} /> : <p className="ait-muted">{tr('Откройте страницу из истории или переведите картинку.')}</p>) : null}
           </div>
         </main>
         <ToastHost />

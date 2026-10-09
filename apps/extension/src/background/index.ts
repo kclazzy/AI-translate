@@ -1,6 +1,6 @@
 import '@ait/core/i18n/all';
 import { AppError, bytesToBase64, checkReadiness, dataUrlToBytes, isOllama, ollamaUnloadAll, readinessText, toAppError, type Readiness } from '@ait/core';
-import type { BackgroundToContent, ContentToBackground, FromOffscreen, JobStatus, ToOffscreen, UiToBackground, UiStrings } from '../shared/messages';
+import type { BackgroundToContent, ContentToBackground, FromOffscreen, ImageRef, JobStatus, ToOffscreen, UiToBackground, UiStrings } from '../shared/messages';
 import { hostOf, loadSettings, saveSettings } from '../shared/store';
 import { dictionaryFor, setUiLang, tr, uiLang } from '@ait/core/i18n';
 
@@ -185,6 +185,34 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
         return { queued: false };
       }
     }
+    case 'translate-strip': {
+      // Neighbouring pictures of one strip: fetch them all and translate them as one page.
+      const one = (image: ImageRef) => handleContent({ type: 'translate', image, pageUrl: msg.pageUrl, title: msg.title, priority: msg.priority, force: msg.force }, sender);
+      const settings = await loadSettings();
+      if (settings.enabled === false || !(await readiness()).ok || msg.images.length < 2) {
+        for (const image of msg.images) void one(image);
+        return { queued: false };
+      }
+      const jobIds = msg.images.map((im) => `${tabId}|${im.id}`);
+      for (const j of jobIds) track(tabId, j, true);
+      const parts: { bytesB64: string; mime?: string }[] = [];
+      try {
+        for (const image of msg.images) {
+          let got: { bytes: Uint8Array; mime: string } | null = null;
+          if (image.dataUrl) got = dataUrlToBytes(image.dataUrl);
+          else if (image.src) got = await fetchImage(image.src, msg.pageUrl).catch(() => null);
+          if (!got) throw new Error('fetch');
+          parts.push({ bytesB64: bytesToBase64(got.bytes), mime: got.mime });
+        }
+      } catch {
+        // A picture that cannot be fetched (protected reader): each one on its own, as before.
+        for (const j of jobIds) track(tabId, j, false);
+        for (const image of msg.images) void one(image);
+        return { queued: false };
+      }
+      await toOffscreen({ target: 'offscreen', type: 'run-strip', jobIds, tabId, parts, pageUrl: msg.pageUrl, title: msg.title, priority: msg.priority, force: msg.force });
+      return { queued: true };
+    }
     case 'capture-area': {
       const jobId = `${tabId}|${msg.image.id}`;
       if ((await loadSettings()).enabled === false) {
@@ -217,7 +245,7 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
     case 'get-page-state': {
       const s = await loadSettings();
       applyLang(s.interfaceLang);
-      return { autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(msg.host), minImageSize: s.minImageSize, enabled: s.enabled !== false, targetLang: s.targetLang, ui: uiStrings() };
+      return { autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(msg.host), minImageSize: s.minImageSize, enabled: s.enabled !== false, targetLang: s.targetLang, stitch: s.stitchStrips !== false, ui: uiStrings() };
     }
     case 'build-download': {
       const s = await loadSettings();
@@ -247,7 +275,7 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       await offerSetup(tabId, true);
       return null;
     case 'open-editor':
-      await chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?key=${encodeURIComponent(msg.key)}`), index: (sender.tab?.index ?? 0) + 1 });
+      await chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?key=${encodeURIComponent(msg.key)}${msg.chapter?.length ? `&chapter=${msg.chapter.map(encodeURIComponent).join(',')}` : ''}`), index: (sender.tab?.index ?? 0) + 1 });
       return null;
     case 'get-result':
       return toOffscreen({ target: 'offscreen', type: 'get-result', key: msg.key });
@@ -283,7 +311,7 @@ async function broadcastState() {
   for (const t of tabs) {
     if (t.id === undefined) continue;
     const host = hostOf(t.url);
-    sendToTab(t.id, { type: 'state', autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(host), minImageSize: s.minImageSize, enabled: s.enabled !== false, targetLang: s.targetLang, ui: uiStrings() });
+    sendToTab(t.id, { type: 'state', autoTranslate: s.autoTranslate.enabled || s.autoTranslate.sites.includes(host), minImageSize: s.minImageSize, enabled: s.enabled !== false, targetLang: s.targetLang, stitch: s.stitchStrips !== false, ui: uiStrings() });
   }
   showEnabled(s.enabled !== false);
 }

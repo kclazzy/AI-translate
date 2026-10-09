@@ -26,10 +26,11 @@ export interface RenderedTiles {
 // content → background
 export type ContentToBackground =
   | { type: 'translate'; image: ImageRef; pageUrl: string; title: string; priority: number; force?: boolean }
+  | { type: 'translate-strip'; images: ImageRef[]; pageUrl: string; title: string; priority: number; force?: boolean }
   | { type: 'cancel'; id: string }
   | { type: 'capture-area'; image: ImageRef; pageUrl: string; title: string }
   | { type: 'get-page-state'; host: string }
-  | { type: 'open-editor'; key: string }
+  | { type: 'open-editor'; key: string; chapter?: string[] }
   | { type: 'get-result'; key: string }
   | { type: 'status'; ids: string[] }
   | { type: 'open-setup' }
@@ -56,7 +57,7 @@ export type BackgroundToContent =
   | { type: 'translate-src'; src: string }
   | { type: 'result-changed'; key: string }
   | { type: 'get-langs' }
-  | { type: 'state'; autoTranslate: boolean; minImageSize: number; enabled: boolean; targetLang: string; ui?: UiStrings };
+  | { type: 'state'; autoTranslate: boolean; minImageSize: number; enabled: boolean; targetLang: string; stitch?: boolean; ui?: UiStrings };
 
 /** Interface language for the page overlays: the content script has no dictionaries of its own. */
 export interface UiStrings {
@@ -82,6 +83,7 @@ export type JobStatus =
 export type ToOffscreen =
   | { target: 'offscreen'; type: 'run'; jobId: string; tabId: number; bytesB64: string; mime?: string; pageUrl: string; title: string; priority: number; generic?: boolean; force?: boolean }
   | { target: 'offscreen'; type: 'crop-run'; jobId: string; tabId: number; screenshot: string; rect: { x: number; y: number; width: number; height: number }; dpr: number; pageUrl: string; title: string; generic?: boolean; priority?: number }
+  | { target: 'offscreen'; type: 'run-strip'; jobIds: string[]; tabId: number; parts: { bytesB64: string; mime?: string }[]; pageUrl: string; title: string; priority: number; force?: boolean }
   | { target: 'offscreen'; type: 'cancel'; jobId: string }
   | { target: 'offscreen'; type: 'cancel-tab'; tabId?: number }
   | { target: 'offscreen'; type: 'status'; jobIds: string[] }

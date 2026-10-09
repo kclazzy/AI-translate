@@ -25,6 +25,8 @@ interface Item {
   lost?: number;
   result?: RenderedTiles;
   docRect?: { x: number; y: number; width: number; height: number };
+  /** Translated together with these neighbouring pictures (one strip): a retry redoes them all. */
+  group?: Candidate[];
 }
 
 declare global {
@@ -54,6 +56,7 @@ function main() {
     }
   };
   let targetLang = 'ru';
+  let stitch = true;
   const langsOf = (r: RenderedTiles) => ({ source: nativeName(dominantLanguage(r.page.blocks.map((b) => b.language)) ?? 'auto') || tr('Оригинал'), target: nativeName(targetLang) });
   let originalsShown = false;
   let seq = 0;
@@ -100,9 +103,15 @@ function main() {
       },
       onEdit: () => {
         const it = items.get(id);
-        if (it?.result) void send({ type: 'open-editor', key: it.result.key });
+        if (!it?.result) return;
+        // The other translated pictures of this column: the editor can show them as one strip.
+        const chapterKeys = pageItemsInOrder().flatMap((x) => (x.result ? [x.result.key] : []));
+        void send({ type: 'open-editor', key: it.result.key, chapter: chapterKeys.length > 1 ? chapterKeys : undefined });
       },
-      onRetry: () => void translate(c, { priority: 50, force: true }),
+      onRetry: () => {
+        const group = items.get(id)?.group;
+        for (const g of group ?? [c]) void translate(g, { priority: 50, force: true });
+      },
       onCancel: () => {
         const it = items.get(id);
         void send({ type: 'cancel', id: it?.req ?? id });
@@ -119,7 +128,14 @@ function main() {
     try {
       const image: ImageRef = { id: req, kind: c.kind, src: c.src, dataUrl: await inlineData(c), rect: viewportRect(c.el), dpr: devicePixelRatio };
       if (image.dataUrl) image.src = undefined;
-      await send({ type: 'translate', image, pageUrl: location.href, title: document.title, priority: opts.priority ?? priorityOf(c.el), force: opts.force });
+      const priority = opts.priority ?? priorityOf(c.el);
+      if (stitch && c.kind === 'img') {
+        // Wait a moment for the neighbours: pictures of one strip go to the model together.
+        strip.push({ item, image, priority, force: opts.force });
+        if (!stripTimer) stripTimer = setTimeout(flushStrip, 300);
+        return;
+      }
+      await send({ type: 'translate', image, pageUrl: location.href, title: document.title, priority, force: opts.force });
       item.sentAt = Date.now();
       startWatch();
     } catch (e) {
@@ -127,6 +143,56 @@ function main() {
       if (items.get(id) !== item) return;
       item.status = 'error';
       overlay.error(tr('Не удалось отправить картинку на перевод'), e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // ---- strips: pictures a site cut out of one long webtoon strip --------------------------
+  type Pending = { item: Item; image: ImageRef; priority: number; force?: boolean };
+  let strip: Pending[] = [];
+  let stripTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Pictures that touch one another in one column (same left edge and width, no gap). */
+  function stripGroups(list: Pending[]): Pending[][] {
+    const at = (p: Pending) => {
+      const r = p.item.cand.el.getBoundingClientRect();
+      return { left: r.left, width: r.width, top: r.top + scrollY, bottom: r.bottom + scrollY };
+    };
+    const sorted = list.map((p) => ({ p, r: at(p) })).sort((a, b) => a.r.top - b.r.top);
+    const groups: Pending[][] = [];
+    let prev: (typeof sorted)[number] | null = null;
+    for (const cur of sorted) {
+      const joins = prev && Math.abs(prev.r.left - cur.r.left) <= 2 && Math.abs(prev.r.width - cur.r.width) <= 2 && Math.abs(cur.r.top - prev.r.bottom) <= 6 && cur.r.width > 0;
+      if (joins) groups[groups.length - 1].push(cur.p);
+      else groups.push([cur.p]);
+      prev = cur;
+    }
+    return groups;
+  }
+
+  async function flushStrip() {
+    stripTimer = null;
+    const list = strip.filter((p) => items.get(p.item.id) === p.item);
+    strip = [];
+    for (const g of stripGroups(list)) {
+      const priority = Math.min(...g.map((p) => p.priority));
+      const force = g.some((p) => p.force);
+      const msg: ContentToBackground =
+        g.length > 1
+          ? { type: 'translate-strip', images: g.map((p) => p.image), pageUrl: location.href, title: document.title, priority, force }
+          : { type: 'translate', image: g[0].image, pageUrl: location.href, title: document.title, priority, force };
+      const group = g.length > 1 ? g.map((p) => p.item.cand) : undefined;
+      for (const p of g) p.item.group = group;
+      try {
+        await send(msg);
+        for (const p of g) p.item.sentAt = Date.now();
+        startWatch();
+      } catch (e) {
+        for (const p of g) {
+          if (items.get(p.item.id) !== p.item) continue;
+          p.item.status = 'error';
+          p.item.overlay.error(tr('Не удалось отправить картинку на перевод'), e instanceof Error ? e.message : String(e));
+        }
+      }
     }
   }
 
@@ -306,6 +372,7 @@ function main() {
         minSize = msg.minImageSize;
         enabled = msg.enabled;
         targetLang = msg.targetLang;
+        stitch = msg.stitch !== false;
         if (!enabled) hoverBtn.style.display = 'none';
         setAuto(msg.autoTranslate);
         break;
@@ -691,13 +758,14 @@ function main() {
   // Ask for the state; the service worker may be waking up, so try a few times.
   const loadState = (attempt = 0) => {
     if (!alive()) return;
-    send<{ autoTranslate: boolean; minImageSize: number; enabled: boolean; targetLang: string; ui?: UiStrings }>({ type: 'get-page-state', host: location.hostname })
+    send<{ autoTranslate: boolean; minImageSize: number; enabled: boolean; targetLang: string; stitch?: boolean; ui?: UiStrings }>({ type: 'get-page-state', host: location.hostname })
       .then((s) => {
         if (!s) throw new Error('no state');
         applyUi(s.ui);
         minSize = s.minImageSize;
         enabled = s.enabled;
         targetLang = s.targetLang;
+        stitch = s.stitch !== false;
         if (!enabled) hoverBtn.style.display = 'none';
         setAuto(s.autoTranslate);
       })

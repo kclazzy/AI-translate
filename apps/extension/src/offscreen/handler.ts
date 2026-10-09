@@ -32,7 +32,12 @@ async function recordSpeed(ms: number, usage: { outputTokens: number }[]): Promi
 /** What each job is doing, so the page can show progress and notice lost jobs. */
 const jobs = new Map<string, { tabId: number; startedAt?: number; stage?: StageEvent }>();
 
+/** Pictures translated together as one strip share the queue job of the first one. */
+const alias = new Map<string, string>();
+const main = (id: string) => alias.get(id) ?? id;
+
 export function jobStatus(jobId: string): JobStatus {
+  jobId = main(jobId);
   const info = jobs.get(jobId);
   const pos = queue.position(jobId);
   if (pos.state === 'unknown') return { state: 'unknown' };
@@ -137,8 +142,80 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
         .finally(() => jobs.delete(jobId));
       return { queued: true, status: jobStatus(jobId) };
     }
+    case 'run-strip': {
+      const settings = await loadSettings();
+      setUiLang(settings.interfaceLang, false);
+      const vision = settings.providers.find((p) => p.id === settings.visionProviderId);
+      const local = settings.pipeline !== 'engine' && (!vision || isLocalProvider(vision));
+      queue.concurrency = local ? 1 : Math.max(1, settings.concurrency);
+      const { tabId, jobIds } = msg;
+      const jobId = jobIds[0];
+      for (const id of jobIds.slice(1)) alias.set(id, jobId);
+      jobs.set(jobId, { tabId });
+      const done = new Set<string>();
+      void queue
+        .add({
+          key: jobId,
+          priority: msg.priority ?? 100,
+          run: async (signal) => {
+            const info = jobs.get(jobId);
+            if (info) info.startedAt = Date.now();
+            const watch = new AbortController();
+            const onAbort = () => watch.abort(signal.reason);
+            signal.addEventListener('abort', onAbort, { once: true });
+            // A strip is several pictures: allow time for each chunk of it.
+            const limitMin = (local ? WATCHDOG_LOCAL_MIN : WATCHDOG_CLOUD_MIN) * Math.max(1, Math.ceil(jobIds.length / 3));
+            const timer = setTimeout(() => watch.abort(new DOMException('watchdog', 'TimeoutError')), limitMin * 60_000);
+            let t0 = Date.now();
+            let current: string[] = jobIds;
+            try {
+              await service.translateStrip(
+                msg.parts.map((p) => ({ bytes: base64ToBytes(p.bytesB64), mime: p.mime })),
+                {
+                  sourceUrl: msg.pageUrl,
+                  title: msg.title,
+                  force: msg.force,
+                  signal: watch.signal,
+                  keepAliveMin: local ? CHAPTER_KEEP_ALIVE_MIN : undefined,
+                  onChunk: (idx) => {
+                    current = idx.map((i) => jobIds[i]);
+                    t0 = Date.now();
+                  },
+                  onStage: (event) => {
+                    const i = jobs.get(jobId);
+                    if (i) i.stage = event;
+                    for (const id of current) if (!done.has(id)) emit({ source: 'offscreen', type: 'stage', jobId: id, tabId, event });
+                  },
+                  onPart: (i, result, cached) => {
+                    done.add(jobIds[i]);
+                    if (!cached && result.strip?.index === 0) void recordSpeed(Date.now() - t0, result.page.usage);
+                    emit({ source: 'offscreen', type: 'done', jobId: jobIds[i], tabId, result: toRendered(result, cached) });
+                  },
+                },
+              );
+            } catch (e) {
+              if (watch.signal.aborted && watch.signal.reason instanceof DOMException && watch.signal.reason.message === 'watchdog') {
+                throw new AppError('TIMEOUT', { retryable: true, detail: tr('Модель не ответила за {0} мин. Картинка пропущена, перевод главы продолжается. Проверьте модель в настройках: возможно, она не помещается в видеопамять.', limitMin) });
+              }
+              throw e;
+            } finally {
+              clearTimeout(timer);
+              signal.removeEventListener('abort', onAbort);
+            }
+          },
+        })
+        .catch((e) => {
+          const error = toAppError(e).toJSON();
+          for (const id of jobIds) if (!done.has(id)) emit({ source: 'offscreen', type: 'error', jobId: id, tabId, error });
+        })
+        .finally(() => {
+          jobs.delete(jobId);
+          for (const id of jobIds) alias.delete(id);
+        });
+      return { queued: true, status: jobStatus(jobId) };
+    }
     case 'cancel':
-      return { cancelled: queue.cancel(msg.jobId) };
+      return { cancelled: queue.cancel(main(msg.jobId)) };
     case 'cancel-tab': {
       let n = 0;
       for (const [id, j] of jobs) if (msg.tabId === undefined || j.tabId === msg.tabId) n += queue.cancel(id) ? 1 : 0;

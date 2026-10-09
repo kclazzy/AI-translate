@@ -299,3 +299,14 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ait-guide p { margin: 6px 0 0; }
 .ait-guide a { color: var(--magenta); }
 .ait-guide-note { color: var(--ink-2); }
+
+/* Whole-chapter editing: where one picture ends and the next begins. */
+.ait-page-mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 2px dashed rgba(200, 32, 95, 0.55);
+  pointer-events: none;
+  z-index: 3;
+}

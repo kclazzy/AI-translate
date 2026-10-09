@@ -1,3 +1,4 @@
+import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import {
   cleanBlock,
@@ -39,6 +40,10 @@ export interface EditorProps {
   onSave: (page: PageResult, cleaned: TiledImage, pixelsChanged: boolean) => Promise<void>;
   onClose?: () => void;
   title?: string;
+  /** Rows where one picture of the chapter ends and the next begins (whole-chapter mode). */
+  marks?: number[];
+  /** Extra buttons for the toolbar. */
+  toolbarExtra?: React.ReactNode;
 }
 
 const BASE_FONTS = ['"AIT Lettering"', '"AIT Comic"', '"AIT Narration"', '"AIT SFX"', 'Arial', '"Comic Sans MS"', '"Times New Roman"', 'Georgia', 'Impact'];
@@ -48,7 +53,7 @@ function clonePixels(p: PixelData): PixelData {
   return { width: p.width, height: p.height, data: new Uint8ClampedArray(p.data) };
 }
 
-export function Editor({ page, original, cleaned, settings, onSave, onClose, title }: EditorProps) {
+export function Editor({ page, original, cleaned, settings, onSave, onClose, title, marks, toolbarExtra }: EditorProps) {
   const platform = usePlatform();
   const [blocks, setBlocks] = useState<TextBlock[]>(page.blocks);
   const [selected, setSelected] = useState<string | null>(page.blocks[0]?.id ?? null);
@@ -380,6 +385,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       <div className="ait-toolbar">
         {onClose ? <button className="ait-btn small ghost" onClick={() => (!dirty || confirm(tr('Есть несохранённые правки. Закрыть без сохранения?'))) && onClose()}>{tr('← Назад')}</button> : null}
         {title ? <strong style={{ marginRight: 8 }}>{title}</strong> : null}
+        {toolbarExtra}
         {toolBtn('select', tr('Выбор'), 'V')}
         {toolBtn('brush', tr('Кисть'), 'B')}
         {toolBtn('eraser', tr('Ластик'), 'E')}
@@ -412,6 +418,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       <div className="ait-editor">
         <div ref={stageRef} className={`ait-stage ${tool === 'select' ? '' : 'drawing'}`} onPointerDown={onStagePointerDown} style={{ cursor: tool === 'select' ? 'default' : 'crosshair' }}>
           <div ref={innerRef} className="ait-stage-inner" style={{ width: page.width * zoom, height: page.height * zoom }}>
+            {marks?.map((y) => <div key={`m${y}`} className="ait-page-mark" style={{ top: y * zoom }} aria-hidden />)}
             <div style={{ position: 'absolute', left: 0, top: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: '0 0' }}>
               {cleaned.tiles.map((t, i) => (
                 <canvas

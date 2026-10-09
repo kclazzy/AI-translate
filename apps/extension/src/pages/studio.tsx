@@ -6,6 +6,7 @@ import { extensionPlatform } from './platform';
 
 const params = new URLSearchParams(location.search);
 const key = params.get('key') ?? undefined;
+const chapter = params.get('chapter')?.split(',').filter(Boolean);
 const view = (params.get('view') as View | null) ?? undefined;
 
-createRoot(document.getElementById('root')!).render(<StudioApp platform={extensionPlatform()} resultKey={key} initialView={view} />);
+createRoot(document.getElementById('root')!).render(<StudioApp platform={extensionPlatform()} resultKey={key} chapterKeys={chapter} initialView={view} />);

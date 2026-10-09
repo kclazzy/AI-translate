@@ -71,6 +71,8 @@ export interface AppSettings {
   exportPageLength?: 'normal' | 'long' | 'whole';
   /** Translate in a separate step after reading the picture (default: on, except fast mode). */
   twoStepTranslation?: boolean;
+  /** Translate neighbouring pictures of one webtoon strip together (default on). */
+  stitchStrips?: boolean;
   /** Interface language: "auto" (default) follows the browser / Windows language. */
   interfaceLang?: string;
 }

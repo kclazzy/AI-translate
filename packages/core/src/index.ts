@@ -36,3 +36,4 @@ export * from './llm/selftest';
 export * from './llm/readiness';
 export * from './translate/qa';
 export * from './image/slice';
+export * from './image/strip';
