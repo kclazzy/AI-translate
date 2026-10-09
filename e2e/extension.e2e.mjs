@@ -254,6 +254,13 @@ try {
     await ed.screenshot({ path: join(OUT, 'e2e-ocr-frame.png') });
     check('manual OCR shows the frame while it is stretched', frame > 80, `width=${frame}`);
     await ed.mouse.up();
+    // Pipette: the brush takes the colour of the picture where it is clicked (grey screentone here).
+    await new Promise((r) => setTimeout(r, 500));
+    await ed.click('[aria-label^="Пипетка"]');
+    await ed.mouse.click(sb.x + 20, sb.y + sb.height - 20);
+    const picked = await ed.$eval('[data-testid="brush-color"]', (el) => el.value);
+    const [pr, pg, pb] = [1, 3, 5].map((i) => parseInt(picked.slice(i, i + 2), 16));
+    check('the pipette takes the brush colour from the picture', picked !== '#ffffff' && Math.abs(pr - pg) < 20 && Math.abs(pg - pb) < 20 && pr > 120 && pr < 235, picked);
   }
 
   // Popup renders.

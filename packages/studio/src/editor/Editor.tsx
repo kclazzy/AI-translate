@@ -31,7 +31,7 @@ import { usePlatform } from '../platform';
 import { ErrorBox, Field, Switch, toast, useAction } from '../ui';
 import { tr } from '@ait/core/i18n';
 
-type Tool = 'select' | 'brush' | 'eraser' | 'inpaint' | 'ocr';
+type Tool = 'select' | 'brush' | 'eraser' | 'inpaint' | 'ocr' | 'picker';
 
 type HistoryItem =
   | { kind: 'blocks'; before: TextBlock[]; after: TextBlock[] }
@@ -294,6 +294,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       } else if (e.key === 'v') setTool('select');
       else if (e.key === 'b') setTool('brush');
       else if (e.key === 'e') setTool('eraser');
+      else if (e.key === 'i') setTool('picker');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -366,8 +367,32 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     toast(tr('Добавлено блоков: {0}', added.length));
   });
 
+  /** Colour of the page under the pointer: what the reader sees (cleaned picture), 3×3 average. */
+  const pickColor = (clientX: number, clientY: number) => {
+    const [px, py] = toPage(clientX, clientY);
+    const x = Math.max(0, Math.min(cleaned.width - 3, Math.round(px) - 1));
+    const y = Math.max(0, Math.min(cleaned.height - 3, Math.round(py) - 1));
+    const d = cleaned.getRegion(x, y, 3, 3).data;
+    let r = 0, g = 0, b = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      r += d[i];
+      g += d[i + 1];
+      b += d[i + 2];
+    }
+    const hex = '#' + [r, g, b].map((v) => Math.round(v / 9).toString(16).padStart(2, '0')).join('');
+    setBrushColor(hex);
+    toast(tr('Цвет кисти: {0}', hex));
+  };
+
   const onStagePointerDown = (e: RPointerEvent) => {
     if (e.button === 1) return pan(e);
+    // Pipette (or Alt+click with the brush): take the brush colour from the picture.
+    if (tool === 'picker' || (tool === 'brush' && e.altKey)) {
+      e.preventDefault();
+      pickColor(e.clientX, e.clientY);
+      if (tool === 'picker') setTool('brush');
+      return;
+    }
     if (tool === 'select') {
       setSelected(null);
       setMulti(new Set());
@@ -529,13 +554,14 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           {toolBtn('eraser', '⌫', tr('Ластик'), 'E')}
           {toolBtn('inpaint', '◍', tr('Заливка фона'))}
           {toolBtn('ocr', 'OCR', tr('Ручной OCR'))}
+          {toolBtn('picker', '⊙', tr('Пипетка: взять цвет для кисти с картинки (Alt+щелчок кистью)'), 'I')}
+          <input className="ait-pal-color" type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} aria-label={tr('Цвет кисти')} title={tr('Цвет кисти')} data-testid="brush-color" />
           {painting ? (
             <div className="ait-pal-group" aria-label={tr('Размер кисти')}>
               <button className="ait-pal-btn" onClick={() => setBrush((b) => Math.min(100, b + 4))} title={tr('Больше ( ] )')} aria-label={tr('Кисть больше')}>+</button>
               <input className="ait-pal-range" type="range" min={1} max={100} value={brush} onChange={(e) => setBrush(Number(e.target.value))} aria-label={tr('Размер кисти')} />
               <span className="ait-pal-val">{brush}</span>
               <button className="ait-pal-btn" onClick={() => setBrush((b) => Math.max(1, b - 4))} title={tr('Меньше ( [ )')} aria-label={tr('Кисть меньше')}>−</button>
-              {tool === 'brush' ? <input className="ait-pal-color" type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} aria-label={tr('Цвет кисти')} title={tr('Цвет кисти')} /> : null}
             </div>
           ) : null}
           <span className="ait-pal-sep" />
@@ -564,7 +590,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
             if (r && painting) setCursorAt([e.clientX - r.left, e.clientY - r.top]);
           }}
           onPointerLeave={() => setCursorAt(null)}
-          style={{ cursor: tool === 'select' ? 'default' : painting ? 'none' : 'crosshair' }}
+          style={{ cursor: tool === 'select' ? 'default' : tool === 'picker' ? 'copy' : painting ? 'none' : 'crosshair' }}
         >
           <div ref={innerRef} className="ait-stage-inner" style={{ width: page.width * zoom, height: page.height * zoom }}>
             {marks?.map((y) => <div key={`m${y}`} className="ait-page-mark" style={{ top: y * zoom }} aria-hidden />)}

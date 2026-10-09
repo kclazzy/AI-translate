@@ -1,6 +1,6 @@
 [project]
 name = "ait-engine"
-version = "0.5.3"
+version = "0.5.4"
 description = "Local GPU engine for AI Translate: text detection, OCR, translation and inpainting for manga, manhwa and comics"
 requires-python = ">=3.11"
 license = { text = "MIT" }
