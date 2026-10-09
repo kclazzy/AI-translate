@@ -68,6 +68,8 @@ try {
     return req.continue();
   });
   await page.goto(`chrome-extension://${extId}/studio.html?view=settings&update=1`);
+  // The welcome tab opened on install must not leave this page in the background (timers and rendering pause there).
+  await page.bringToFront();
   // Stand-in for the user's extension folder: same manifest as the running extension, an old bundle and a user file.
   await page.evaluate(async (m) => {
     const root = await navigator.storage.getDirectory();
