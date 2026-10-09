@@ -105,7 +105,8 @@ try {
       ui: document.querySelector('[data-testid="update-check"]')?.innerText,
     };
   });
-  await page.screenshot({ path: join(OUT, 'update.png') });
+  // Only a picture for the log: never fail the test on it (a busy page can stall the capture).
+  await Promise.race([page.screenshot({ path: join(OUT, 'update.png') }).catch(() => {}), new Promise((r) => setTimeout(r, 10000))]);
   check('new files are written into the extension folder', state.version === '9.9.9' && state.studio?.includes('new'), JSON.stringify(state));
   check('old bundles are removed, the user’s own files are kept', state.assets.join() === 'new.js' && state.notes === 'mine' && !state.engineCopied, JSON.stringify(state.assets));
   check('the extension reloads itself after the update', state.reloaded === true, state.ui);
