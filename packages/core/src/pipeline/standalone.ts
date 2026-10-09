@@ -109,6 +109,17 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
   );
 }
 
+/** Does text written in this script belong to the language (kanji-only Japanese looks Chinese)? */
+export function scriptFits(script: ReturnType<typeof detectScript>, lang: string): boolean {
+  if (script === 'other') return true;
+  const base = lang.split('-')[0];
+  if (base === 'ja') return script === 'ja' || script === 'zh';
+  if (base === 'zh') return script === 'zh' || script === 'ja';
+  if (base === 'ko') return script === 'ko';
+  if (['ru', 'uk', 'be', 'bg', 'sr', 'kk'].includes(base)) return script === 'cyrillic';
+  return script === 'latin';
+}
+
 /** Letters with case (Latin, Cyrillic, Greek) and all of them capitals: comic lettering. */
 export function isAllCaps(text: string): boolean {
   const letters = [...text].filter((c) => c.toLowerCase() !== c.toUpperCase());
@@ -303,6 +314,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   blocks = merged.map((l, i): TextBlock => {
     const script = detectScript(l.text);
     const language = config.sourceLang !== 'auto' ? config.sourceLang : script === 'latin' ? 'en' : script === 'cyrillic' ? 'ru' : script === 'other' ? 'und' : script;
+    // The user's filters: only bubbles, only the chosen language.
+    const skip = (config.bubblesOnly && (l.type === 'SFX' || l.type === 'SIGN' || l.type === 'OTHER')) || (config.onlySourceLang && !scriptFits(script, config.sourceLang));
     return {
       id: `b${i + 1}`,
       textType: req.generic && l.type === 'DIALOGUE' ? 'OTHER' : l.type,
@@ -316,7 +329,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       writingDirection: l.vertical ? 'ttb-rl' : 'ltr',
       fontSizeEstimate: estimateFontSize(l.box, l.text),
       bubble: null,
-      translate: !(l.type === 'SFX' && !config.translateSfx),
+      translate: !skip && !(l.type === 'SFX' && !config.translateSfx),
       ...(l.speaker ? { speaker: l.speaker } : {}),
       ...(l.gender ? { speakerGender: l.gender } : {}),
     };

@@ -96,6 +96,8 @@ try {
   const extId = new URL(sw.url()).host;
   const client = await browser.target().createCDPSession();
   await client.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: DL, eventsEnabled: true });
+  const names = [];
+  client.on('Browser.downloadWillBegin', (e) => names.push(e.suggestedFilename));
   const studio = await browser.newPage();
   await studio.goto(`chrome-extension://${extId}/studio.html?view=history`);
   await studio.evaluate(async () => {
@@ -114,6 +116,7 @@ try {
     s.translationProviderId = null;
     s.privacy = 'local';
     s.pipeline = 'standalone';
+    s.autoSave = true;
     store.put(s, 'settings');
     await new Promise((r) => (tx.oncomplete = r));
   });
@@ -170,6 +173,12 @@ try {
   const sizes = imageCalls.map((c) => /The image is (\d+×\d+)/.exec(JSON.stringify(c.messages))?.[1]);
   check('the two pictures go to the model once, glued into the whole page', imageCalls.length === 1 && sizes[0] === '800×1100', `calls=${imageCalls.length} sizes=${sizes.join(',')}`);
   check('the chapter file is downloaded', !!file, file ?? 'none');
+  if (process.env.DEBUG) {
+    const swNow = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().endsWith('background.js'), { timeout: 5000 }).catch(() => null);
+    console.log('SWLOG', swNow ? await (await swNow.worker()).evaluate(() => (globalThis.__aitLog ?? []).slice(-15).join('\n')).catch((e) => String(e)) : 'none');
+  }
+  const pngs = readdirSync(DL).filter((f) => { try { return readFileSync(join(DL, f)).subarray(1, 4).toString() === 'PNG'; } catch { return false; } });
+  check('«Сохранять каждую картинку»: both translated pictures are saved', pngs.length === 2, `${pngs.length} PNG files ${names.join(', ')}`);
   if (file) {
     const dir = join(DL, 'x');
     mkdirSync(dir, { recursive: true });
@@ -203,6 +212,31 @@ try {
     check('one image per picture in the download, at the pictures’ own sizes', info.sizes.join(',') === `800×${CUT},800×${1100 - CUT}`, info.sizes.join(','));
     check('the half of the bubble in the second picture is translated too', info.diff > 150, `changed pixels=${info.diff}`);
   }
+
+  // Opened again: the translations from the cache are shown at once, without asking the model.
+  const overlays = async () => {
+    const c4 = await tab.target().createCDPSession();
+    const { root } = await c4.send('DOM.getDocument', { depth: -1, pierce: true });
+    let n = 0;
+    const walk = (x) => { if (x.nodeType === 3 && /^⇄/.test(x.nodeValue?.trim() ?? '')) n++; (x.children ?? []).forEach(walk); (x.shadowRoots ?? []).forEach(walk); };
+    walk(root);
+    await c4.detach();
+    return n;
+  };
+  const before = calls.length;
+  await tab.reload();
+  let shown = 0;
+  for (let i = 0; i < 20 && shown < 2; i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    shown = await overlays();
+  }
+  check('a page opened again shows its translations from the cache by itself', shown === 2 && calls.length === before, `overlays=${shown} new model calls=${calls.length - before}`);
+  await studio.evaluate(async () => {
+    const [t] = await chrome.tabs.query({ url: 'http://127.0.0.1:18141/' });
+    await chrome.runtime.sendMessage({ type: 'popup-command', command: 'clear-page', tabId: t.id });
+  });
+  await new Promise((r) => setTimeout(r, 600));
+  check('«Очистить всё» removes every translation from the page', (await overlays()) === 0, `overlays=${await overlays()}`);
 } catch (e) {
   check('unexpected failure', false, String(e?.stack ?? e));
 } finally {

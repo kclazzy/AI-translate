@@ -89,14 +89,46 @@ function main() {
     return id;
   };
 
-  // ---- translate one candidate -------------------------------------------------------------
-  async function translate(c: Candidate, opts: { priority?: number; force?: boolean } = {}) {
-    dismissed.delete(c.el);
-    const id = idFor(c.el);
-    const existing = items.get(id);
-    if (existing && !opts.force && existing.src === (c.src ?? existing.src) && existing.status !== 'error') return;
-    existing?.overlay.destroy();
-    const overlay = new Overlay(() => (c.el.isConnected ? contentRect(c.el) : null), {
+  function showResult(it: Item, result: RenderedTiles) {
+    it.status = 'done';
+    it.overlay.setTiles(result.tiles, langsOf(result));
+    // The overlay keeps its own copies of the pictures; holding the base64 tiles too would
+    // double the memory on long webtoon pages.
+    it.result = { ...result, tiles: [] };
+    it.overlay.setOriginal(originalsShown);
+    const qa = result.page.blocks.flatMap((b) => (b.qa?.issues ?? []).map((q) => `• ${q.note}${b.qa?.before !== undefined ? tr(' (исправлено)') : ''}`));
+    it.overlay.setQa(qa.length, qa.slice(0, 8).join('\n'));
+    it.overlay.position();
+  }
+
+  // ---- translations made before: shown as soon as the page opens again -------------------
+  const looked = new WeakSet<Element>();
+  async function applyCached() {
+    if (!enabled || !alive()) return;
+    const fresh = scanPage(minSize).filter((c) => c.kind === 'img' && c.src && !c.src.startsWith('data:') && !looked.has(c.el) && !dismissed.has(c.el) && !items.has(byElement.get(c.el) ?? ''));
+    if (!fresh.length) return;
+    for (const c of fresh) looked.add(c.el);
+    let found: Record<string, RenderedTiles> = {};
+    try {
+      found = (await send<Record<string, RenderedTiles>>({ type: 'lookup-cached', srcs: fresh.map((c) => c.src!) })) ?? {};
+    } catch {
+      return;
+    }
+    for (const c of fresh) {
+      const r = found[c.src!];
+      const id = idFor(c.el);
+      if (!r || items.has(id)) continue;
+      const overlay = makeOverlay(c, id);
+      const item: Item = { id, cand: c, src: c.src, status: 'done', overlay };
+      watchEl(c.el);
+      items.set(id, item);
+      showResult(item, r);
+    }
+  }
+
+  /** The overlay of one picture with its buttons (switch, edit, retry, stop). */
+  function makeOverlay(c: Candidate, id: string): Overlay {
+    return new Overlay(() => (c.el.isConnected ? contentRect(c.el) : null), {
       onToggle: () => {
         const it = items.get(id);
         if (it) it.overlay.setOriginal(!it.overlay.showingOriginal);
@@ -120,6 +152,16 @@ function main() {
         items.delete(id);
       },
     });
+  }
+
+  // ---- translate one candidate -------------------------------------------------------------
+  async function translate(c: Candidate, opts: { priority?: number; force?: boolean } = {}) {
+    dismissed.delete(c.el);
+    const id = idFor(c.el);
+    const existing = items.get(id);
+    if (existing && !opts.force && existing.src === (c.src ?? existing.src) && existing.status !== 'error') return;
+    existing?.overlay.destroy();
+    const overlay = makeOverlay(c, id);
     const req = `${id}~${(reqSeq++).toString(36)}`;
     const item: Item = { id, req, cand: c, src: c.src, status: 'queued', overlay };
     watchEl(c.el);
@@ -302,17 +344,7 @@ function main() {
       case 'job-done': {
         const it = itemFor(msg.id);
         if (!it) break;
-        it.status = 'done';
-        it.overlay.setTiles(msg.result.tiles, langsOf(msg.result));
-        // The overlay keeps its own copies of the pictures; holding the base64 tiles too would
-        // double the memory on long webtoon pages.
-        it.result = { ...msg.result, tiles: [] };
-        it.overlay.setOriginal(originalsShown);
-        {
-          const qa = msg.result.page.blocks.flatMap((b) => (b.qa?.issues ?? []).map((q) => `• ${q.note}${b.qa?.before !== undefined ? tr(' (исправлено)') : ''}`));
-          it.overlay.setQa(qa.length, qa.slice(0, 8).join('\n'));
-        }
-        it.overlay.position();
+        showResult(it, msg.result);
         break;
       }
       case 'job-error': {
@@ -341,6 +373,10 @@ function main() {
         break;
       }
       case 'command':
+        if (msg.command === 'clear-page') {
+          clearPage();
+          break;
+        }
         if (!enabled && msg.command !== 'toggle-original' && msg.command !== 'set-auto') {
           toastOnce(tr('AI Translate выключен — включите его в окне расширения'));
           break;
@@ -378,6 +414,7 @@ function main() {
         enabled = msg.enabled;
         targetLang = msg.targetLang;
         stitch = msg.stitch !== false;
+        if (enabled) void applyCached();
         if (!enabled) hoverBtn.style.display = 'none';
         setAuto(msg.autoTranslate);
         break;
@@ -503,6 +540,24 @@ function main() {
     }
   }
 
+  /** «Очистить всё»: remove every translation from this page and stop what is still running. */
+  function clearPage() {
+    pageMode = false;
+    if (chapter) {
+      clearInterval(chapter.timer);
+      chapter.panel.remove();
+      chapter = null;
+    }
+    for (const it of items.values()) {
+      if (it.status === 'queued' || it.status === 'working') void send({ type: 'cancel', id: it.req ?? it.id }).catch(() => undefined);
+      if (!it.docRect) dismissed.add(it.cand.el);
+      it.overlay.destroy();
+    }
+    items.clear();
+    strip = [];
+    originalsShown = false;
+  }
+
   function translatePage() {
     pageMode = true;
     dismissed = new WeakSet();
@@ -549,6 +604,7 @@ function main() {
           }
         }
       }
+      if (enabled) void applyCached();
       if (!autoTranslate && !pageMode) return;
       if (!enabled) return;
       const found = scanPage(minSize);
@@ -773,6 +829,7 @@ function main() {
         enabled = s.enabled;
         targetLang = s.targetLang;
         stitch = s.stitch !== false;
+        if (enabled) void applyCached();
         if (!enabled) hoverBtn.style.display = 'none';
         setAuto(s.autoTranslate);
       })

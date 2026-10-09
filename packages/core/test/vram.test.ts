@@ -55,3 +55,29 @@ describe('models.json', () => {
     expect(tierForVram(12).model).toBe('qwen3.5:9b-q4_K_M');
   });
 });
+
+describe('filters chosen by the user', () => {
+  it('«Только баблы» and «Только выбранный язык» leave other text as it is', async () => {
+    const { runStandalonePipeline, configFromPreset, DEFAULT_PROFILES } = await import('../src');
+    const { bytes, bubbles } = await makeMangaPage();
+    const answer = JSON.stringify({
+      blocks: [
+        { box: toNorm(bubbles[0].textBox, 800, 1100), text: 'たなかさん待って', translation: 'Танака, подожди!', type: 'DIALOGUE', vertical: true },
+        { box: toNorm(bubbles[1].textBox, 800, 1100), text: 'BOOM', translation: 'БУМ', type: 'SFX', vertical: false },
+      ],
+      entities: [],
+      summary: '',
+    });
+    const run = async (extra: object) => {
+      const mock = mockOpenAi(() => answer);
+      const out = await runStandalonePipeline(
+        { bytes, config: { mode: 'standalone', privacy: 'local', sourceLang: 'ja', targetLang: 'ru', quality: 'balanced', profile: DEFAULT_PROFILES[0], glossary: [], translateSfx: true, sfxStyle: 'translated', vision: { ...configFromPreset('lmstudio', 'vlm'), vision: true }, translator: null, ...extra } as any },
+        { backend: napiBackend, fetchImpl: mock.fetchImpl },
+      );
+      return out.page.blocks.map((b) => b.translate);
+    };
+    expect(await run({})).toEqual([true, true]);
+    expect(await run({ bubblesOnly: true })).toEqual([true, false]);
+    expect(await run({ onlySourceLang: true })).toEqual([true, false]); // BOOM is not Japanese
+  });
+});

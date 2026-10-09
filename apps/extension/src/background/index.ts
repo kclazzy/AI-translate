@@ -86,6 +86,15 @@ function track(tabId: number, jobId: string, on: boolean) {
 }
 
 function relayFromOffscreen(m: FromOffscreen) {
+  if (m.type === 'save') {
+    // Some systems accept only Latin file names: transliterate each folder name if refused.
+    const latin = m.filename.split('/').map((x) => translit(x).replace(/[^A-Za-z0-9 ._,()-]+/g, ' ').replace(/\s+/g, ' ').trim() || 'page').join('/');
+    void chrome.downloads
+      .download({ url: m.url, filename: m.filename, saveAs: false, conflictAction: 'uniquify' })
+      .catch(() => chrome.downloads.download({ url: m.url, filename: latin, saveAs: false, conflictAction: 'uniquify' }))
+      .catch((e) => dlog('auto-save failed', m.filename, e));
+    return;
+  }
   const id = m.jobId.split('|')[1] ?? m.jobId;
   if (m.type === 'stage') sendToTab(m.tabId, { type: 'job-stage', id, event: m.event });
   else if (m.type === 'done') {
@@ -176,7 +185,7 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
           await toOffscreen({ target: 'offscreen', type: 'crop-run', jobId, tabId, screenshot: shot, rect: msg.image.rect, dpr: msg.image.dpr ?? 1, pageUrl: msg.pageUrl, title: msg.title, generic: false, priority: msg.priority });
           return { queued: true, captured: true };
         }
-        await toOffscreen({ target: 'offscreen', type: 'run', jobId, tabId, bytesB64: bytesToBase64(bytes), mime, pageUrl: msg.pageUrl, title: msg.title, priority: msg.priority, force: msg.force });
+        await toOffscreen({ target: 'offscreen', type: 'run', jobId, tabId, bytesB64: bytesToBase64(bytes), mime, pageUrl: msg.pageUrl, title: msg.title, priority: msg.priority, force: msg.force, imageSrc: msg.image.src });
         return { queued: true };
       } catch (e) {
         dlog('translate failed', e);
@@ -195,14 +204,14 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       }
       const jobIds = msg.images.map((im) => `${tabId}|${im.id}`);
       for (const j of jobIds) track(tabId, j, true);
-      const parts: { bytesB64: string; mime?: string }[] = [];
+      const parts: { bytesB64: string; mime?: string; src?: string }[] = [];
       try {
         for (const image of msg.images) {
           let got: { bytes: Uint8Array; mime: string } | null = null;
           if (image.dataUrl) got = dataUrlToBytes(image.dataUrl);
           else if (image.src) got = await fetchImage(image.src, msg.pageUrl).catch(() => null);
           if (!got) throw new Error('fetch');
-          parts.push({ bytesB64: bytesToBase64(got.bytes), mime: got.mime });
+          parts.push({ bytesB64: bytesToBase64(got.bytes), mime: got.mime, src: image.src });
         }
       } catch {
         // A picture that cannot be fetched (protected reader): each one on its own, as before.
@@ -274,6 +283,11 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       readyCache = null;
       await offerSetup(tabId, true);
       return null;
+    case 'lookup-cached': {
+      const s = await loadSettings();
+      if (s.enabled === false || s.autoApplyCached === false || !msg.srcs.length) return {};
+      return toOffscreen({ target: 'offscreen', type: 'lookup-cached', srcs: msg.srcs });
+    }
     case 'free-memory': {
       // Unload every local model from video memory; the next picture loads only the one it needs.
       const s = await loadSettings();

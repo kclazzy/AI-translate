@@ -35,6 +35,7 @@ export type ContentToBackground =
   | { type: 'status'; ids: string[] }
   | { type: 'open-setup' }
   | { type: 'free-memory' }
+  | { type: 'lookup-cached'; srcs: string[] }
   | { type: 'build-download'; keys: string[]; title: string; format: ChapterFormat };
 
 /** Time per translated page (kv 'speed'), written by the worker, shown in the popup. */
@@ -54,7 +55,7 @@ export type BackgroundToContent =
   | { type: 'job-stage'; id: string; event: StageEvent }
   | { type: 'job-done'; id: string; result: RenderedTiles }
   | { type: 'job-error'; id: string; error: SerializedError }
-  | { type: 'command'; command: 'translate-page' | 'select-area' | 'toggle-original' | 'set-auto' | 'download-chapter'; value?: boolean | ChapterFormat }
+  | { type: 'command'; command: 'translate-page' | 'select-area' | 'toggle-original' | 'set-auto' | 'download-chapter' | 'clear-page'; value?: boolean | ChapterFormat }
   | { type: 'translate-src'; src: string }
   | { type: 'result-changed'; key: string }
   | { type: 'get-langs' }
@@ -82,23 +83,25 @@ export type JobStatus =
 
 // background ↔ offscreen
 export type ToOffscreen =
-  | { target: 'offscreen'; type: 'run'; jobId: string; tabId: number; bytesB64: string; mime?: string; pageUrl: string; title: string; priority: number; generic?: boolean; force?: boolean }
+  | { target: 'offscreen'; type: 'run'; jobId: string; tabId: number; bytesB64: string; mime?: string; pageUrl: string; title: string; priority: number; generic?: boolean; force?: boolean; imageSrc?: string }
   | { target: 'offscreen'; type: 'crop-run'; jobId: string; tabId: number; screenshot: string; rect: { x: number; y: number; width: number; height: number }; dpr: number; pageUrl: string; title: string; generic?: boolean; priority?: number }
-  | { target: 'offscreen'; type: 'run-strip'; jobIds: string[]; tabId: number; parts: { bytesB64: string; mime?: string }[]; pageUrl: string; title: string; priority: number; force?: boolean }
+  | { target: 'offscreen'; type: 'run-strip'; jobIds: string[]; tabId: number; parts: { bytesB64: string; mime?: string; src?: string }[]; pageUrl: string; title: string; priority: number; force?: boolean }
   | { target: 'offscreen'; type: 'cancel'; jobId: string }
   | { target: 'offscreen'; type: 'cancel-tab'; tabId?: number }
   | { target: 'offscreen'; type: 'status'; jobIds: string[] }
   | { target: 'offscreen'; type: 'build-file'; keys: string[]; title: string; format: ChapterFormat; lang: string }
-  | { target: 'offscreen'; type: 'get-result'; key: string };
+  | { target: 'offscreen'; type: 'get-result'; key: string }
+  | { target: 'offscreen'; type: 'lookup-cached'; srcs: string[] };
 
 export type FromOffscreen =
   | { source: 'offscreen'; type: 'stage'; jobId: string; tabId: number; event: StageEvent }
   | { source: 'offscreen'; type: 'done'; jobId: string; tabId: number; result: RenderedTiles }
-  | { source: 'offscreen'; type: 'error'; jobId: string; tabId: number; error: SerializedError };
+  | { source: 'offscreen'; type: 'error'; jobId: string; tabId: number; error: SerializedError }
+  | { source: 'offscreen'; type: 'save'; tabId: number; url: string; filename: string };
 
 // UI pages → background
 export type UiToBackground =
-  | { type: 'popup-command'; command: 'translate-page' | 'select-area' | 'toggle-original' | 'download-chapter'; tabId: number; format?: ChapterFormat }
+  | { type: 'popup-command'; command: 'translate-page' | 'select-area' | 'toggle-original' | 'download-chapter' | 'clear-page'; tabId: number; format?: ChapterFormat }
   | { type: 'set-auto'; host: string; enabled: boolean; tabId: number }
   | { type: 'settings-changed' }
   | { type: 'cancel-all'; tabId?: number }

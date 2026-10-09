@@ -1,4 +1,4 @@
-import { AppError, base64ToBytes, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type StoredResult } from '@ait/core';
+import { AppError, base64ToBytes, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type StoredResult } from '@ait/core';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
 import type { StageEvent } from '@ait/core';
@@ -45,6 +45,35 @@ export function jobStatus(jobId: string): JobStatus {
   return { state: 'running', elapsedMs: info?.startedAt ? Date.now() - info.startedAt : 0, stage: info?.stage?.stage };
 }
 let pruned = false;
+
+/** Remember which picture address gave which result, so a page opened again shows it at once. */
+async function rememberSrc(src: string | undefined, key: string): Promise<void> {
+  if (!src || src.startsWith('data:')) return;
+  const s = await loadSettings();
+  await db.put('kv', `src:${s.targetLang}:${src}`, key);
+}
+
+/** «Сохранять каждую переведённую картинку»: Downloads/AI Translate/<site>/<chapter>/<picture>.png */
+async function autoSave(r: StoredResult, pageUrl: string, title: string, src: string | undefined, tabId: number, emit: (m: FromOffscreen) => void): Promise<void> {
+  const s = await loadSettings();
+  if (!s.autoSave) return;
+  const clean = (x: string) => x.replace(/[^\p{L}\p{N} ._,()\-]+/gu, ' ').replace(/\s+/g, ' ').replace(/^[ .]+|[ .]+$/g, '').slice(0, 80);
+  let host = 'site';
+  try {
+    host = new URL(pageUrl).hostname.replace(/^www\./, '');
+  } catch {
+    /* keep */
+  }
+  const base = src && !src.startsWith('data:') ? clean(decodeURIComponent(new URL(src, pageUrl).pathname.split('/').pop() ?? '').replace(/\.\w+$/, '')) : '';
+  const name = base || r.key.slice(0, 10);
+  const image = await tilesToImage(browserBackend, r.page.width, r.page.height, r.rendered);
+  const c = browserBackend.createCanvas(image.width, image.height);
+  image.drawRegion(c.getContext('2d'), 0, 0, image.width, image.height, image.width, image.height);
+  const bytes = await browserBackend.encode(c, 'image/png');
+  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'image/png' }));
+  setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
+  emit({ source: 'offscreen', type: 'save', tabId, url, filename: `AI Translate/${clean(host) || 'site'}/${clean(title) || 'page'}/${name}.png` });
+}
 
 export function toRendered(r: StoredResult, cached: boolean): RenderedTiles {
   return {
@@ -127,6 +156,8 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
               });
               if (!cached) void recordSpeed(Date.now() - t0, result.page.usage);
               emit({ source: 'offscreen', type: 'done', jobId, tabId, result: toRendered(result, cached) });
+              if (msg.type === 'run') void rememberSrc(msg.imageSrc, result.key);
+              if (!cached) void autoSave(result, msg.pageUrl, msg.title, msg.type === 'run' ? msg.imageSrc : undefined, tabId, emit).catch(() => undefined);
             } catch (e) {
               if (watch.signal.aborted && watch.signal.reason instanceof DOMException && watch.signal.reason.message === 'watchdog') {
                 throw new AppError('TIMEOUT', { retryable: true, detail: tr('Модель не ответила за {0} мин. Картинка пропущена, перевод главы продолжается. Проверьте модель в настройках: возможно, она не помещается в видеопамять.', limitMin) });
@@ -190,6 +221,8 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
                     done.add(jobIds[i]);
                     if (!cached && result.strip?.index === 0) void recordSpeed(Date.now() - t0, result.page.usage);
                     emit({ source: 'offscreen', type: 'done', jobId: jobIds[i], tabId, result: toRendered(result, cached) });
+                    void rememberSrc(msg.parts[i].src, result.key);
+                    if (!cached) void autoSave(result, msg.pageUrl, msg.title, msg.parts[i].src, tabId, emit).catch(() => undefined);
                   },
                 },
               );
@@ -223,6 +256,17 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
     }
     case 'status':
       return Object.fromEntries(msg.jobIds.map((id) => [id, jobStatus(id)]));
+    case 'lookup-cached': {
+      // Pictures of this page translated before (to the current language): their results.
+      const s = await loadSettings();
+      const out: Record<string, RenderedTiles> = {};
+      for (const src of msg.srcs.slice(0, 300)) {
+        const key = await db.get<string>('kv', `src:${s.targetLang}:${src}`);
+        const r = key ? await service.getResult(key) : undefined;
+        if (r) out[src] = toRendered(r, true);
+      }
+      return out;
+    }
     case 'get-result': {
       const r = await service.getResult(msg.key);
       return r ? toRendered(r, true) : null;

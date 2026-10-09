@@ -17,6 +17,47 @@ export interface EngineOptions {
   inpainter: 'auto' | 'fill' | 'telea' | 'lama';
 }
 
+export interface ModelPreset {
+  id: string;
+  name: string;
+  pipeline: AppSettings['pipeline'];
+  visionProviderId: string | null;
+  translationProviderId: string | null;
+  quality: AppSettings['quality'];
+  twoStepTranslation?: boolean;
+  qaMode?: AppSettings['qaMode'];
+  /** Models of the providers at the time the preset was saved. */
+  models: Record<string, string>;
+}
+
+/** Apply a preset: the providers keep their keys and addresses, only the choice and models change. */
+export function applyPreset(s: AppSettings, p: ModelPreset): Partial<AppSettings> {
+  return {
+    pipeline: p.pipeline,
+    visionProviderId: s.providers.some((x) => x.id === p.visionProviderId) ? p.visionProviderId : s.visionProviderId,
+    translationProviderId: p.translationProviderId && s.providers.some((x) => x.id === p.translationProviderId) ? p.translationProviderId : null,
+    quality: p.quality,
+    twoStepTranslation: p.twoStepTranslation,
+    qaMode: p.qaMode,
+    providers: s.providers.map((x) => (p.models[x.id] ? { ...x, model: p.models[x.id] } : x)),
+  };
+}
+
+export function presetFrom(s: AppSettings, name: string): ModelPreset {
+  const ids = [s.visionProviderId, s.translationProviderId].filter(Boolean) as string[];
+  return {
+    id: `p${Date.now().toString(36)}`,
+    name,
+    pipeline: s.pipeline,
+    visionProviderId: s.visionProviderId,
+    translationProviderId: s.translationProviderId,
+    quality: s.quality,
+    twoStepTranslation: s.twoStepTranslation,
+    qaMode: s.qaMode,
+    models: Object.fromEntries(s.providers.filter((p) => ids.includes(p.id)).map((p) => [p.id, p.model])),
+  };
+}
+
 export interface AppSettings {
   version: 1;
   /** @deprecated never used; the interface language is `interfaceLang`. */
@@ -73,6 +114,16 @@ export interface AppSettings {
   twoStepTranslation?: boolean;
   /** Translate neighbouring pictures of one webtoon strip together (default on). */
   stitchStrips?: boolean;
+  /** «Только баблы»: leave sound effects and signs untranslated. */
+  bubblesOnly?: boolean;
+  /** «Только выбранный язык»: leave text in other languages untranslated (needs a source language). */
+  onlySourceLang?: boolean;
+  /** Show translations already in the cache as soon as a page with those pictures opens (default on). */
+  autoApplyCached?: boolean;
+  /** Save every newly translated picture to Downloads/AI Translate/<site>/ (off unless chosen). */
+  autoSave?: boolean;
+  /** Named sets of model settings to switch between quickly. */
+  presets?: ModelPreset[];
   /** models.json fetched from the repository (recommended local models, family settings). */
   modelCatalog?: import('./llm/catalog').ModelCatalog;
   modelCatalogCheckedAt?: string;

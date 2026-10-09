@@ -30,6 +30,10 @@ export interface PipelineConfig {
    * speakers, their gender and the story so far): more accurate wording and word endings.
    */
   twoStep?: boolean;
+  /** Translate only text in speech bubbles and caption boxes (leave sound effects and signs). */
+  bubblesOnly?: boolean;
+  /** Translate only text in the chosen source language (leave text in other languages as it is). */
+  onlySourceLang?: boolean;
 }
 
 function withKeepAlive(p: ProviderConfig | undefined, s: AppSettings): ProviderConfig | null {
@@ -66,6 +70,8 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     engine: s.engine,
     qa: fastLocalActive(s) && (s.qaMode ?? 'fix') !== 'off' ? 'rules' : s.qaMode ?? 'fix',
     twoStep: s.twoStepTranslation ?? !(fastLocalActive(s) || s.quality === 'fast'),
+    bubblesOnly: s.bubblesOnly || undefined,
+    onlySourceLang: (s.onlySourceLang && s.sourceLang !== 'auto') || undefined,
   };
 }
 
@@ -86,6 +92,8 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     engine: c.mode === 'engine' ? c.engine?.options : undefined,
     qa: c.qa ?? 'off',
     two: c.twoStep ? 1 : undefined,
+    bo: c.bubblesOnly ? 1 : undefined,
+    osl: c.onlySourceLang ? 1 : undefined,
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);
 }

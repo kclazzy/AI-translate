@@ -1,7 +1,7 @@
 import '@ait/core/i18n/all';
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, MODEL_TIERS, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
+import { applyPreset, checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, modelTiers, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
@@ -26,7 +26,7 @@ function VramLine({ settings }: { settings: AppSettings }) {
   // Part of the model in system RAM: the main reason for a sudden slowdown.
   const spill = loaded.find((m) => gpuShare(m) < 0.95);
   const vision = pById(settings, settings.visionProviderId);
-  const tier = MODEL_TIERS.find((t) => vision && t.model === vision.model);
+  const tier = modelTiers().find((t) => vision && t.model === vision.model);
   const expected = tier ? Number(tier.secondsPerPage.split('–')[1]) : undefined;
   const slow = speed && speed.pages >= 2 && expected && speed.avgMs / 1000 > expected * 2;
   return (
@@ -109,9 +109,9 @@ function Popup() {
     setS(next);
     void saveSettings(next);
   };
-  const command = async (command: 'translate-page' | 'select-area' | 'toggle-original' | 'download-chapter') => {
+  const command = async (command: 'translate-page' | 'select-area' | 'toggle-original' | 'download-chapter' | 'clear-page') => {
     if (!tab?.id) return;
-    if (command !== 'toggle-original') {
+    if (command !== 'toggle-original' && command !== 'clear-page') {
       // Before a local translation: is everything installed and running? If not, open the helper,
       // which offers the downloads and continues this translation once ready.
       setPreflight(true);
@@ -124,7 +124,7 @@ function Popup() {
       }
     }
     void chrome.runtime.sendMessage({ type: 'popup-command', command, tabId: tab.id, format: command === 'download-chapter' ? fmt : undefined });
-    if (command !== 'toggle-original') window.close();
+    if (command !== 'toggle-original' && command !== 'clear-page') window.close();
   };
   const open = (path: string) => void chrome.tabs.create({ url: chrome.runtime.getURL(path) });
   const missing = s.pipeline === 'standalone' && !vision?.vision;
@@ -231,6 +231,11 @@ function Popup() {
           {tr('Остановить перевод ({0} в работе)', busy)}
         </button>
       ) : null}
+      <div className="pp-row">
+        <button className="ait-btn" disabled={!canRun} data-testid="clear-page" onClick={() => void command('clear-page')} title={tr('Убрать все переводы с этой страницы и остановить перевод')}>
+          {tr('Очистить всё')}
+        </button>
+      </div>
       {!canRun ? <p className="ait-hint">{tr('На этой странице расширение не работает. Откройте сайт с мангой.')}</p> : null}
 
       <label className="ait-switch pp-auto">
@@ -250,6 +255,34 @@ function Popup() {
         />
         <span>{tr('Автоперевод на')}{' '}{host || tr('этом сайте')}</span>
       </label>
+
+      <div className="pp-filters" data-testid="filters">
+        <label className="ait-check" title={tr('Звуки (SFX) и надписи на фоне остаются как в оригинале')}>
+          <input type="checkbox" data-testid="bubbles-only" checked={!!s.bubblesOnly} onChange={(e) => update({ bubblesOnly: e.target.checked })} />
+          <span>{tr('Только баблы')}</span>
+        </label>
+        <label className="ait-check" title={s.sourceLang === 'auto' ? tr('Сначала выберите исходный язык ниже') : tr('Текст на других языках остаётся как в оригинале')}>
+          <input type="checkbox" data-testid="only-source" checked={!!s.onlySourceLang && s.sourceLang !== 'auto'} disabled={s.sourceLang === 'auto'} onChange={(e) => update({ onlySourceLang: e.target.checked })} />
+          <span>{tr('Только {0}', s.sourceLang === 'auto' ? tr('выбранный язык') : nativeName(s.sourceLang))}</span>
+        </label>
+      </div>
+      {s.presets?.length ? (
+        <label className="ait-field">
+          <span>{tr('Набор настроек')}</span>
+          <select
+            className="ait-select"
+            data-testid="preset"
+            value=""
+            onChange={(e) => {
+              const p = s.presets?.find((x) => x.id === e.target.value);
+              if (p) update(applyPreset(s, p));
+            }}
+          >
+            <option value="">{tr('— выбрать —')}</option>
+            {s.presets.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </label>
+      ) : null}
 
       <div className="pp-grid">
         <label className="ait-field">

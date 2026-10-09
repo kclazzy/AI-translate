@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
+  applyPreset,
   configFromPreset,
+  presetFrom,
   createProvider,
   EngineClient,
   isLocalProvider,
@@ -288,6 +290,28 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               <option value="off">{tr('Выключена (быстрее)')}</option>
             </select>
           </Field>
+          <Field label={tr('Наборы настроек')} hint={tr('Модель, качество и проверка — одним выбором (например «Быстро локально» и «Точно в облаке»)')}>
+            <div style={{ display: 'grid', gap: 6 }} data-testid="presets">
+              {(s.presets ?? []).map((p) => (
+                <span key={p.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <b style={{ flex: 1 }}>{p.name}</b>
+                  <small className="ait-muted">{Object.values(p.models).join(' + ')}</small>
+                  <button className="ait-btn small" onClick={() => update(applyPreset(s, p))}>{tr('Применить')}</button>
+                  <button className="ait-btn small danger" aria-label={tr('Удалить набор {0}', p.name)} onClick={() => update({ presets: (s.presets ?? []).filter((x) => x.id !== p.id) })}>✕</button>
+                </span>
+              ))}
+              <button
+                className="ait-btn small"
+                style={{ justifySelf: 'start' }}
+                onClick={() => {
+                  const name = prompt(tr('Название набора'), tr('Набор {0}', (s.presets?.length ?? 0) + 1));
+                  if (name?.trim()) update({ presets: [...(s.presets ?? []), presetFrom(s, name.trim())] });
+                }}
+              >
+                {tr('Сохранить текущие как набор')}
+              </button>
+            </div>
+          </Field>
           <Field label={tr('Качество')} hint={tr('Чем выше, тем крупнее картинка уходит модели и дольше ответ')}>
             <Segmented label={tr('Качество')} value={s.quality} onChange={(quality) => update({ quality })} options={[{ value: 'fast', label: tr('Быстро') }, { value: 'balanced', label: tr('Баланс') }, { value: 'best', label: tr('Максимум') }]} />
             <div style={{ marginTop: 8 }}>
@@ -303,6 +327,18 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
                 onChange={(stitchStrips) => update({ stitchStrips })}
                 label={tr('Склеивать соседние картинки ленты (вебтун) — баблы на стыке не теряются')}
               />
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <Switch checked={!!s.bubblesOnly} onChange={(bubblesOnly) => update({ bubblesOnly })} label={tr('Только баблы: звуки и надписи на фоне оставлять как в оригинале')} />
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <Switch checked={!!s.onlySourceLang} onChange={(onlySourceLang) => update({ onlySourceLang })} label={tr('Переводить только текст на исходном языке (нужен выбранный исходный язык)')} />
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <Switch checked={s.autoApplyCached !== false} onChange={(autoApplyCached) => update({ autoApplyCached })} label={tr('Сразу показывать уже переведённые картинки, когда страница открывается снова')} />
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <Switch checked={!!s.autoSave} onChange={(autoSave) => update({ autoSave })} label={tr('Сохранять каждую переведённую картинку в Загрузки/AI Translate/<сайт>')} />
             </div>
           </Field>
           <Field label={tr('Звуки (SFX)')}>
