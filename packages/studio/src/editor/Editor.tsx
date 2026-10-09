@@ -20,6 +20,7 @@ import {
   type TextStyle,
   type TiledImage,
   QA_LABELS,
+  qaNote,
 } from '@ait/core';
 import { loadUserFonts, registerUserFont, saveUserFont } from '../fonts';
 import { exportTexts, importTexts } from './texts';
@@ -615,7 +616,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                   <b>{tr('Проверка перевода')}</b>
                   {sel.qa.issues.map((q, i) => (
                     <small key={i}>
-                      {q.severity === 'major' ? '⚠' : '•'} {QA_LABELS[q.kind]}: {q.note}
+                      {q.severity === 'major' ? '⚠' : '•'} {QA_LABELS[q.kind]}: {qaNote(q)}
                     </small>
                   ))}
                   {sel.qa.before !== undefined ? (
@@ -757,7 +758,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
               {blocks.map((b, i) => (
                 <button key={b.id} aria-pressed={b.id === selected || multi.has(b.id)} onClick={(e) => { pick(b.id, e.ctrlKey || e.shiftKey || e.metaKey); setTool('select'); }}>
                   {i + 1}. {b.translatedText.slice(0, 40) || <em className="ait-muted">{tr('пусто')}</em>} {overflow.has(b.id) ? '⚠' : ''}
-                  {b.qa?.issues.length ? <span title={b.qa.issues.map((q) => `${QA_LABELS[q.kind]}: ${q.note}`).join('\n')}> 🔍{b.qa.issues.length}</span> : null}
+                  {b.qa?.issues.length ? <span title={b.qa.issues.map((q) => `${QA_LABELS[q.kind]}: ${qaNote(q)}`).join('\n')}> 🔍{b.qa.issues.length}</span> : null}
                 </button>
               ))}
             </div>

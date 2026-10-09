@@ -3,7 +3,7 @@ import { dominantLanguage, nativeName } from '@ait/core/languages';
 import type { BackgroundToContent, ChapterFormat, ContentToBackground, ImageRef, JobStatus, PageLangs, RenderedTiles, UiStrings } from '../shared/messages';
 import { Overlay } from './overlay';
 import { asCandidate, candidateAt, chapterColumn, imgSrc, inlineData, lazySrc, markUi, scanPage, viewportRect, type Candidate } from './scanner';
-import { registerDictionary, setUiLang, tr } from '@ait/core/i18n';
+import { fmtNumber, fmtUsd, registerDictionary, setUiLang, tr } from '@ait/core/i18n';
 
 /**
  * Content script: finds images, shows the hover button, runs auto-translate on
@@ -96,7 +96,7 @@ function main() {
     // double the memory on long webtoon pages.
     it.result = { ...result, tiles: [] };
     it.overlay.setOriginal(originalsShown);
-    const qa = result.page.blocks.flatMap((b) => (b.qa?.issues ?? []).map((q) => `• ${q.note}${b.qa?.before !== undefined ? tr(' (исправлено)') : ''}`));
+    const qa = result.page.blocks.flatMap((b) => (b.qa?.issues ?? []).map((q) => `• ${q.code ? tr(q.code, ...(q.args ?? [])) : q.note}${b.qa?.before !== undefined ? tr(' (исправлено)') : ''}`));
     it.overlay.setQa(qa.length, qa.slice(0, 8).join('\n'));
     it.overlay.setInfo(pageInfo(result));
     it.overlay.position();
@@ -109,11 +109,11 @@ function main() {
     const tokOut = u.reduce((a, x) => a + x.outputTokens, 0);
     const cost = u.reduce((a, x) => a + x.costUsd, 0);
     const models = [...new Set(u.map((x) => x.model))].join(', ');
-    const sec = r.page.timings.totalMs ? (r.page.timings.totalMs / 1000).toFixed(1) : '—';
+    const sec = r.page.timings.totalMs ? fmtNumber(r.page.timings.totalMs / 1000, { maximumFractionDigits: 1 }) : '—';
     const lines = [
       tr('Время: {0} с', sec),
-      tr('Токены: {0} на входе, {1} на выходе', tokIn, tokOut),
-      tr('Стоимость: ${0}', cost.toFixed(4)),
+      tr('Токены: {0} на входе, {1} на выходе', fmtNumber(tokIn), fmtNumber(tokOut)),
+      tr('Стоимость: {0}', fmtUsd(cost, 4)),
       models ? tr('Модель: {0}', models) : '',
       tr('Текстов на картинке: {0}', r.page.blocks.length),
       r.cached ? tr('Взято из кэша') : '',

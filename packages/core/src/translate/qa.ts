@@ -19,8 +19,16 @@ export interface QaIssue {
   kind: QaKind;
   severity: 'minor' | 'major';
   note: string;
+  /** Rule checks: the message key and its values, so the note follows the interface language. */
+  code?: string;
+  args?: (string | number)[];
   /** Where the issue came from: rule check or the model's review. */
   by: 'rules' | 'review';
+}
+
+/** The note in the current interface language (rule notes are re-translated, model notes kept). */
+export function qaNote(q: QaIssue): string {
+  return q.code ? tr(q.code, ...(q.args ?? [])) : q.note;
 }
 
 export interface BlockQa {
@@ -56,28 +64,28 @@ export function ruleChecks(b: TextBlock, targetLang: string, glossary: GlossaryE
   const src = b.originalText.trim();
   const dst = b.translatedText.trim();
   if (!b.translate || !src) return issues;
-  if (!dst) return [{ kind: 'untranslated', severity: 'major', note: tr('Перевод пустой.'), by: 'rules' }];
+  if (!dst) return [{ kind: 'untranslated', severity: 'major', note: tr('Перевод пустой.'), code: 'Перевод пустой.', by: 'rules' }];
   const cjkTarget = ['ja', 'zh', 'zh-TW', 'ko'].includes(targetLang);
-  if (!cjkTarget && CJK.test(dst)) issues.push({ kind: 'untranslated', severity: 'major', note: tr('В переводе остались иероглифы или кана.'), by: 'rules' });
-  if (targetLang === 'ru' && LATIN.test(dst) && !/[А-Яа-яЁё]/.test(dst) && dst.length > 3) issues.push({ kind: 'untranslated', severity: 'major', note: tr('Текст не переведён на русский.'), by: 'rules' });
+  if (!cjkTarget && CJK.test(dst)) issues.push({ kind: 'untranslated', severity: 'major', note: tr('В переводе остались иероглифы или кана.'), code: 'В переводе остались иероглифы или кана.', by: 'rules' });
+  if (targetLang === 'ru' && LATIN.test(dst) && !/[А-Яа-яЁё]/.test(dst) && dst.length > 3) issues.push({ kind: 'untranslated', severity: 'major', note: tr('Текст не переведён на русский.'), code: 'Текст не переведён на русский.', by: 'rules' });
   const end = (s: string) => (/[?？]/.test(s.slice(-3)) ? '?' : /[!！]/.test(s.slice(-3)) ? '!' : /(\.\.\.|…|・・・)$/.test(s) ? '…' : '');
   const e1 = end(src);
   const e2 = end(dst);
-  if (e1 === '?' && e2 !== '?' && !dst.includes('?')) issues.push({ kind: 'punctuation', severity: 'minor', note: tr('В оригинале вопрос, в переводе нет вопросительного знака.'), by: 'rules' });
-  if (e1 === '!' && !dst.includes('!')) issues.push({ kind: 'punctuation', severity: 'minor', note: tr('В оригинале восклицание, в переводе нет «!».'), by: 'rules' });
+  if (e1 === '?' && e2 !== '?' && !dst.includes('?')) issues.push({ kind: 'punctuation', severity: 'minor', note: tr('В оригинале вопрос, в переводе нет вопросительного знака.'), code: 'В оригинале вопрос, в переводе нет вопросительного знака.', by: 'rules' });
+  if (e1 === '!' && !dst.includes('!')) issues.push({ kind: 'punctuation', severity: 'minor', note: tr('В оригинале восклицание, в переводе нет «!».'), code: 'В оригинале восклицание, в переводе нет «!».', by: 'rules' });
   const nums = (s: string) => (s.normalize('NFKC').match(/\d+/g) ?? []).sort().join(',');
-  if (nums(src) && nums(src) !== nums(dst)) issues.push({ kind: 'formatting', severity: 'major', note: tr('Числа не совпадают: {0} → {1}.', nums(src), nums(dst) || tr('нет')), by: 'rules' });
+  if (nums(src) && nums(src) !== nums(dst)) issues.push({ kind: 'formatting', severity: 'major', note: tr('Числа не совпадают: {0} → {1}.', nums(src), nums(dst) || '—'), code: 'Числа не совпадают: {0} → {1}.', args: [nums(src), nums(dst) || '—'], by: 'rules' });
   for (const h of findGlossaryHits(src, glossary)) {
-    if (h.entry.target && !dst.toLowerCase().includes(h.entry.target.toLowerCase())) issues.push({ kind: 'terminology', severity: 'major', note: tr('По глоссарию «{0}» → «{1}».', h.entry.source, h.entry.target), by: 'rules' });
+    if (h.entry.target && !dst.toLowerCase().includes(h.entry.target.toLowerCase())) issues.push({ kind: 'terminology', severity: 'major', note: tr('По глоссарию «{0}» → «{1}».', h.entry.source, h.entry.target), code: 'По глоссарию «{0}» → «{1}».', args: [h.entry.source, h.entry.target], by: 'rules' });
   }
   for (const e of context?.entities ?? []) {
     if (!e.source || !e.target || e.kind !== 'character') continue;
     if (src.includes(e.source) && !dst.toLowerCase().includes(e.target.toLowerCase().slice(0, Math.max(3, e.target.length - 2)))) {
-      issues.push({ kind: 'characters', severity: 'minor', note: tr('Имя «{0}» обычно переводится как «{1}».', e.source, e.target), by: 'rules' });
+      issues.push({ kind: 'characters', severity: 'minor', note: tr('Имя «{0}» обычно переводится как «{1}».', e.source, e.target), code: 'Имя «{0}» обычно переводится как «{1}».', args: [e.source, e.target], by: 'rules' });
     }
   }
   const ratio = [...dst].length / Math.max(1, [...src].length);
-  if (!CJK.test(src) && (ratio > 3.5 || ratio < 0.25) && src.length > 8) issues.push({ kind: 'meaning', severity: 'minor', note: tr('Перевод сильно отличается по длине — возможно, что-то потеряно или добавлено.'), by: 'rules' });
+  if (!CJK.test(src) && (ratio > 3.5 || ratio < 0.25) && src.length > 8) issues.push({ kind: 'meaning', severity: 'minor', note: tr('Перевод сильно отличается по длине — возможно, что-то потеряно или добавлено.'), code: 'Перевод сильно отличается по длине — возможно, что-то потеряно или добавлено.', by: 'rules' });
   return issues;
 }
 

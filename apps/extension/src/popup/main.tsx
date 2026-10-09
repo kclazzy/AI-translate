@@ -8,7 +8,7 @@ import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-pick
 import './popup.css';
 import type { PageLangs, SpeedStats } from '../shared/messages';
 import { db, hostOf, loadSettings, saveSettings, secrets } from '../shared/store';
-import { applyUiLangFromSettings, tr } from '@ait/core/i18n';
+import { applyUiLangFromSettings, tr, trp, fmtUsd } from '@ait/core/i18n';
 
 /** What Ollama holds in video memory right now, with a button to free it. */
 function VramLine({ settings }: { settings: AppSettings }) {
@@ -343,7 +343,7 @@ function Popup() {
         <button className="pp-link" onClick={() => open('studio.html')}>{tr('Студия')}</button>
         <button className="pp-link" onClick={() => open('studio.html?view=history')}>{tr('История')}</button>
         <button className="pp-link" onClick={() => chrome.runtime.openOptionsPage()}>{tr('Настройки')}</button>
-        <span className="ait-muted">{usage ? tr('{0} стр. · ${1}', usage.pages, usage.costUsd.toFixed(2)) : ''}</span>
+        <span className="ait-muted">{usage ? `${trp(usage.pages, '{0} страница', '{0} страницы', '{0} страниц')} · ${fmtUsd(usage.costUsd)}` : ''}</span>
       </footer>
       <div className="pp-update">
         <UpdateCheck compact current={chrome.runtime.getManifest().version} install={async () => open('studio.html?view=settings&update=1')} />

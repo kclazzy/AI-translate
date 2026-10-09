@@ -147,3 +147,32 @@ export function applyUiLangFromSettings(p: UiLangPref | null | undefined): boole
  * translated where it is shown, with tr(). Returns the string unchanged.
  */
 export const N_ = (s: string): string => s;
+
+/**
+ * Count with the right word form for the interface language: `one` (1 страница), `few`
+ * (2 страницы) and `many` (5 страниц) are Russian source strings with {0} for the number.
+ */
+export function trp(n: number, one: string, few: string, many: string, ...args: (string | number)[]): string {
+  let cat: string = 'other';
+  try {
+    cat = new Intl.PluralRules(uiLocale()).select(n);
+  } catch {
+    /* keep "other" */
+  }
+  const key = cat === 'one' ? one : cat === 'few' ? few : many;
+  return t(key, fmtNumber(n), ...args);
+}
+
+/** A number in the interface language's format (1 234,5 / 1,234.5). */
+export function fmtNumber(n: number, opts?: Intl.NumberFormatOptions): string {
+  try {
+    return new Intl.NumberFormat(uiLocale(), opts).format(n);
+  } catch {
+    return String(n);
+  }
+}
+
+/** Money in dollars (what the providers charge). */
+export function fmtUsd(n: number, digits = 2): string {
+  return fmtNumber(n, { style: 'currency', currency: 'USD', minimumFractionDigits: digits, maximumFractionDigits: digits });
+}

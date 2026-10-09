@@ -31,6 +31,7 @@ for (const dir of DIRS) {
           const k = lit(n.arguments[0]);
           if (k && /[А-Яа-яЁё]/.test(k)) keys.add(k);
         }
+        if (name === 'trp') for (const a of n.arguments.slice(1, 4)) if (lit(a)) keys.add(lit(a));
         if (name === 'lazyStrings' && n.arguments[0] && ts.isObjectLiteralExpression(n.arguments[0])) {
           for (const p of n.arguments[0].properties) if (ts.isPropertyAssignment(p) && lit(p.initializer)) keys.add(lit(p.initializer));
         }

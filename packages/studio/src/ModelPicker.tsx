@@ -33,7 +33,7 @@ import {
   type UpdateInfo,
 } from '@ait/core';
 import { FoldPanel } from './ui';
-import { tr, uiLocale } from '@ait/core/i18n';
+import { tr, uiLocale, fmtNumber } from '@ait/core/i18n';
 
 /** Ollama settings that save video memory (Windows command line). */
 export const OLLAMA_MEMORY_ENV = 'setx OLLAMA_FLASH_ATTENTION 1 && setx OLLAMA_KV_CACHE_TYPE q8_0 && setx OLLAMA_NUM_PARALLEL 1 && setx OLLAMA_MAX_LOADED_MODELS 1';
@@ -118,7 +118,7 @@ export function ModelPicker({ cfg, getKey, onPick, compact, hasKey }: { cfg: Pro
 type KeyGetter = (providerId: string) => Promise<string | undefined>;
 
 function gb(n?: number): string {
-  return n ? tr('{0} ГБ', (n / 1e9).toFixed(1)) : '';
+  return n ? tr('{0} ГБ', fmtNumber(n / 1e9, { minimumFractionDigits: 1, maximumFractionDigits: 1 })) : '';
 }
 
 function ago(iso: string): string {
