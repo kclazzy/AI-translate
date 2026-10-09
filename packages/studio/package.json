@@ -22,6 +22,7 @@
     "@fontsource/pangolin": "^5.2.0",
     "@fontsource/pt-sans-narrow": "^5.2.0",
     "@fontsource/russo-one": "^5.2.0",
+    "ag-psd": "22.0.2",
     "jspdf": "^3.0.0",
     "jszip": "^3.10.1",
     "pdfjs-dist": "^5.4.0",

@@ -23,6 +23,7 @@ import {
 } from '@ait/core';
 import { loadUserFonts, registerUserFont, saveUserFont } from '../fonts';
 import { exportTexts, importTexts } from './texts';
+import { exportPsd } from '../psd';
 import { usePlatform } from '../platform';
 import { ErrorBox, Field, Switch, toast, useAction } from '../ui';
 import { tr } from '@ait/core/i18n';
@@ -509,6 +510,16 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
         <button className="ait-btn small" onClick={() => setZoom((z) => Math.min(6, +(z * 1.25).toFixed(3)))} aria-label={tr('Увеличить')}>+</button>
         <button className="ait-btn small" onClick={() => setZoom(fitZoom())}>{tr('По ширине')}</button>
         <button className={`ait-btn small ${compare ? 'active' : ''}`} onClick={() => setCompare((c) => !c)} aria-pressed={compare}>{tr('Сравнить')}</button>
+        <button
+          className="ait-btn small"
+          title={tr('Сохранить страницу для Photoshop: оригинал, очищенная картинка и каждый текст отдельным слоем')}
+          onClick={() => {
+            if (page.height > 30000 || page.width > 30000) return toast(tr('Страница длиннее 30 000 px — Photoshop такую не откроет'));
+            void platform.saveFile(`${(title || 'page').slice(0, 60)}.psd`, exportPsd(platform.backend, { ...page, blocks }, original, cleaned, defaults), 'image/vnd.adobe.photoshop');
+          }}
+        >
+          PSD
+        </button>
         <span style={{ flex: 1 }} />
         <button className="ait-bubble-btn" style={{ fontSize: 16, minHeight: 36, padding: '4px 18px' }} onClick={() => void save.run()} disabled={save.busy || !dirty}>
           {save.busy ? tr('Сохраняю…') : dirty ? tr('Сохранить') : tr('Сохранено')}

@@ -148,6 +148,9 @@ importers:
       '@fontsource/russo-one':
         specifier: ^5.2.0
         version: 5.3.0
+      ag-psd:
+        specifier: 22.0.2
+        version: 22.0.2
       jspdf:
         specifier: ^3.0.0
         version: 3.0.4
@@ -882,6 +885,10 @@ packages:
   '@types/babel__traverse@7.28.0':
     resolution: {integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==}
 
+  '@types/base64-js@1.5.0':
+    resolution: {integrity: sha512-xDDGwUoGXW4FHFWs1pIMXZrVD4kxOAo4KmNSZlb0w5hT52Gd4eIzkjwVp/XRpSox2hfR3h7ZO6witfU7aAZ6XA==}
+    deprecated: This is a stub types definition. base64-js provides its own type definitions, so you do not need this installed.
+
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
 
@@ -970,6 +977,9 @@ packages:
   '@xmldom/xmldom@0.9.12':
     resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
     engines: {node: '>=14.6'}
+
+  ag-psd@22.0.2:
+    resolution: {integrity: sha512-sX4fGnXdzP+DxnW55vUtOMqdpVHNgEyWvAPhCWR/i8dJJ3jwsMPtZPfTIqAn4JqIKfwcaYhvn0g7rD0CeXsREQ==}
 
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
@@ -2773,6 +2783,10 @@ snapshots:
     dependencies:
       '@babel/types': 7.29.8
 
+  '@types/base64-js@1.5.0':
+    dependencies:
+      base64-js: 1.5.1
+
   '@types/chai@5.2.3':
     dependencies:
       '@types/deep-eql': 4.0.2
@@ -2888,6 +2902,12 @@ snapshots:
       tinyrainbow: 3.2.0
 
   '@xmldom/xmldom@0.9.12': {}
+
+  ag-psd@22.0.2:
+    dependencies:
+      '@types/base64-js': 1.5.0
+      base64-js: 1.5.1
+      pako: 2.2.0
 
   agent-base@7.1.4: {}
 
