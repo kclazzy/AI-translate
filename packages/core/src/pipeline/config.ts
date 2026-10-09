@@ -34,6 +34,10 @@ export interface PipelineConfig {
   bubblesOnly?: boolean;
   /** Translate only text in the chosen source language (leave text in other languages as it is). */
   onlySourceLang?: boolean;
+  /** How far past the letters to erase, px. */
+  inpaintExpand?: number;
+  /** Redo text over artwork with LaMa in the local engine (when it runs). */
+  lamaEngine?: boolean;
 }
 
 function withKeepAlive(p: ProviderConfig | undefined, s: AppSettings): ProviderConfig | null {
@@ -72,6 +76,8 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     twoStep: s.twoStepTranslation ?? !(fastLocalActive(s) || s.quality === 'fast'),
     bubblesOnly: s.bubblesOnly || undefined,
     onlySourceLang: (s.onlySourceLang && s.sourceLang !== 'auto') || undefined,
+    inpaintExpand: s.inpaintExpand,
+    lamaEngine: s.lamaEngine || undefined,
   };
 }
 
@@ -94,6 +100,8 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     two: c.twoStep ? 1 : undefined,
     bo: c.bubblesOnly ? 1 : undefined,
     osl: c.onlySourceLang ? 1 : undefined,
+    ie: c.inpaintExpand,
+    lama: c.lamaEngine ? 1 : undefined,
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);
 }

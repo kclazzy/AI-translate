@@ -4,7 +4,7 @@ import type { ImageBackend } from '../image/backend';
 import { cleanBlock, findLeftoverText, findTextRegions, luminance, parseHex, type Lettering, type LeftoverProbe } from '../image/clean';
 import { boxToPolygon, clampBox, expandBox, overlapRatio, TiledImage } from '../image/tiled';
 import { detectScript } from '../languages';
-import { assertPrivacy, isLocalProvider } from '../llm/privacy';
+import { assertPrivacy, isLocalProvider, isLocalUrl } from '../llm/privacy';
 import { createProvider } from '../llm/presets';
 import type { FetchLike, LlmProvider } from '../llm/types';
 import { mergeContext, type TranslationContext } from '../translate/context';
@@ -17,6 +17,7 @@ import { bytesToBase64, sha256Hex } from '../util/bytes';
 import { mapLimit } from '../util/queue';
 import { withRetry } from '../util/retry';
 import { pipelineHash, type PipelineConfig } from './config';
+import { EngineClient } from './engine';
 
 export interface PipelineRequest {
   bytes: Uint8Array;
@@ -107,6 +108,61 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
     // A local model that timed out will time out again: report it instead of waiting 3× longer.
     { retries: 2, signal, shouldRetry: (e) => e.retryable && !(e.code === 'TIMEOUT' && isLocalProvider(config.vision!)) },
   );
+}
+
+/**
+ * Text over artwork is smudged away with a simple fill first; when the local engine runs, LaMa
+ * redraws those areas properly (hair, backgrounds). Any failure keeps the simple result.
+ */
+export async function lamaViaEngine(original: TiledImage, cleaned: TiledImage, masks: { box: Box; mask: Uint8Array }[], engine: { url: string; token: string }, deps: StandaloneDeps, signal?: AbortSignal): Promise<number> {
+  const client = new EngineClient(engine.url, engine.token, deps.fetchImpl);
+  let done = 0;
+  for (const m of masks.slice(0, 12)) {
+    try {
+      // Context around the mask helps LaMa: a margin of half the box on every side.
+      const pad = Math.round(Math.max(24, Math.max(m.box[2], m.box[3]) * 0.5));
+      const area = clampBox([m.box[0] - pad, m.box[1] - pad, m.box[2] + pad * 2, m.box[3] + pad * 2], original.width, original.height);
+      const [ax, ay, aw, ah] = area;
+      const img = original.getRegion(ax, ay, aw, ah);
+      const c = deps.backend.createCanvas(aw, ah);
+      const ctx = c.getContext('2d');
+      const id = ctx.createImageData(aw, ah);
+      id.data.set(img.data);
+      ctx.putImageData(id, 0, 0);
+      const mc = deps.backend.createCanvas(aw, ah);
+      const mctx = mc.getContext('2d');
+      const md = mctx.createImageData(aw, ah);
+      const inMask = new Uint8Array(aw * ah);
+      for (let y = 0; y < m.box[3]; y++) {
+        for (let x = 0; x < m.box[2]; x++) {
+          if (!m.mask[y * m.box[2] + x]) continue;
+          const px = m.box[0] - ax + x;
+          const py = m.box[1] - ay + y;
+          if (px < 0 || py < 0 || px >= aw || py >= ah) continue;
+          const i = py * aw + px;
+          inMask[i] = 1;
+          md.data[i * 4] = md.data[i * 4 + 1] = md.data[i * 4 + 2] = 255;
+        }
+      }
+      for (let i = 0; i < aw * ah; i++) md.data[i * 4 + 3] = 255;
+      mctx.putImageData(md, 0, 0);
+      const out = await client.inpaint(await deps.backend.encode(c, 'image/png'), await deps.backend.encode(mc, 'image/png'), signal);
+      const dec = await deps.backend.decode(out, 'image/png');
+      const oc = deps.backend.createCanvas(aw, ah);
+      oc.getContext('2d').drawImage(dec.source, 0, 0, aw, ah);
+      dec.close?.();
+      const res = oc.getContext('2d').getImageData(0, 0, aw, ah);
+      // Only the masked pixels change; everything else stays exactly as cleaned.
+      const cur = cleaned.getRegion(ax, ay, aw, ah);
+      for (let i = 0; i < inMask.length; i++) if (inMask[i]) for (let k = 0; k < 3; k++) cur.data[i * 4 + k] = res.data[i * 4 + k];
+      cleaned.putRegion(cur, ax, ay);
+      done++;
+    } catch (e) {
+      if ((e as { code?: string }).code === 'CANCELLED') throw e;
+      break; // the engine is not there or has no LaMa: keep the simple fill
+    }
+  }
+  return done;
 }
 
 /** Does text written in this script belong to the language (kanji-only Japanese looks Chinese)? */
@@ -365,15 +421,17 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   cleaned = original.clone();
   const closedBubble = new Map<string, boolean>();
   const letterHeight = new Map<string, number>();
+  const artMasks: { box: Box; mask: Uint8Array }[] = [];
   const cleanOne = (b: TextBlock) => {
     const erase = b.translate && !(b.textType === 'SFX' && config.sfxStyle === 'original');
     if (req.generic) {
       // UI/screen text: no bubbles; paint a plate behind the text instead.
-      const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase });
+      const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, expand: config.inpaintExpand });
       b.bubble = r.bubble ? { ...r.bubble, shape: 'rect', safeArea: [...b.bbox] as Box } : null;
       return;
     }
-    const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, sfx: b.textType === 'SFX' });
+    const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, sfx: b.textType === 'SFX', expand: config.inpaintExpand });
+    if (r.artMask) artMasks.push(r.artMask);
     b.bubble = r.bubble;
     closedBubble.set(b.id, r.closed);
     if (r.lettering) letterHeight.set(b.id, r.lettering.letterHeight);
@@ -426,6 +484,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   }
   blocks = mergeSharedBubbles(blocks, closedBubble);
   separateAreas(blocks);
+  // The picture goes to the engine: only to one on this computer / network unless the cloud is allowed.
+  if (config.lamaEngine && config.engine?.url && artMasks.length && (config.privacy === 'cloud' || isLocalUrl(config.engine.url))) await lamaViaEngine(original, cleaned, artMasks, config.engine, deps, signal);
   tCleaned = performance.now();
   return finish();
 

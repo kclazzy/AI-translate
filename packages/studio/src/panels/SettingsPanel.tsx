@@ -341,6 +341,16 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               <Switch checked={!!s.autoSave} onChange={(autoSave) => update({ autoSave })} label={tr('Сохранять каждую переведённую картинку в Загрузки/AI Translate/<сайт>')} />
             </div>
             <div style={{ marginTop: 8 }}>
+              <label className="ait-field">
+                <span>{tr('Стирать оригинал с запасом: {0} px', s.inpaintExpand ?? 3)}</span>
+                <input type="range" min={0} max={12} value={s.inpaintExpand ?? 3} onChange={(e) => update({ inpaintExpand: Number(e.target.value) })} aria-label={tr('Запас вокруг букв при стирании')} />
+                <small className="ait-muted">{tr('Больше — если вокруг перевода остаются следы старых букв; меньше — если стирается лишний рисунок.')}</small>
+              </label>
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <Switch checked={!!s.lamaEngine} onChange={(lamaEngine) => update({ lamaEngine })} label={tr('Текст поверх рисунка дорисовывать нейросетью LaMa (нужен локальный движок с LaMa)')} />
+            </div>
+            <div style={{ marginTop: 8 }}>
               <Segmented label={tr('Страницы главы в редакторе')} value={s.editorPageList ?? 'bottom'} onChange={(editorPageList) => update({ editorPageList })} options={[{ value: 'bottom', label: tr('Снизу') }, { value: 'right', label: tr('Справа') }]} />
             </div>
           </Field>

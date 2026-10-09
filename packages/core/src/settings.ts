@@ -126,6 +126,10 @@ export interface AppSettings {
   presets?: ModelPreset[];
   /** Where the editor shows the other pages of a chapter. */
   editorPageList?: 'bottom' | 'right';
+  /** How far past the letters the original text is erased, px (default 3). */
+  inpaintExpand?: number;
+  /** Text over artwork: redo the background with LaMa in the local engine when it is running. */
+  lamaEngine?: boolean;
   /** models.json fetched from the repository (recommended local models, family settings). */
   modelCatalog?: import('./llm/catalog').ModelCatalog;
   modelCatalogCheckedAt?: string;

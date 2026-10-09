@@ -334,6 +334,8 @@ export interface CleanResult {
   closed: boolean;
   /** How the original lettering looks, so the translation can match it. */
   lettering?: Lettering;
+  /** Text over artwork that was smudged away (page coordinates and a mask of that box). */
+  artMask?: { box: Box; mask: Uint8Array };
 }
 
 export interface Lettering {
@@ -357,6 +359,8 @@ export interface CleanOptions {
   analyzeOnly?: boolean;
   /** Sound effect over artwork: erase only clear letter pixels, never smear a whole box. */
   sfx?: boolean;
+  /** How far past the letters to erase, px (default 3 over artwork, 2 in bubbles). */
+  expand?: number;
 }
 
 /** Colour, stroke thickness and letter height of the lettering in `mask` (before erasing). */
@@ -746,7 +750,7 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       const snap = snapToLettering(cand, img.width, search, local, img);
       tb = snap.box;
       letterMask = snap.mask;
-      mask = dilate(snap.mask, img.width, img.height, 2);
+      mask = dilate(snap.mask, img.width, img.height, Math.max(1, (opts.expand ?? 3) - 1));
     }
     const lettering = measureLettering(img, letterMask, closed ? flood!.box : search, bg);
     if (!opts.analyzeOnly) fillMask(img, mask, bg);
@@ -815,7 +819,7 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       if (small && !opts.sfx) for (let y = inner[1]; y < inner[1] + inner[3]; y++) for (let x = inner[0]; x < inner[0] + inner[2]; x++) mask[y * img.width + x] = 1;
     }
     // Outlined lettering has a halo: take a little more around the strokes.
-    mask = dilate(mask, img.width, img.height, 3);
+    mask = dilate(mask, img.width, img.height, opts.expand ?? 3);
     let method: CleanResult['method'] = opts.analyzeOnly ? 'none' : 'diffuse';
     const textArea = clampBox(expandBox(tb ? unionBox(tb, local) : local, 2), img.width, img.height);
     if (!opts.analyzeOnly) {
@@ -836,7 +840,19 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       }
     }
     const textBox: Box | null = tb ? [tb[0] + region[0], tb[1] + region[1], tb[2], tb[3]] : null;
+    // Where letters over artwork were smudged away: a better inpainter (LaMa) can redo this part.
+    let artMask: CleanResult['artMask'];
+    if (method === 'diffuse' && countMask(mask)) {
+      let x0 = img.width, y0 = img.height, x1 = -1, y1 = -1;
+      for (let y = 0; y < img.height; y++) for (let x = 0; x < img.width; x++) if (mask[y * img.width + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      const w = x1 - x0 + 1;
+      const h = y1 - y0 + 1;
+      const m = new Uint8Array(w * h);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) m[y * w + x] = mask[(y + y0) * img.width + x + x0];
+      artMask = { box: [x0 + region[0], y0 + region[1], w, h], mask: m };
+    }
     result = {
+      artMask,
       closed: false,
       lettering,
       bubble: method === 'plate' ? { box: unionBox(textBox, bbox), fill: toHex(bg), safeArea: unionBox(textBox, bbox), shape: 'rect' } : null,
