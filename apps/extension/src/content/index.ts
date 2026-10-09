@@ -397,6 +397,16 @@ function main() {
           clearPage();
           break;
         }
+        if (msg.command === 'refresh-look') {
+          // Text size changed: draw the translated pictures again (from the cache, no model).
+          const done = [...items.values()].filter((it) => it.status === 'done' && !it.docRect);
+          for (const it of done) {
+            it.overlay.destroy();
+            items.delete(it.id);
+          }
+          for (const it of done) void translate(it.cand, { priority: 10 });
+          break;
+        }
         if (!enabled && msg.command !== 'toggle-original' && msg.command !== 'set-auto') {
           toastOnce(tr('AI Translate выключен — включите его в окне расширения'));
           break;

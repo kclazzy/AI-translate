@@ -32,6 +32,14 @@ export interface StoredResult {
   strip?: { parent: string; index: number; y: number; h: number };
   /** A glued strip: the keys of the pictures cut back out of it. */
   parts?: string[];
+  /** Text size scale the picture was drawn with (settings → fonts.scale). */
+  fontScale?: number;
+}
+
+/** Fonts that change the cached result: the text size scale only re-draws, so it is left out. */
+function lookOf(fonts: AppSettings['fonts']): Omit<AppSettings['fonts'], 'scale'> {
+  const { scale: _scale, ...rest } = fonts;
+  return rest;
 }
 
 export interface HistoryEntry {
@@ -121,10 +129,16 @@ export class TranslateService {
         if (p) config[k] = { ...p, keepAliveMin: Math.max(p.keepAliveMin ?? 0, opts.keepAliveMin) };
       }
     }
-    const key = await this.cacheKey(bytes, config, { generic: opts.generic, fonts: settings.fonts });
+    const key = await this.cacheKey(bytes, config, { generic: opts.generic, fonts: lookOf(settings.fonts) });
     if (!opts.force) {
       const hit = await this.db.get<StoredResult>('results', key);
       if (hit) {
+        // Only the text size changed in the settings: draw the text again, no model needed.
+        if ((hit.fontScale ?? 1) !== (settings.fonts.scale ?? 1) && !hit.strip) {
+          const again = await this.saveEdited(key, hit.page);
+          opts.onStage?.({ stage: 'done', progress: 1, message: 'cache' });
+          return { result: again, cached: true };
+        }
         hit.lastHitAt = new Date().toISOString();
         void this.db.put('results', key, hit);
         opts.onStage?.({ stage: 'done', progress: 1, message: 'cache' });
@@ -150,6 +164,7 @@ export class TranslateService {
         seriesKey,
         createdAt: now,
         lastHitAt: now,
+        fontScale: settings.fonts.scale,
       };
       await this.db.put('results', key, result);
       if (out.context && seriesKey) await this.db.put('contexts', seriesKey, out.context);
@@ -176,7 +191,7 @@ export class TranslateService {
     const seriesKey = opts.seriesKey ?? seriesKeyFromUrl(opts.sourceUrl);
     const { settings, config } = await this.config(seriesKey);
     // Pictures translated before (in any grouping) are taken from the cache.
-    const partKeys = await Promise.all(parts.map((p) => this.cacheKey(p.bytes, config, { generic: opts.generic, fonts: settings.fonts })));
+    const partKeys = await Promise.all(parts.map((p) => this.cacheKey(p.bytes, config, { generic: opts.generic, fonts: lookOf(settings.fonts) })));
     const known: (StoredResult | undefined)[] = await Promise.all(
       partKeys.map(async (k) => {
         if (opts.force) return undefined;
@@ -184,6 +199,18 @@ export class TranslateService {
         return ref ? this.getResult(ref) : undefined;
       }),
     );
+    // Text size changed since: draw the strips again (each parent once), then take the pieces.
+    const redrawn = new Set<string>();
+    for (const [i, r] of known.entries()) {
+      if (!r?.strip || (r.fontScale ?? 1) === (settings.fonts.scale ?? 1)) continue;
+      const parent = r.strip.parent;
+      if (!redrawn.has(parent)) {
+        const pr = await this.getResult(parent);
+        if (pr) await this.saveEdited(parent, pr.page);
+        redrawn.add(parent);
+      }
+      known[i] = await this.getResult(r.key);
+    }
     const todo = parts.map((_, i) => i).filter((i) => !known[i]);
     for (const [i, r] of known.entries()) if (r) opts.onPart(i, r, true);
     if (!todo.length) return;
@@ -271,7 +298,7 @@ export class TranslateService {
     if (!image) image = await tilesToImage(this.backend, stored.page.width, stored.page.height, stored.cleaned);
     const rendered = await renderOutput(this.backend, { page, cleaned: image }, styleDefaultsFor({ targetLang: page.targetLang, sfxStyle: settings.sfxStyle }, settings.fonts));
     const cleanedTiles = cleaned ? await Promise.all(cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') }))) : stored.cleaned;
-    const next: StoredResult = { ...stored, page: rendered.page, rendered: rendered.tiles, cleaned: cleanedTiles, lastHitAt: new Date().toISOString() };
+    const next: StoredResult = { ...stored, page: rendered.page, rendered: rendered.tiles, cleaned: cleanedTiles, lastHitAt: new Date().toISOString(), fontScale: settings.fonts.scale };
     await this.db.put('results', key, next);
     // A glued strip: cut the edited result back into its pictures too.
     if (stored.parts?.length) {

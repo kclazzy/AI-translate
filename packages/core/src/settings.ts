@@ -88,7 +88,8 @@ export interface AppSettings {
   minImageSize: number;
   saveHistory: boolean;
   debug: boolean;
-  fonts: { dialogue: string; narration: string; sfx: string };
+  /** Fonts by text type; `scale` makes all automatic sizes bigger or smaller (1 = as fits). */
+  fonts: { dialogue: string; narration: string; sfx: string; scale?: number };
   cacheDays: number;
   /** First-run setup finished (mobile app shows a setup screen until then). */
   onboarded?: boolean;

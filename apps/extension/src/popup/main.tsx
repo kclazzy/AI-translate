@@ -109,9 +109,9 @@ function Popup() {
     setS(next);
     void saveSettings(next);
   };
-  const command = async (command: 'translate-page' | 'select-area' | 'toggle-original' | 'download-chapter' | 'clear-page') => {
+  const command = async (command: 'translate-page' | 'select-area' | 'toggle-original' | 'download-chapter' | 'clear-page' | 'refresh-look') => {
     if (!tab?.id) return;
-    if (command !== 'toggle-original' && command !== 'clear-page') {
+    if (command !== 'toggle-original' && command !== 'clear-page' && command !== 'refresh-look') {
       // Before a local translation: is everything installed and running? If not, open the helper,
       // which offers the downloads and continues this translation once ready.
       setPreflight(true);
@@ -124,7 +124,7 @@ function Popup() {
       }
     }
     void chrome.runtime.sendMessage({ type: 'popup-command', command, tabId: tab.id, format: command === 'download-chapter' ? fmt : undefined });
-    if (command !== 'toggle-original' && command !== 'clear-page') window.close();
+    if (command !== 'toggle-original' && command !== 'clear-page' && command !== 'refresh-look') window.close();
   };
   const open = (path: string) => void chrome.tabs.create({ url: chrome.runtime.getURL(path) });
   const missing = s.pipeline === 'standalone' && !vision?.vision;
@@ -256,6 +256,28 @@ function Popup() {
         <span>{tr('Автоперевод на')}{' '}{host || tr('этом сайте')}</span>
       </label>
 
+      <div className="pp-font" data-testid="font-scale">
+        <span>{tr('Шрифт перевода')}</span>
+        {(() => {
+          const scale = s.fonts.scale ?? 1;
+          const set = async (v: number) => {
+            const next = Math.round(Math.max(0.6, Math.min(1.5, v)) * 100) / 100;
+            const ns = { ...s, fonts: { ...s.fonts, scale: next } };
+            setS(ns);
+            await saveSettings(ns);
+            // Pictures already translated on this page are drawn again at the new size.
+            if (canRun) void command('refresh-look');
+          };
+          return (
+            <>
+              <button className="ait-btn small" aria-label={tr('Шрифт меньше')} title={tr('Шрифт меньше')} disabled={scale <= 0.6} onClick={() => void set(scale - 0.1)}>A−</button>
+              <b style={{ minWidth: 44, textAlign: 'center' }}>{Math.round(scale * 100)}%</b>
+              <button className="ait-btn small" aria-label={tr('Шрифт больше')} title={tr('Шрифт больше')} disabled={scale >= 1.5} onClick={() => void set(scale + 0.1)}>A+</button>
+              {scale !== 1 ? <button className="pp-link" onClick={() => void set(1)}>{tr('сброс')}</button> : null}
+            </>
+          );
+        })()}
+      </div>
       <div className="pp-filters" data-testid="filters">
         <label className="ait-check" title={tr('Звуки (SFX) и надписи на фоне остаются как в оригинале')}>
           <input type="checkbox" data-testid="bubbles-only" checked={!!s.bubblesOnly} onChange={(e) => update({ bubblesOnly: e.target.checked })} />

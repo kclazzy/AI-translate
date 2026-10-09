@@ -55,7 +55,7 @@ export type BackgroundToContent =
   | { type: 'job-stage'; id: string; event: StageEvent }
   | { type: 'job-done'; id: string; result: RenderedTiles }
   | { type: 'job-error'; id: string; error: SerializedError }
-  | { type: 'command'; command: 'translate-page' | 'select-area' | 'toggle-original' | 'set-auto' | 'download-chapter' | 'clear-page'; value?: boolean | ChapterFormat }
+  | { type: 'command'; command: 'translate-page' | 'select-area' | 'toggle-original' | 'set-auto' | 'download-chapter' | 'clear-page' | 'refresh-look'; value?: boolean | ChapterFormat }
   | { type: 'translate-src'; src: string }
   | { type: 'result-changed'; key: string }
   | { type: 'get-langs' }
@@ -101,7 +101,7 @@ export type FromOffscreen =
 
 // UI pages → background
 export type UiToBackground =
-  | { type: 'popup-command'; command: 'translate-page' | 'select-area' | 'toggle-original' | 'download-chapter' | 'clear-page'; tabId: number; format?: ChapterFormat }
+  | { type: 'popup-command'; command: 'translate-page' | 'select-area' | 'toggle-original' | 'download-chapter' | 'clear-page' | 'refresh-look'; tabId: number; format?: ChapterFormat }
   | { type: 'set-auto'; host: string; enabled: boolean; tabId: number }
   | { type: 'settings-changed' }
   | { type: 'cancel-all'; tabId?: number }

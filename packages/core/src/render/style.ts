@@ -17,6 +17,8 @@ export interface StyleDefaults {
   /** Target language; CJK targets may typeset vertically. */
   targetLang: string;
   verticalForCjk: boolean;
+  /** Scale of the automatic text size (1 = fit the bubble as usual). */
+  fontScale?: number;
 }
 
 export const DEFAULT_STYLE_DEFAULTS: StyleDefaults = {

@@ -342,6 +342,13 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               <Switch checked={!!s.autoSave} onChange={(autoSave) => update({ autoSave })} label={tr('Сохранять каждую переведённую картинку в Загрузки/AI Translate/<сайт>')} />
             </div>
             <div style={{ marginTop: 8 }}>
+              <label className="ait-field" data-testid="font-scale">
+                <span>{tr('Размер текста перевода: {0}%', Math.round((s.fonts.scale ?? 1) * 100))}</span>
+                <input type="range" min={0.6} max={1.5} step={0.05} value={s.fonts.scale ?? 1} onChange={(e) => update({ fonts: { ...s.fonts, scale: Number(e.target.value) } })} aria-label={tr('Размер текста перевода')} />
+                <small className="ait-muted">{tr('Меньше 100% — текст мельче, чем помещается в бабл; больше — крупнее, пока помещается. Размер, заданный в редакторе вручную, не меняется.')}</small>
+              </label>
+            </div>
+            <div style={{ marginTop: 8 }}>
               <label className="ait-field">
                 <span>{tr('Стирать оригинал с запасом: {0} px', s.inpaintExpand ?? 3)}</span>
                 <input type="range" min={0} max={12} value={s.inpaintExpand ?? 3} onChange={(e) => update({ inpaintExpand: Number(e.target.value) })} aria-label={tr('Запас вокруг букв при стирании')} />

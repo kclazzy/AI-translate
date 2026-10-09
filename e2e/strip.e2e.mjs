@@ -240,6 +240,25 @@ try {
     shown = await overlays();
   }
   check('a page opened again shows its translations from the cache by itself', shown === 2 && calls.length === before, `overlays=${shown} new model calls=${calls.length - before}`);
+  // «Шрифт перевода»: a new size redraws the pictures on the page from the cache.
+  const callsBefore = calls.length;
+  await studio.evaluate(async () => {
+    const db = await new Promise((res) => { const r = indexedDB.open('ai-translate', 1); r.onsuccess = () => res(r.result); });
+    const tx = db.transaction('kv', 'readwrite');
+    const store = tx.objectStore('kv');
+    const st = await new Promise((res) => { const g = store.get('settings'); g.onsuccess = () => res(g.result); });
+    st.fonts = { ...(st.fonts ?? {}), scale: 0.7 };
+    store.put(st, 'settings');
+    await new Promise((r) => (tx.oncomplete = r));
+    const [t] = await chrome.tabs.query({ url: 'http://127.0.0.1:18141/' });
+    await chrome.runtime.sendMessage({ type: 'popup-command', command: 'refresh-look', tabId: t.id });
+  });
+  let again = 0;
+  for (let i = 0; i < 30 && again < 2; i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    again = await overlays();
+  }
+  check('a new text size redraws the translations without asking the model', again === 2 && calls.length === callsBefore, `overlays=${again} new model calls=${calls.length - callsBefore}`);
   await studio.evaluate(async () => {
     const [t] = await chrome.tabs.query({ url: 'http://127.0.0.1:18141/' });
     await chrome.runtime.sendMessage({ type: 'popup-command', command: 'clear-page', tabId: t.id });

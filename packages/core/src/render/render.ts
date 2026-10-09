@@ -102,8 +102,10 @@ function layoutBlockIn(measurer: Measurer, block: TextBlock, d: StyleDefaults, b
   measurer = spaced(measurer, style.letterSpacing);
   const rows = !block.textBox && block.bubble?.rows && !style.vertical ? block.bubble.rows : undefined;
   const pad = Math.max(3, (block.bubble?.box[2] ?? 0) * 0.06);
-  const cap = block.fontSizeEstimate > 0 ? Math.max(14, block.fontSizeEstimate * 1.3) : undefined;
-  return layoutText(measurer, {
+  // «Размер шрифта перевода» in the settings: all automatic sizes scaled (a size set by hand stays).
+  const scale = Math.max(0.5, Math.min(2, d.fontScale ?? 1));
+  const cap = block.fontSizeEstimate > 0 ? Math.max(14, block.fontSizeEstimate * 1.3) * Math.max(1, scale) : undefined;
+  const input = {
     text: displayText(block, d),
     minSize,
     box,
@@ -118,7 +120,11 @@ function layoutBlockIn(measurer: Measurer, block: TextBlock, d: StyleDefaults, b
     alignment: style.alignment,
     lang: d.targetLang,
     spans: rows ? spansFromRows(rows, box, pad) : undefined,
-  });
+  };
+  const l = layoutText(measurer, input);
+  // Smaller than fits: the same layout at a fixed, scaled-down size.
+  if (scale < 1 && style.fontSize == null && !l.overflow) return layoutText(measurer, { ...input, fontSize: Math.max(6, Math.round(l.fontSize * scale)) });
+  return l;
 }
 
 /** Draw the translated text of one block. `offsetY` shifts page coordinates into a tile. */

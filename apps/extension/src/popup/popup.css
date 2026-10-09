@@ -16,3 +16,6 @@ body { width: 340px; background: var(--sheet); }
 .ait-check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 .ait-check input { margin: 0; accent-color: var(--magenta, #c8205f); }
 .ait-check input:disabled + span { opacity: 0.55; }
+.pp-font { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.pp-font > span { flex: 1; }
+.pp-font .ait-btn.small { min-width: 38px; }

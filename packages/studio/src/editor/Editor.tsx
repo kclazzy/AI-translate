@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import {
   cleanBlock,
   clampBox,
+  ctxMeasurer,
+  layoutBlock,
   paintRegion,
   parseHex,
   recognizeRegion,
@@ -163,6 +165,13 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   };
 
   const sel = blocks.find((b) => b.id === selected) ?? null;
+  /** The size the selected text gets automatically (shown as the hint, the start for A−/A+). */
+  const autoSize = useMemo(() => {
+    if (!sel) return 0;
+    const m = ctxMeasurer(platform.backend.createCanvas(8, 8).getContext('2d'));
+    const b = { ...sel, style: { ...(sel.style ?? {}), fontSize: null } };
+    return Math.round(layoutBlock(m, b, defaults, { width: page.width, height: page.height }).fontSize);
+  }, [sel, defaults, platform.backend, page.width, page.height]);
   const updateBlock = (id: string, patch: Partial<TextBlock>) => commitBlocks(blocks.map((b) => (b.id === id ? { ...b, ...patch, edited: true } : b)));
   /** The selected block and the others picked with Ctrl/Shift+click. */
   const targets = selected ? new Set([selected, ...multi]) : new Set(multi);
@@ -673,7 +682,14 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                   </select>
                 </Field>
                 <Field label={tr('Кегль')}>
-                  <input className="ait-input" type="number" min={6} max={200} placeholder={tr('авто')} value={sel.style?.fontSize ?? ''} onChange={(e) => updateStyle(sel.id, { fontSize: e.target.value ? Number(e.target.value) : null })} />
+                  <div style={{ display: 'flex', gap: 4, alignItems: 'center' }} data-testid="font-size">
+                    <button className="ait-btn small" aria-label={tr('Шрифт меньше')} title={tr('Шрифт меньше')} onClick={() => updateStyle(sel.id, { fontSize: Math.max(6, (sel.style?.fontSize ?? autoSize) - 2) })}>A−</button>
+                    <input className="ait-input" style={{ minWidth: 0 }} type="number" min={6} max={200} placeholder={String(autoSize)} value={sel.style?.fontSize ?? ''} onChange={(e) => updateStyle(sel.id, { fontSize: e.target.value ? Number(e.target.value) : null })} aria-label={tr('Кегль')} />
+                    <button className="ait-btn small" aria-label={tr('Шрифт больше')} title={tr('Шрифт больше')} onClick={() => updateStyle(sel.id, { fontSize: Math.min(200, (sel.style?.fontSize ?? autoSize) + 2) })}>A+</button>
+                  </div>
+                  {sel.style?.fontSize != null ? (
+                    <button className="pp-link" style={{ fontSize: 12 }} onClick={() => updateStyle(sel.id, { fontSize: null })}>{tr('авто ({0})', autoSize)}</button>
+                  ) : null}
                 </Field>
                 <div style={{ gridColumn: '1 / -1' }}>
                   <Field label={tr('Шрифт')}>

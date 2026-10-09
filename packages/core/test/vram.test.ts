@@ -81,3 +81,31 @@ describe('filters chosen by the user', () => {
     expect(await run({ onlySourceLang: true })).toEqual([true, false]); // BOOM is not Japanese
   });
 });
+
+describe('text size scale', () => {
+  it('a new size redraws the cached page without asking the model again', async () => {
+    const { bytes, bubbles } = await makeMangaPage();
+    const mock = mockOpenAi(() => JSON.stringify({ blocks: bubbles.map((b) => ({ box: toNorm(b.textBox, 800, 1100), text: b.text, translation: 'ПОДОЖДИ МЕНЯ', type: 'DIALOGUE', vertical: false })), entities: [], summary: '' }));
+    const settings = { ...defaultSettings(), providers: [{ ...configFromPreset('lmstudio', 'vlm'), id: 'v', vision: true }], visionProviderId: 'v', twoStepTranslation: false, qaMode: 'off' } as any;
+    const svc = new TranslateService(memoryDb(), { get: async () => undefined } as any, napiBackend, async () => settings, mock.fetchImpl);
+    const first = await svc.translate(bytes, 'image/png', { generic: true });
+    settings.fonts = { ...settings.fonts, scale: 0.7 };
+    const second = await svc.translate(bytes, 'image/png', { generic: true });
+    expect(mock.calls.length).toBe(1);
+    expect(second.cached).toBe(true);
+    expect(second.result.key).toBe(first.result.key);
+    expect(second.result.fontScale).toBe(0.7);
+    expect(second.result.rendered[0].bytes).not.toEqual(first.result.rendered[0].bytes);
+  });
+
+  it('scales the automatic size, a size set by hand stays', async () => {
+    const { ctxMeasurer, layoutBlock, DEFAULT_STYLE_DEFAULTS } = await import('../src');
+    const { createCanvas } = await import('@napi-rs/canvas');
+    const m = ctxMeasurer(createCanvas(8, 8).getContext('2d') as any);
+    const b: any = { id: 'b', textType: 'DIALOGUE', originalText: 'x', translatedText: 'Привет, как дела?', confidence: 1, language: 'en', bbox: [0, 0, 300, 200], polygon: [], orientation: 0, writingDirection: 'ltr', fontSizeEstimate: 30, bubble: null, translate: true, textBox: [0, 0, 300, 200] };
+    const base = layoutBlock(m, b, DEFAULT_STYLE_DEFAULTS).fontSize;
+    expect(layoutBlock(m, b, { ...DEFAULT_STYLE_DEFAULTS, fontScale: 0.7 }).fontSize).toBeLessThan(base * 0.75);
+    expect(layoutBlock(m, b, { ...DEFAULT_STYLE_DEFAULTS, fontScale: 1.4 }).fontSize).toBeGreaterThan(base);
+    expect(layoutBlock(m, { ...b, style: { fontSize: 22 } }, { ...DEFAULT_STYLE_DEFAULTS, fontScale: 0.7 }).fontSize).toBe(22);
+  });
+});
