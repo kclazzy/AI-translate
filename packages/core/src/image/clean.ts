@@ -392,6 +392,32 @@ export interface Lettering {
   outline?: string;
   /** How the lines are aligned (needs at least two lines). */
   align?: 'left' | 'center' | 'right';
+  /** The letters lean to the right. */
+  italic?: boolean;
+}
+
+/** Lean of the lettering (x per y, right = positive): the shear giving the sharpest column profile. */
+export function slantOf(mask: Uint8Array, width: number, [x0, y0, w, h]: Box): number {
+  const pts: [number, number][] = [];
+  for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) if (mask[y * width + x]) pts.push([x - x0, y - y0]);
+  if (pts.length < 40) return 0;
+  let best = 0;
+  let bestScore = -1;
+  for (let k = -8; k <= 8; k++) {
+    const s = k * 0.05;
+    const cols = new Map<number, number>();
+    for (const [x, y] of pts) {
+      const c = Math.round(x + s * y);
+      cols.set(c, (cols.get(c) ?? 0) + 1);
+    }
+    let score = 0;
+    for (const n of cols.values()) score += n * n;
+    if (score > bestScore * 1.02 || (Math.abs(score - bestScore) <= bestScore * 0.02 && Math.abs(s) < Math.abs(best))) {
+      if (score > bestScore) bestScore = score;
+      best = s;
+    }
+  }
+  return best;
 }
 
 export interface CleanOptions {
@@ -519,6 +545,10 @@ export function measureLettering(img: PixelData, mask: Uint8Array, rect: Box, bg
       else out.align = 'center';
     }
   }
+  // Italic: the letters lean. Shearing the lettering back by its slant makes the vertical strokes
+  // line up into sharp columns; the shear that gives the sharpest columns is the slant.
+  const slope = slantOf(mask, img.width, [x0, y0, w, h]);
+  if (slope >= 0.12 && letterHeight >= 8) out.italic = true;
   return out;
 }
 
@@ -847,7 +877,20 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
         if ((l > 232 && bgLum < 200) || (l < 28 && bgLum > 60) || colorDist(img.data, p * 4, bg) > 120) cand[p] = 1;
       }
     }
-    const snap = snapToLettering(cand, img.width, search, local, img);
+    let snap = snapToLettering(cand, img.width, search, local, img);
+    if (!snap.box) {
+      // Colourful art (every stripe "far" from the average colour) hides the letters in one big
+      // blob: look again for the extreme pixels only — white or black lettering and its outline.
+      const extreme = new Uint8Array(img.width * img.height);
+      for (let y = search[1]; y < search[1] + search[3]; y++) {
+        for (let x = search[0]; x < search[0] + search[2]; x++) {
+          const p = y * img.width + x;
+          const l = luminance(img.data[p * 4], img.data[p * 4 + 1], img.data[p * 4 + 2]);
+          if (l > 232 || l < 28) extreme[p] = 1;
+        }
+      }
+      snap = snapToLettering(extreme, img.width, search, local, img);
+    }
     let mask = snap.mask;
     const tb = snap.box;
     const inner = clampBox(expandBox(local, 2), img.width, img.height);

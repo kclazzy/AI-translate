@@ -70,3 +70,26 @@ describe('erasing text over artwork', () => {
     expect(calls.some((u) => u.includes('/v1/inpaint'))).toBe(false);
   });
 });
+
+describe('sound effects over colourful art', () => {
+  it('white letters with a black outline on a rainbow are erased', async () => {
+    const c = createCanvas(600, 400);
+    const ctx = c.getContext('2d') as any;
+    for (let x = 0; x < 600; x += 10) {
+      ctx.fillStyle = `hsl(${x % 360}, 60%, 50%)`;
+      ctx.fillRect(x, 0, 10, 400);
+    }
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 4;
+    ctx.font = 'bold 48px TestSans';
+    ctx.strokeText('DOOM', 200, 220);
+    ctx.fillText('DOOM', 200, 220);
+    const img = TiledImage.fromDecoded(napiBackend, { width: 600, height: 400, source: c } as any);
+    cleanBlock(img, [195, 175, 150, 60], { sfx: true });
+    const d = img.getRegion(195, 175, 150, 60).data;
+    let white = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] > 240 && d[i + 1] > 240 && d[i + 2] > 240) white++;
+    expect(white).toBeLessThan(40);
+  });
+});

@@ -207,6 +207,8 @@ export function matchLettering(b: TextBlock, l: Lettering | undefined): Partial<
       style.strokeColor = l.outline;
       style.strokeWidth = Math.max(2, Math.min(8, Math.round(l.stroke * 0.5)));
     }
+    // Slanted lettering (thoughts, whispers, foreign speech) stays slanted.
+    if (l.italic) style.italic = true;
     // Captions written flush left (or right) stay that way.
     if (l.align && l.align !== 'center') style.alignment = l.align;
   }

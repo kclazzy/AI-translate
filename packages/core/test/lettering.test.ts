@@ -74,3 +74,27 @@ describe('plain lettering', () => {
     expect(r.lettering?.outline).toBeUndefined();
   });
 });
+
+describe('slanted lettering', () => {
+  it('italic letters are told from upright ones', async () => {
+    const { createCanvas } = await import('@napi-rs/canvas');
+    const { measureLettering } = await import('../src/image/clean');
+    const probe = (font: string, skew = 0) => {
+      const c = createCanvas(420, 160);
+      const ctx = c.getContext('2d') as any;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, 420, 160);
+      ctx.fillStyle = '#000';
+      ctx.font = font;
+      if (skew) ctx.setTransform(1, 0, -skew, 1, skew * 100, 0);
+      ctx.fillText('I KNEW IT', 20, 60);
+      ctx.fillText('ALL ALONG', 20, 110);
+      const d = ctx.getImageData(0, 0, 420, 160);
+      const mask = new Uint8Array(420 * 160);
+      for (let i = 0; i < mask.length; i++) mask[i] = d.data[i * 4] < 100 ? 1 : 0;
+      return measureLettering(d, mask, [0, 0, 420, 160], [255, 255, 255]);
+    };
+    expect(probe('bold 36px TestSans')?.italic).toBeFalsy();
+    expect(probe('bold 36px TestSans', 0.25)?.italic).toBe(true);
+  });
+});
