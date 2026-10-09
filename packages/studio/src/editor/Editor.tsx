@@ -88,6 +88,9 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   const origCanvases = useRef<(HTMLCanvasElement | null)[]>([]);
   const innerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  /** Where the brush outline is drawn (inside the editor frame), or nowhere. */
+  const [cursorAt, setCursorAt] = useState<[number, number] | null>(null);
   const fitZoom = useCallback(() => {
     const w = stageRef.current?.clientWidth ?? 900;
     return Math.max(0.1, Math.min(1, (w - 56) / page.width));
@@ -485,41 +488,19 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
 
   const usage = page.usage.reduce((a, u) => ({ input: a.input + u.inputTokens, output: a.output + u.outputTokens, cost: a.cost + u.costUsd }), { input: 0, output: 0, cost: 0 });
   const st = sel ? resolveStyle(sel, defaults) : null;
-  const toolBtn = (t: Tool, label: string, key?: string) => (
-    <button className={`ait-btn small ${tool === t ? 'active' : ''}`} onClick={() => setTool(t)} title={key ? `${label} (${key})` : label} aria-pressed={tool === t}>
-      {label}
+  const toolBtn = (t: Tool, icon: string, label: string, key?: string) => (
+    <button className={`ait-pal-btn ${tool === t ? 'active' : ''}`} onClick={() => setTool(t)} title={key ? `${label} (${key})` : label} aria-label={label} aria-pressed={tool === t}>
+      {icon}
     </button>
   );
+  const painting = tool === 'brush' || tool === 'eraser' || tool === 'inpaint';
 
   return (
     <div>
-      <div className="ait-toolbar">
+      <div className="ait-toolbar ait-toolbar-sticky">
         {onClose ? <button className="ait-btn small ghost" onClick={() => (!dirty || confirm(tr('Есть несохранённые правки. Закрыть без сохранения?'))) && onClose()}>{tr('← Назад')}</button> : null}
         {title ? <strong style={{ marginRight: 8 }}>{title}</strong> : null}
         {toolbarExtra}
-        {toolBtn('select', tr('Выбор'), 'V')}
-        {toolBtn('brush', tr('Кисть'), 'B')}
-        {toolBtn('eraser', tr('Ластик'), 'E')}
-        {toolBtn('inpaint', tr('Заливка фона'))}
-        {toolBtn('ocr', tr('Ручной OCR'))}
-        {tool !== 'select' && tool !== 'ocr' ? (
-          <>
-            <label className="ait-muted" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-              {brush}px
-              <input type="range" min={1} max={100} value={brush} onChange={(e) => setBrush(Number(e.target.value))} aria-label={tr('Размер кисти')} />
-            </label>
-            {tool === 'brush' ? <input type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} aria-label={tr('Цвет кисти')} /> : null}
-          </>
-        ) : null}
-        <span className="sep" />
-        <button className="ait-btn small ait-icon-btn" onClick={undo} disabled={!undoStack.current.length} title={`${tr('Отменить')} (Ctrl+Z)`} aria-label={tr('Отменить')}>↶</button>
-        <button className="ait-btn small ait-icon-btn" onClick={redo} disabled={!redoStack.current.length} title={`${tr('Повторить')} (Ctrl+Shift+Z)`} aria-label={tr('Повторить')}>↷</button>
-        <span className="sep" />
-        <button className="ait-btn small" onClick={() => setZoom((z) => Math.max(0.1, +(z / 1.25).toFixed(3)))} aria-label={tr('Уменьшить')}>−</button>
-        <span className="ait-muted" style={{ fontSize: 13, minWidth: 44, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
-        <button className="ait-btn small" onClick={() => setZoom((z) => Math.min(6, +(z * 1.25).toFixed(3)))} aria-label={tr('Увеличить')}>+</button>
-        <button className="ait-btn small" onClick={() => setZoom(fitZoom())}>{tr('По ширине')}</button>
-        <button className={`ait-btn small ${compare ? 'active' : ''}`} onClick={() => setCompare((c) => !c)} aria-pressed={compare}>{tr('Сравнить')}</button>
         <button
           className="ait-btn small"
           title={tr('Сохранить страницу для Photoshop: оригинал, очищенная картинка и каждый текст отдельным слоем')}
@@ -537,7 +518,51 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       </div>
       <ErrorBox error={save.error || ocr.error} />
       <div className="ait-editor">
-        <div ref={stageRef} className={`ait-stage ${tool === 'select' ? '' : 'drawing'}`} onPointerDown={onStagePointerDown} style={{ cursor: tool === 'select' ? 'default' : 'crosshair' }}>
+        <div className="ait-stage-wrap" ref={wrapRef}>
+        {/* The tools live on the page itself, always in reach while scrolling. */}
+        <div className="ait-palette" role="toolbar" aria-label={tr('Инструменты')} data-testid="palette">
+          {toolBtn('select', '↖', tr('Выбор'), 'V')}
+          {toolBtn('brush', '🖌', tr('Кисть'), 'B')}
+          {toolBtn('eraser', '⌫', tr('Ластик'), 'E')}
+          {toolBtn('inpaint', '◍', tr('Заливка фона'))}
+          {toolBtn('ocr', 'OCR', tr('Ручной OCR'))}
+          {painting ? (
+            <div className="ait-pal-group" aria-label={tr('Размер кисти')}>
+              <button className="ait-pal-btn" onClick={() => setBrush((b) => Math.min(100, b + 4))} title={tr('Больше ( ] )')} aria-label={tr('Кисть больше')}>+</button>
+              <input className="ait-pal-range" type="range" min={1} max={100} value={brush} onChange={(e) => setBrush(Number(e.target.value))} aria-label={tr('Размер кисти')} />
+              <span className="ait-pal-val">{brush}</span>
+              <button className="ait-pal-btn" onClick={() => setBrush((b) => Math.max(1, b - 4))} title={tr('Меньше ( [ )')} aria-label={tr('Кисть меньше')}>−</button>
+              {tool === 'brush' ? <input className="ait-pal-color" type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} aria-label={tr('Цвет кисти')} title={tr('Цвет кисти')} /> : null}
+            </div>
+          ) : null}
+          <span className="ait-pal-sep" />
+          <button className="ait-pal-btn" onClick={undo} disabled={!undoStack.current.length} title={`${tr('Отменить')} (Ctrl+Z)`} aria-label={tr('Отменить')}>↶</button>
+          <button className="ait-pal-btn" onClick={redo} disabled={!redoStack.current.length} title={`${tr('Повторить')} (Ctrl+Shift+Z)`} aria-label={tr('Повторить')}>↷</button>
+          <span className="ait-pal-sep" />
+          <button className="ait-pal-btn" onClick={() => setZoom((z) => Math.min(6, +(z * 1.25).toFixed(3)))} title={tr('Увеличить (Ctrl+колесо)')} aria-label={tr('Увеличить')}>+</button>
+          <span className="ait-pal-val">{Math.round(zoom * 100)}%</span>
+          <button className="ait-pal-btn" onClick={() => setZoom((z) => Math.max(0.1, +(z / 1.25).toFixed(3)))} title={tr('Уменьшить')} aria-label={tr('Уменьшить')}>−</button>
+          <button className="ait-pal-btn" onClick={() => setZoom(fitZoom())} title={tr('По ширине')} aria-label={tr('По ширине')}>↔</button>
+          <button className={`ait-pal-btn ${compare ? 'active' : ''}`} onClick={() => setCompare((c) => !c)} aria-pressed={compare} title={tr('Сравнить с оригиналом')} aria-label={tr('Сравнить')}>◐</button>
+        </div>
+        {painting && cursorAt ? (
+          <div
+            className={`ait-brush-cursor ${tool}`}
+            aria-hidden
+            style={{ left: cursorAt[0], top: cursorAt[1], width: Math.max(4, brush * zoom), height: Math.max(4, brush * zoom), borderColor: tool === 'brush' ? brushColor : undefined }}
+          />
+        ) : null}
+        <div
+          ref={stageRef}
+          className={`ait-stage ${tool === 'select' ? '' : 'drawing'}`}
+          onPointerDown={onStagePointerDown}
+          onPointerMove={(e) => {
+            const r = wrapRef.current?.getBoundingClientRect();
+            if (r && painting) setCursorAt([e.clientX - r.left, e.clientY - r.top]);
+          }}
+          onPointerLeave={() => setCursorAt(null)}
+          style={{ cursor: tool === 'select' ? 'default' : painting ? 'none' : 'crosshair' }}
+        >
           <div ref={innerRef} className="ait-stage-inner" style={{ width: page.width * zoom, height: page.height * zoom }}>
             {marks?.map((y) => <div key={`m${y}`} className="ait-page-mark" style={{ top: y * zoom }} aria-hidden />)}
             <div style={{ position: 'absolute', left: 0, top: 0, width: page.width, height: page.height, transform: `scale(${zoom})`, transformOrigin: '0 0' }}>
@@ -630,6 +655,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           </div>
         </div>
 
+        </div>
         <div className="ait-props">
           {sel && st ? (
             <div className="ait-panel">
