@@ -15,6 +15,7 @@ import {
   type PromptProfile,
   type ProviderConfig,
 } from '@ait/core';
+import { buildReport } from '../report';
 import { LocalModels, LocalSetup, ModelCheckCard, ModelPicker, UpdateCheck } from '../ModelPicker';
 import { usePlatform } from '../platform';
 import { ErrorBox, Field, FoldPanel, NumberInput, Segmented, Switch, toast, useAction } from '../ui';
@@ -561,6 +562,22 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
         <StorageLine />
         <div style={{ marginTop: 14 }}>
           <span id="ait-update"><UpdateCheck current={platform.version} install={platform.installUpdate} autoCheck={params.get('update') === '1'} /></span>
+        </div>
+        <div style={{ marginTop: 14, display: 'grid', gap: 6 }} data-testid="report">
+          <b>{tr('Сообщить о проблеме')}</b>
+          <small className="ait-muted">{tr('Соберёт файл с версией, настройками (без ключей API) и последними ошибками. Приложите его к сообщению на GitHub.')}</small>
+          <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              className="ait-btn small"
+              onClick={async () => {
+                const bytes = await buildReport({ db: platform.db, settings: s, version: platform.version, kind: platform.kind, history: await platform.service.history(50) });
+                await platform.saveFile(`ai-translate-report-${new Date().toISOString().slice(0, 10)}.zip`, bytes, 'application/zip');
+              }}
+            >
+              {tr('Собрать файл для отчёта')}
+            </button>
+            <a className="ait-btn small" href="https://github.com/kclazzy/AI-translate/issues/new" target="_blank" rel="noreferrer">{tr('Открыть GitHub')}</a>
+          </span>
         </div>
       </div>
     </div>

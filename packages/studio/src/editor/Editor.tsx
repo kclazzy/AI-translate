@@ -599,8 +599,21 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                       window.addEventListener('pointerup', up);
                     }}
                     role="slider"
+                    tabIndex={0}
                     aria-label={tr('Оригинал / перевод')}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
                     aria-valuenow={Math.round(split * 100)}
+                    onKeyDown={(e) => {
+                      const step = e.shiftKey ? 0.2 : 0.05;
+                      if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') setSplit((v) => Math.max(0, v - step));
+                      else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') setSplit((v) => Math.min(1, v + step));
+                      else if (e.key === 'Home') setSplit(0);
+                      else if (e.key === 'End') setSplit(1);
+                      else return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
                   />
                 </div>
               ) : null}

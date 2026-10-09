@@ -29,18 +29,18 @@ export function GlossaryEditor({ entries, onChange, title = tr('Глоссари
           <tbody>
             {entries.map((e) => (
               <tr key={e.id}>
-                <td><input className="ait-input" value={e.source} onChange={(ev) => set(e.id, { source: ev.target.value })} placeholder="田中" /></td>
-                <td><input className="ait-input" value={e.target} onChange={(ev) => set(e.id, { target: ev.target.value })} placeholder={tr('Танака')} /></td>
-                <td><input className="ait-input" value={e.forbidden.join(', ')} onChange={(ev) => set(e.id, { forbidden: ev.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} /></td>
+                <td><input className="ait-input" value={e.source} onChange={(ev) => set(e.id, { source: ev.target.value })} placeholder="田中" aria-label={tr('Оригинал')} /></td>
+                <td><input className="ait-input" value={e.target} onChange={(ev) => set(e.id, { target: ev.target.value })} placeholder={tr('Танака')} aria-label={tr('Перевод')} /></td>
+                <td><input className="ait-input" value={e.forbidden.join(', ')} onChange={(ev) => set(e.id, { forbidden: ev.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} aria-label={tr('Запрещённые варианты')} /></td>
                 <td>
-                  <select className="ait-select" value={e.matchMode} onChange={(ev) => set(e.id, { matchMode: ev.target.value as GlossaryEntry['matchMode'] })}>
+                  <select className="ait-select" aria-label={tr('Как искать')} value={e.matchMode} onChange={(ev) => set(e.id, { matchMode: ev.target.value as GlossaryEntry['matchMode'] })}>
                     <option value="exact">{tr('Точное')}</option>
                     <option value="regex">{tr('Регулярка')}</option>
                   </select>
                 </td>
                 <td><input type="checkbox" aria-label={tr('С учётом регистра')} checked={e.caseSensitive} onChange={(ev) => set(e.id, { caseSensitive: ev.target.checked })} /></td>
                 <td><input type="checkbox" aria-label={tr('Включено')} checked={e.enabled} onChange={(ev) => set(e.id, { enabled: ev.target.checked })} /></td>
-                <td><button className="ait-btn small ghost danger" onClick={() => onChange(entries.filter((x) => x.id !== e.id))}>{tr('Удалить')}</button></td>
+                <td><button className="ait-btn small ghost danger" onClick={() => onChange(entries.filter((x) => x.id !== e.id))} aria-label={tr('Удалить «{0}»', e.source || e.target)}>{tr('Удалить')}</button></td>
               </tr>
             ))}
           </tbody>
@@ -87,22 +87,22 @@ export function ContextEditor({ context, onChange }: { context: TranslationConte
           <tbody>
             {context.entities.map((e, i) => (
               <tr key={i}>
-                <td><input className="ait-input" value={e.source} onChange={(ev) => set(i, { source: ev.target.value })} /></td>
-                <td><input className="ait-input" value={e.target} onChange={(ev) => set(i, { target: ev.target.value })} /></td>
+                <td><input className="ait-input" value={e.source} onChange={(ev) => set(i, { source: ev.target.value })} aria-label={tr('Оригинал')} /></td>
+                <td><input className="ait-input" value={e.target} onChange={(ev) => set(i, { target: ev.target.value })} aria-label={tr('Перевод')} /></td>
                 <td>
-                  <select className="ait-select" value={e.kind} onChange={(ev) => set(i, { kind: ev.target.value as ContextEntity['kind'] })}>
+                  <select className="ait-select" aria-label={tr('Тип')} value={e.kind} onChange={(ev) => set(i, { kind: ev.target.value as ContextEntity['kind'] })}>
                     {KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                   </select>
                 </td>
                 <td>
-                  <select className="ait-select" value={e.gender ?? 'unknown'} onChange={(ev) => set(i, { gender: ev.target.value as ContextEntity['gender'] })}>
+                  <select className="ait-select" aria-label={tr('Пол')} value={e.gender ?? 'unknown'} onChange={(ev) => set(i, { gender: ev.target.value as ContextEntity['gender'] })}>
                     <option value="unknown">—</option>
                     <option value="male">{tr('м')}</option>
                     <option value="female">{tr('ж')}</option>
                     <option value="other">{tr('другое')}</option>
                   </select>
                 </td>
-                <td><input className="ait-input" value={e.speechStyle ?? ''} onChange={(ev) => set(i, { speechStyle: ev.target.value })} placeholder={tr('грубо, на «ты»')} /></td>
+                <td><input className="ait-input" value={e.speechStyle ?? ''} onChange={(ev) => set(i, { speechStyle: ev.target.value })} placeholder={tr('грубо, на «ты»')} aria-label={tr('Манера речи')} /></td>
                 <td><input type="checkbox" aria-label={tr('Закрепить')} checked={e.locked} onChange={(ev) => set(i, { locked: ev.target.checked })} /></td>
                 <td><button className="ait-btn small ghost danger" onClick={() => onChange({ ...context, entities: context.entities.filter((_, j) => j !== i) })}>{tr('Удалить')}</button></td>
               </tr>
