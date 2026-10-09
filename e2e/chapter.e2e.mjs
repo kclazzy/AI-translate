@@ -80,6 +80,15 @@ const browser = await puppeteer.launch({
   args: [...(cdp ? [] : [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`]), '--no-sandbox', '--lang=ru', '--no-first-run', '--disable-gpu'],
   defaultViewport: { width: 1000, height: 1200 },
 });
+// The welcome tab opened on install would take the focus from the pages under test.
+const closeWelcome = async (t) => {
+  if (!t.url().includes('view=welcome')) return;
+  const p = await t.page().catch(() => null);
+  await p?.close().catch(() => {});
+};
+browser.on('targetcreated', (t) => void closeWelcome(t));
+browser.on('targetchanged', (t) => void closeWelcome(t));
+
 
 /** Texts on the page including closed shadow roots (our overlays and panels). */
 async function pageTexts(p) {

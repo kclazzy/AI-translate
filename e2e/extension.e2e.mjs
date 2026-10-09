@@ -72,6 +72,14 @@ try {
   args: [...(cdpExtensions ? [] : [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`]), '--no-sandbox', '--lang=ru', '--no-first-run', '--window-size=1280,1300', '--disable-gpu'],
   defaultViewport: { width: 1200, height: 1200 },
   });
+  // The welcome tab opened on install would take the focus from the pages under test.
+  const closeWelcome = async (t) => {
+    if (!t.url().includes('view=welcome')) return;
+    const p = await t.page().catch(() => null);
+    await p?.close().catch(() => {});
+  };
+  browser.on('targetcreated', (t) => void closeWelcome(t));
+  browser.on('targetchanged', (t) => void closeWelcome(t));
 } catch (e) {
   check('browser launches with the extension', false, String(e?.stack ?? e));
   writeFileSync(join(OUT, `e2e-extension-${MODE}.json`), JSON.stringify(results, null, 2));
