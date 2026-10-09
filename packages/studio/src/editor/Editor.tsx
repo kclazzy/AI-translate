@@ -503,8 +503,8 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           </>
         ) : null}
         <span className="sep" />
-        <button className="ait-btn small" onClick={undo} disabled={!undoStack.current.length} title="Ctrl+Z">{tr('Отменить')}</button>
-        <button className="ait-btn small" onClick={redo} disabled={!redoStack.current.length} title="Ctrl+Shift+Z">{tr('Повторить')}</button>
+        <button className="ait-btn small ait-icon-btn" onClick={undo} disabled={!undoStack.current.length} title={`${tr('Отменить')} (Ctrl+Z)`} aria-label={tr('Отменить')}>↶</button>
+        <button className="ait-btn small ait-icon-btn" onClick={redo} disabled={!redoStack.current.length} title={`${tr('Повторить')} (Ctrl+Shift+Z)`} aria-label={tr('Повторить')}>↷</button>
         <span className="sep" />
         <button className="ait-btn small" onClick={() => setZoom((z) => Math.max(0.1, +(z / 1.25).toFixed(3)))} aria-label={tr('Уменьшить')}>−</button>
         <span className="ait-muted" style={{ fontSize: 13, minWidth: 44, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>

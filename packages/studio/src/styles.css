@@ -328,3 +328,6 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ait-page:hover .ait-page-tools, .ait-page:focus-within .ait-page-tools { opacity: 1; }
 .ait-page-tools button { border: 1px solid var(--rule); background: var(--paper); border-radius: 4px; cursor: pointer; font-size: 11px; padding: 1px 5px; }
 .ait-page-tools button:disabled { opacity: .4; cursor: default; }
+
+/* Undo / redo as arrows. */
+.ait-btn.small.ait-icon-btn { font-size: 20px; line-height: 1; min-width: 36px; padding-left: 8px; padding-right: 8px; }
