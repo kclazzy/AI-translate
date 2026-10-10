@@ -169,3 +169,18 @@ describe('a model stuck on a drawn-out word', () => {
     expect((await translateBlocks(provider(stubborn.fetchImpl), input, one)).translations.has('b1')).toBe(false);
   });
 });
+
+describe('line breaks in bubbles', () => {
+  it('never lets an escaped \\n reach the bubble, and sends the original as one sentence', async () => {
+    const { cleanTranslation, joinLines } = await import('../src/translate/parse');
+    expect(cleanTranslation('…ПРАВО\\nМЕСТО,\\nГДЕ ЕЙ\\\\nВЕЧНО БЫТЬ…')).toBe('…ПРАВО МЕСТО, ГДЕ ЕЙ ВЕЧНО БЫТЬ…');
+    expect(cleanTranslation('Там,\nгде ей место')).toBe('Там, где ей место');
+    expect(joinLines('...RIGHT\nWHERE SHE BELONGS\nAS ALWAYS...')).toBe('...RIGHT WHERE SHE BELONGS AS ALWAYS...');
+    expect(joinLines('...RIGHT\\nWHERE SHE')).toBe('...RIGHT WHERE SHE');
+    expect(joinLines('たなかさん\n待って')).toBe('たなかさん待って');
+    expect(joinLines('incre-\ndible')).toBe('incredible');
+    const r = parseTranslationAnswer('{"translations":[{"id":"b1","text":"…ПРАВО\\\\nМЕСТО"}]}', [{ id: 'b1', text: 'x' }]);
+    expect(r.translations.get('b1')!.text).toBe('…ПРАВО МЕСТО');
+    expect(textTranslateInstruction([{ id: 'b1', type: 'NARRATION', text: '...RIGHT\nWHERE SHE BELONGS' }], {})).toContain('"...RIGHT WHERE SHE BELONGS"');
+  });
+});

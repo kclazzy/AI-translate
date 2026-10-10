@@ -3,7 +3,7 @@ import type { TextType } from '../types';
 import type { TranslationContext } from './context';
 import type { GlossaryEntry, GlossaryHit } from './glossary';
 import type { PromptProfile } from './profiles';
-import { jsonData, sanitizeLine } from './parse';
+import { joinLines, jsonData, sanitizeLine } from './parse';
 
 export interface PromptInput {
   sourceLang: string;
@@ -96,6 +96,7 @@ export function buildSystemPrompt(input: PromptInput, hits?: GlossaryHit[]): str
     `Source language: ${source}. Target language: ${target}.`,
     securityRules(),
     'Translate meaning and tone, not words. Lines must be short enough to fit back into the same speech bubble.',
+    'Text broken over several lines in a bubble is one sentence: translate it as a whole, not line by line. Write every translation on one line, without "\\n" — the typesetter breaks the lines itself.',
     grammarRules(input.targetLang),
     HONORIFICS[p.honorifics],
     NAMES[p.names],
@@ -170,7 +171,7 @@ export function textTranslateInstruction(blocks: BlockForTranslation[], hintsByB
   const data = blocks.map((b) => ({
     id: b.id,
     type: b.type,
-    text: b.text,
+    text: joinLines(b.text),
     ...(b.speaker ? { speaker: b.speaker } : {}),
     ...(b.gender && b.gender !== 'unknown' ? { speakerGender: b.gender } : {}),
     ...(hintsByBlock[b.id]?.length ? { glossary: hintsByBlock[b.id] } : {}),

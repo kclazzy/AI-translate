@@ -155,6 +155,25 @@ export function tameRuns(text: string): string {
   return text.replace(/(\p{L})\1{6,}/gu, (_m, c: string) => c.repeat(6));
 }
 
+/**
+ * A translation as the model wrote it, made fit for a bubble: models sometimes copy the escaped line
+ * breaks of the original into the text («ПРАВО\\nМЕСТО»), or break lines where the original did.
+ * Bubble lines are laid out by the typesetter, so every break becomes a space.
+ */
+export function cleanTranslation(value: unknown, maxLen = 1500): string {
+  const t = sanitizeText(value, maxLen);
+  return t.replace(/\\+[rn]/g, ' ').replace(/\s*[\r\n]+\s*/g, ' ').replace(/ {2,}/g, ' ').trim();
+}
+
+/** Lines of a bubble's original joined into one: the line breaks are layout, not meaning. */
+export function joinLines(text: string): string {
+  return text
+    .replace(/\\+[rn]/g, '\n')
+    .split(/\s*\n\s*/)
+    .filter(Boolean)
+    .reduce((acc, line) => (!acc ? line : /[\u3000-\u9fff\uac00-\ud7af]$/.test(acc) && /^[\u3000-\u9fff\uac00-\ud7af]/.test(line) ? acc + line : /-$/.test(acc) && /^\p{Ll}/u.test(line) ? acc.slice(0, -1) + line : `${acc} ${line}`), '');
+}
+
 export function normalizeType(value: unknown, fallback: TextType = 'DIALOGUE'): TextType {
   const v = typeof value === 'string' ? value.toUpperCase() : '';
   if ((TEXT_TYPES as string[]).includes(v)) return v as TextType;
@@ -206,7 +225,7 @@ export function parseVisionAnswer(raw: string, expectTranslation: boolean, repai
     if (x1 - x0 < 2 || y1 - y0 < 2) continue;
     const text = sanitizeText(b.text, 1000);
     if (!text) continue;
-    const translation = sanitizeText(b.translation, 1500);
+    const translation = cleanTranslation(b.translation, 1500);
     blocks.push({
       box: [x0, y0, x1, y1],
       text,
@@ -254,7 +273,7 @@ export function parseTranslationAnswer(raw: string, expected: { id: string; text
     if (!byId.has(id) || translations.has(id)) continue;
     // "translation" wins when both are given: a model mixing in the picture-reading format writes
     // the original into "text" and the translation into "translation".
-    const text = sanitizeText(typeof t.translation === 'string' && t.translation.trim() ? t.translation : t.text, 1500);
+    const text = cleanTranslation(typeof t.translation === 'string' && t.translation.trim() ? t.translation : t.text, 1500);
     if (!text) continue;
     translations.set(id, { text: limitLength(text, byId.get(id)!), type: t.type ? normalizeType(t.type) : undefined });
   }
