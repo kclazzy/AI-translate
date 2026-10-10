@@ -35,7 +35,7 @@ jobs:
           python -m venv .venv
           .venv/bin/pip install -e ".[dev]"
       # Branded Chrome 137+ ignores --load-extension; Chrome for Testing keeps it.
-      - uses: browser-actions/setup-chrome@v1
+      - uses: browser-actions/setup-chrome@v2
         id: chrome
         with: { chrome-version: stable, install-dependencies: true }
       - name: End-to-end tests in Chrome for Testing
