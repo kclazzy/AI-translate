@@ -1,6 +1,6 @@
 {
   "name": "@ait/studio",
-  "version": "0.9.1",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "src/index.ts",
@@ -10,7 +10,8 @@
     "./styles.css": "./src/styles.css",
     "./fonts": "./src/fonts.ts",
     "./model-picker": "./src/ModelPicker.tsx",
-    "./files": "./src/files.ts"
+    "./files": "./src/files.ts",
+    "./problem-report": "./src/problemReport.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",

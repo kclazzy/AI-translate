@@ -501,6 +501,11 @@ export interface CleanOptions {
   sfx?: boolean;
   /** How far past the letters to erase, px (default 3 over artwork, 2 in bubbles). */
   expand?: number;
+  /**
+   * The bubble around the text as the neural detector saw it (page px): the bubble found by the
+   * flood must lie within it, and one that does is taken even when it is much bigger than its text.
+   */
+  bubbleBox?: Box;
 }
 
 /** Colour, stroke thickness and letter height of the lettering in `mask` (before erasing). */
@@ -549,6 +554,19 @@ export function measureLettering(img: PixelData, mask: Uint8Array, rect: Box, bg
   {
     let er = 0, eg = 0, eb = 0, en = 0;
     const deepBins = new Map<number, { n: number; r: number; g: number; b: number }>();
+    // The rim: the edge and the pixel inside it — where an outline lies (its anti-aliased outer
+    // edge, a blend with the background, is only part of it).
+    const rimBins = new Map<number, { n: number; r: number; g: number; b: number }>();
+    const bin = (bins: typeof deepBins, p: number) => {
+      const [r0, g0, b0] = [img.data[p * 4], img.data[p * 4 + 1], img.data[p * 4 + 2]];
+      const k = ((r0 >> 5) << 6) | ((g0 >> 5) << 3) | (b0 >> 5);
+      const e = bins.get(k) ?? { n: 0, r: 0, g: 0, b: 0 };
+      e.n++;
+      e.r += r0;
+      e.g += g0;
+      e.b += b0;
+      bins.set(k, e);
+    };
     let inn = 0;
     for (let y = y0 + 1; y < y0 + h - 1; y++) {
       for (let x = x0 + 1; x < x0 + w - 1; x++) {
@@ -557,25 +575,24 @@ export function measureLettering(img: PixelData, mask: Uint8Array, rect: Box, bg
         const edge = !mask[p - 1] || !mask[p + 1] || !mask[p - img.width] || !mask[p + img.width];
         const deep = !edge && mask[p - 2] && mask[p + 2] && mask[p - 2 * img.width] && mask[p + 2 * img.width];
         if (edge) (er += img.data[p * 4]), (eg += img.data[p * 4 + 1]), (eb += img.data[p * 4 + 2]), en++;
-        else if (deep) {
-          const [r0, g0, b0] = [img.data[p * 4], img.data[p * 4 + 1], img.data[p * 4 + 2]];
-          const k = ((r0 >> 5) << 6) | ((g0 >> 5) << 3) | (b0 >> 5);
-          const e = deepBins.get(k) ?? { n: 0, r: 0, g: 0, b: 0 };
-          e.n++;
-          e.r += r0;
-          e.g += g0;
-          e.b += b0;
-          deepBins.set(k, e);
+        if (!deep) bin(rimBins, p);
+        else {
+          bin(deepBins, p);
           inn++;
         }
       }
     }
     if (en > 30 && inn > 30) {
-      const e: RGB = [er / en, eg / en, eb / en];
       // The fill: the most common colour in the middle of the strokes (anti-aliasing excluded).
       let top = { n: 0, r: 0, g: 0, b: 0 };
       for (const v of deepBins.values()) if (v.n > top.n) top = v;
       const i: RGB = [top.r / top.n, top.g / top.n, top.b / top.n];
+      // The outline: the most common colour of the rim when it is clearly not the fill (a real
+      // outline), else the mean edge colour (a blend with the background, tested below).
+      let rim = { n: 0, r: 0, g: 0, b: 0 };
+      for (const v of rimBins.values()) if (v.n > rim.n) rim = v;
+      const rc: RGB | null = rim.n ? [rim.r / rim.n, rim.g / rim.n, rim.b / rim.n] : null;
+      const e: RGB = rc && Math.hypot(rc[0] - i[0], rc[1] - i[1], rc[2] - i[2]) > 120 ? rc : [er / en, eg / en, eb / en];
       // Anti-aliased edges are a blend of the fill and the background, not an outline.
       const blend = (() => {
         if (!bg) return false;
@@ -868,7 +885,13 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
   // Bubbles are often much larger than their text: grow the analysed region until the
   // bubble closes (open page background never closes and ends as open lettering).
   // The last one: a short remark in a big oval (an exclamation in a webtoon bubble).
-  const pads = [Math.max(40, 0.9 * maxDim), Math.max(70, 1.8 * maxDim), Math.max(110, 3 * maxDim), Math.max(240, 6 * maxDim)].map(Math.round);
+  let pads = [Math.max(40, 0.9 * maxDim), Math.max(70, 1.8 * maxDim), Math.max(110, 3 * maxDim), Math.max(240, 6 * maxDim)].map(Math.round);
+  const known = opts.bubbleBox;
+  if (known) {
+    // The detector's bubble: analyse just past its outline first.
+    const need = Math.round(Math.max(bbox[0] - known[0], known[0] + known[2] - bbox[0] - bbox[2], bbox[1] - known[1], known[1] + known[3] - bbox[1] - bbox[3], 0) + 10);
+    pads = [need, ...pads.filter((p) => p > need)];
+  }
   let region: Box = bbox;
   let img!: PixelData;
   let local: Box = bbox;
@@ -910,6 +933,14 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     if (!flood || leaked || opts.sfx) return false;
     const floodArea = boxArea(flood.box);
     if (flood.area <= boxArea(local) * (tentative ? 0.25 : 0.5)) return false;
+    if (known) {
+      // The bubble must lie within the detector's bubble; a flood filling most of it is that bubble.
+      const m = (v: number) => Math.round(6 + v * 0.06);
+      const lim = expandBox(known, m(known[2]), m(known[3]));
+      const [fx, fy, fw, fh] = [flood.box[0] + region[0], flood.box[1] + region[1], flood.box[2], flood.box[3]];
+      if (fx < lim[0] || fy < lim[1] || fx + fw > lim[0] + lim[2] || fy + fh > lim[1] + lim[3]) return false;
+      if (flood.area >= boxArea(known) * 0.3 && flood.area >= floodArea * 0.4) return true;
+    }
     if (floodArea > Math.max(boxArea(local) * 30, 40_000)) {
       // Much bigger than its text: only an oval around it (a panel or the sky is a rectangle or
       // has no shape at all) with the text in its middle.
@@ -1007,8 +1038,17 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       // Letters sit in the bubble's white: keep only components lying (almost) entirely next to
       // the flooded background. Panel art behind an outline, or past where a bubble breaks out of
       // its panel into the gutter, is not lettering even if it is letter-sized and nearby.
-      const cand = flood ? onBackground(textMask(img, search, bg, 60), img.width, img.height, search, flood.mask) : textMask(img, search, bg, 60);
-      const snap = snapToLettering(cand, img.width, search, local, img);
+      const candAt = (threshold: number) => (flood ? onBackground(textMask(img, search, bg, threshold), img.width, img.height, search, flood.mask) : textMask(img, search, bg, threshold));
+      let snap = snapToLettering(candAt(60), img.width, search, local, img);
+      // "Lettering" running across the whole searched area is the background's own texture
+      // (hatching, a pattern in the bubble colour's range) joined to the letters: take only marks
+      // that stand out strongly from it (the letters and their outline), so the patch painted over
+      // them stays the letters' shape instead of a slab over the art.
+      const spans = (b: Box | null) => !!b && b[2] >= search[2] - 2 && b[3] >= search[3] - 2;
+      if (spans(snap.box)) {
+        const strict = snapToLettering(textMask(img, search, bg, 110), img.width, search, local, img);
+        if (strict.box && !spans(strict.box)) snap = strict;
+      }
       tb = snap.box;
       letterMask = snap.mask;
       mask = dilate(snap.mask, img.width, img.height, Math.max(1, (opts.expand ?? 3) - 1));

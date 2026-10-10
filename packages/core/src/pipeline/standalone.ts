@@ -12,13 +12,16 @@ import { applyForbiddenFixes, findGlossaryHits, findViolations } from '../transl
 import { isDegenerate, parseVisionAnswer, tameRuns, type VisionAnswer } from '../translate/parse';
 import { buildSystemPrompt, contextData, visionFullInstruction, visionOcrInstruction, visionPhrasebook, type PromptInput } from '../translate/prompt';
 import { translateBlocks, usageFrom } from '../translate/translator';
-import type { Box, BubbleInfo, PageResult, StageEvent, TextBlock, TextStyle, Usage } from '../types';
+import type { Box, BubbleInfo, PageDebug, PageResult, StageEvent, TextBlock, TextStyle, Usage } from '../types';
 import { bytesToBase64, sha256Hex } from '../util/bytes';
 import { mapLimit } from '../util/queue';
 import { withRetry } from '../util/retry';
 import { MAX_SIDE, pipelineHash, type PipelineConfig } from './config';
 import { checkForText, type TextCheck } from '../image/textcheck';
 import { EngineClient } from './engine';
+import { addStep, createDebug, recording } from './debug';
+import { backgroundUnder, colourFor } from './selfcheck';
+import { bubbleAround, detectedTextNear, detectorFindsText, detectPage, ellipseBubble, missedText, snapBlocksToDetections, type Detection, type TextDetector } from './detect';
 
 export interface PipelineRequest {
   bytes: Uint8Array;
@@ -44,6 +47,9 @@ export interface PreparedPage {
   decodeMs: number;
   /** The text check (absent when it does not apply: generic, noSkip, setting off). */
   textCheck?: TextCheck;
+  /** The neural detector's boxes (when it is on and here), page px. */
+  detections?: Detection[];
+  detectorMs?: number;
   /** The views as sent to the vision model, for `viewsFor` (model + quality). */
   views?: EncodedView[];
   viewsFor?: string;
@@ -72,7 +78,19 @@ export async function preparePage(req: Pick<PipelineRequest, 'bytes' | 'mime' | 
   const t0 = performance.now();
   const original = await TiledImage.fromBytes(deps.backend, req.bytes, req.mime);
   const prep: PreparedPage = { original, decodeMs: Math.round(performance.now() - t0) };
-  if (checksText(req)) prep.textCheck = checkForText(original);
+  if (usesDetector(req, deps)) {
+    // The neural detector: its boxes help place the text, and it replaces the heuristic text check.
+    const t1 = performance.now();
+    try {
+      prep.detections = await detectPage(original, deps.detect!, deps.backend);
+      prep.detectorMs = Math.round(performance.now() - t1);
+      if (checksText(req)) prep.textCheck = { lines: prep.detections.length, letters: 0, noText: !detectorFindsText(prep.detections), ms: prep.detectorMs };
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError') throw e;
+      // The detector failed (model broken, out of memory): the page goes on without it.
+    }
+  }
+  if (checksText(req) && !prep.textCheck) prep.textCheck = checkForText(original);
   if (req.config.mode === 'standalone' && req.config.vision?.vision && !prep.textCheck?.noText) {
     prep.views = [];
     for (const view of planViews(original.width, original.height)) prep.views.push(await encodeView(original, view, req.config, req.config.vision.model, deps));
@@ -88,6 +106,13 @@ export interface PipelineOutput {
   context?: TranslationContext;
   /** What this page adds to the series context (merged into the latest stored context by the caller). */
   contextUpdate?: ContextUpdate;
+  /** Run the self-check when the page is typeset (renderOutput; see selfcheck.ts). */
+  selfCheck?: boolean;
+}
+
+/** Is the neural detector to be used for this page? */
+function usesDetector(req: Pick<PipelineRequest, 'config' | 'generic'>, deps: StandaloneDeps): boolean {
+  return req.config.mode === 'standalone' && !!req.config.detector && !!deps.detect && !req.generic;
 }
 
 export interface StandaloneDeps {
@@ -95,6 +120,8 @@ export interface StandaloneDeps {
   fetchImpl?: FetchLike;
   /** LaMa running in this browser (extension), used when the settings say so. */
   inpaint?: Inpainter;
+  /** The neural text / bubble detector running in this browser, used when the settings say so. */
+  detect?: TextDetector;
 }
 
 export interface View {
@@ -295,11 +322,13 @@ export function matchLettering(b: TextBlock, l: Lettering | undefined): Partial<
       const bf = parseHex(b.bubble.fill);
       return Math.hypot(f[0] - bf[0], f[1] - bf[1], f[2] - bf[2]) < 60;
     })();
-    if (l.fill && l.outline && b.textType !== 'SFX' && !onOwnColour) {
+    if (l.fill && l.outline && !onOwnColour) {
+      // The fill is the colour in the middle of the strokes, the outline the one around them:
+      // white letters with a black edge stay white with a black edge (not the other way round).
       style.color = l.fill;
       style.strokeColor = l.outline;
       // In proportion to the letters (≈ 11 % of the font size): a thicker one merges the strokes
-      // of a line into one dark plate.
+      // of a line into one dark plate (sound effects too: their default outline is twice that).
       style.strokeWidth = 2;
     }
     // Slanted lettering (thoughts, whispers, foreign speech) stays slanted.
@@ -537,7 +566,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   const prep = prepared ?? (await preparePage(req, deps));
   const original = prep.original;
   const tDecoded = performance.now();
-  const vision = createProvider(config.vision, deps.fetchImpl);
+  const debug = createDebug();
+  const vision = recording(createProvider(config.vision, deps.fetchImpl), 'read', debug);
   const usage: Usage[] = [];
   let blocks: TextBlock[] = [];
   let cleaned: TiledImage | null = null;
@@ -551,9 +581,25 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   let tDetected = tDecoded;
   let entities: unknown[] = [];
   const summaries: string[] = [];
-  if (skipped) return finish();
+  // The neural detector's boxes (prepared ahead, or found now), when it is on.
+  let dets = prep.detections;
+  let detectorMs = prep.detectorMs ?? 0;
+  if (skipped) {
+    addStep(debug, 'page skipped: no text (local check)');
+    return finish();
+  }
 
   stage('detecting');
+  if (!dets && usesDetector(req, deps)) {
+    const t1 = performance.now();
+    try {
+      dets = await detectPage(original, deps.detect!, deps.backend, signal);
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError') throw e;
+    }
+    detectorMs = Math.round(performance.now() - t1);
+  }
+  if (dets) addStep(debug, `detector: ${dets.filter((d) => d.kind !== 'bubble').length} text box(es), ${dets.filter((d) => d.kind === 'bubble').length} bubble(s)`);
   const views = planViews(original.width, original.height);
   const encoded = prep.viewsFor === viewsKey(config) ? prep.views : undefined;
   const located: Located[] = [];
@@ -569,12 +615,14 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     if (answer.summary) summaries.push(answer.summary);
     for (const b of answer.blocks) {
       const box: Box = [(b.box[0] / 1000) * original.width, view.y + (b.box[1] / 1000) * view.h, ((b.box[2] - b.box[0]) / 1000) * original.width, ((b.box[3] - b.box[1]) / 1000) * view.h];
+      if (debug.modelBlocks.length < 200) debug.modelBlocks.push({ box: box.map(Math.round) as Box, text: b.text, ...(b.translation !== undefined ? { translation: b.translation } : {}) });
       located.push({ box: clampBox(box, original.width, original.height), text: b.text, translation: b.translation, type: b.type, vertical: b.vertical, view, speaker: b.speaker, gender: b.gender, ...(answer.repaired ? { low: true } : {}) });
     }
   }
   tDetected = performance.now();
   const merged = dedupe(located);
   if (!merged.length) {
+    addStep(debug, 'model found no text');
     return finish();
   }
 
@@ -606,7 +654,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
 
   stage('translating');
   if (separate) {
-    const translator = createProvider(translatorCfg!, deps.fetchImpl);
+    const translator = recording(createProvider(translatorCfg!, deps.fetchImpl), 'translate', debug);
     const toTranslate = blocks.filter((b) => b.translate).map((b) => ({ id: b.id, type: b.textType, text: b.originalText, speaker: b.speaker, gender: b.speakerGender }));
     const res = await translateBlocks(translator, promptInput(config, req.context), toTranslate, { signal });
     usage.push(...res.usage);
@@ -627,8 +675,9 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     // The model got stuck on a drawn-out word («COOOME…» → «Хххххххх»): ask once more as text only.
     const stuck = blocks.filter((b) => b.translate && isDegenerate(b.translatedText, b.originalText));
     if (stuck.length) {
+      addStep(debug, `stuck translation asked again as text: ${stuck.map((b) => b.id).join(', ')}`);
       try {
-        const res = await translateBlocks(createProvider(config.vision!, deps.fetchImpl), promptInput(config, req.context), stuck.map((b) => ({ id: b.id, type: b.textType, text: b.originalText, speaker: b.speaker, gender: b.speakerGender })), { signal, retries: 1 });
+        const res = await translateBlocks(recording(createProvider(config.vision!, deps.fetchImpl), 'translate', debug), promptInput(config, req.context), stuck.map((b) => ({ id: b.id, type: b.textType, text: b.originalText, speaker: b.speaker, gender: b.speakerGender })), { signal, retries: 1 });
         usage.push(...res.usage);
         for (const b of stuck) {
           const t = res.translations.get(b.id);
@@ -656,6 +705,12 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
 
   stage('cleaning');
   cleaned = original.clone();
+  if (dets?.length && !req.generic) {
+    // The detector knows where the lettering really is: the model's boxes move onto it.
+    const moved = snapBlocksToDetections(blocks, dets, original.width, original.height);
+    for (const b of blocks) if (moved.has(b.id)) b.fontSizeEstimate = estimateFontSize(b.bbox, b.originalText);
+    if (moved.size) addStep(debug, `snapped to the detector's text boxes: ${[...moved].join(', ')}`);
+  }
   const closedBubble = new Map<string, boolean>();
   const letterHeight = new Map<string, number>();
   const cleanOne = (b: TextBlock) => {
@@ -670,6 +725,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       // The model's box holds no letters and none stand nearby: keep the translation where the
       // model put it, but never erase the art there and never shout over it in big light letters.
       b.lowConfidence = true;
+      addStep(debug, `no lettering in the box of ${b.id} → text over art`);
       // Inside a light bubble (empty, or its letters too faint to find) the text may follow its outline.
       const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: true });
       b.bubble = r.closed && r.bubble && luminance(...parseHex(r.bubble.fill)) >= 190 ? r.bubble : null;
@@ -677,8 +733,18 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       b.style = { color: '#111111', strokeColor: '#ffffff', strokeWidth: 3, ...matchLettering(b, undefined), ...(b.style ?? {}) };
       return;
     }
-    const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, sfx: b.textType === 'SFX', expand: config.inpaintExpand });
+    // The detector's bubble around the text limits the bubble the cleaner looks for.
+    const bubbleBox = dets && b.textType !== 'SFX' ? bubbleAround(b.bbox, dets) : undefined;
+    const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, sfx: b.textType === 'SFX', expand: config.inpaintExpand, ...(bubbleBox ? { bubbleBox } : {}) });
+    if (bubbleBox && !r.closed && !r.artMask) {
+      // The outline was not found, but the detector saw a bubble: lay the text out in an ellipse
+      // inscribed in it (erasing still went by the letters' mask).
+      r.bubble = ellipseBubble(bubbleBox, r.bubble?.fill ?? '#ffffff', original.width, original.height);
+      r.closed = true;
+      addStep(debug, `bubble of ${b.id} taken from the detector`);
+    }
     if (r.artMask) artMasks.push(r.artMask);
+    if (!r.bubble && b.textType !== 'SFX') addStep(debug, `bubble not found for ${b.id} → text over art`);
     b.bubble = r.bubble;
     closedBubble.set(b.id, r.closed);
     if (r.lettering) letterHeight.set(b.id, r.lettering.letterHeight);
@@ -691,8 +757,19 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       // Use the measured text pixels to correct an imprecise model box (keep the larger safe area).
       b.fontSizeEstimate = fontFromLettering(r.textBox, b.originalText, r.lettering);
     }
-    b.style = { ...matchLettering(b, r.lettering), ...(b.style ?? {}) };
+    b.style = { ...plainBackgroundStyle(b, r.textBox), ...matchLettering(b, r.lettering), ...(b.style ?? {}) };
     if (r.textGroups && b.textType !== 'SFX' && b.translate) groupsOf.set(b.id, { groups: r.textGroups, lettering: r.lettering });
+  };
+  /**
+   * Text with no bubble found (a loose box over a dark caption plate, a sign): its colours follow
+   * what lies under it once cleaned — light letters on a dark plate, dark ones on a light ground.
+   */
+  const plainBackgroundStyle = (b: TextBlock, textBox: Box | null): Partial<TextStyle> => {
+    if (b.bubble || b.textType === 'SFX') return {};
+    const bg = backgroundUnder(cleaned!, [textBox ?? b.bbox]);
+    if (!bg || bg.flat < 0.6 || bg.lum > 85) return {};
+    addStep(debug, `${b.id}: text over a dark plate → light letters`);
+    return colourFor(bg.lum);
   };
   /**
    * Make sure the block's box holds the letters the model read. A box with no letters at all (put
@@ -704,9 +781,19 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     if (findLetterClusters(original, expandBox(b.bbox, 12)).some((c) => intersects(c.box, b.bbox))) return true;
     // Lettering the quick look does not know (coloured, outlined): the cleaner's own search.
     if (cleanBlock(original, b.bbox, { analyzeOnly: true }).textBox) return true;
+    // The detector's text box nearby, if it saw one nobody else has.
+    const det = dets ? detectedTextNear(b, blocks, dets, original.width) : null;
+    if (det) {
+      addStep(debug, `block ${b.id} snapped to the detector's text box nearby`);
+      b.bbox = clampBox(expandBox(det, 2), original.width, original.height);
+      b.polygon = boxToPolygon(b.bbox);
+      b.fontSizeEstimate = estimateFontSize(b.bbox, b.originalText);
+      return true;
+    }
     // Only lettering nobody has erased yet can be this block's.
     const found = letteringNear(b, blocks, cleaned!);
     if (!found) return false;
+    addStep(debug, `block ${b.id} snapped to lettering nearby`);
     const pad = Math.round(found.letterHeight * 0.2);
     b.bbox = clampBox(expandBox(found.box, pad), original.width, original.height);
     b.polygon = boxToPolygon(b.bbox);
@@ -725,6 +812,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       const info = groupsOf.get(b.id);
       if (!info) return [b];
       if (spans(b, info.groups) < 2 && shares(b)) return [b];
+      if (info.groups.length > 1) addStep(debug, `block ${b.id} split by ${info.groups.length} lettering groups`);
       return splitByGroups(b, info.groups, info.lettering, original.width, original.height);
     });
   if (!req.generic) {
@@ -739,7 +827,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     for (const [k, box] of findLeftoverText(cleaned, probes, known).slice(0, 4).entries()) {
       try {
         const pad = Math.round(Math.max(box[2], box[3]) * 0.3) + 12;
-        const r = await recognizeRegion(original, expandBox(box, pad), config, deps, { context: req.context, signal, idPrefix: `x${k}` });
+        addStep(debug, `left-over lettering read again at [${box.join(',')}]`);
+        const r = await recognizeRegion(original, expandBox(box, pad), config, deps, { context: req.context, signal, idPrefix: `x${k}`, debug });
         usage.push(...r.usage);
         const near = expandBox(box, 6);
         for (const nb of r.blocks) {
@@ -761,8 +850,36 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         // A failed extra read never fails the page.
       }
     }
+    // Text the detector is sure of that no block covers: the model skipped it; read it from there.
+    for (const [k, box] of (dets ? missedText(blocks, dets) : []).entries()) {
+      try {
+        addStep(debug, `text found by the detector read again at [${box.map(Math.round).join(',')}]`);
+        const pad = Math.round(Math.max(box[2], box[3]) * 0.3) + 12;
+        const r = await recognizeRegion(original, expandBox(box, pad), config, deps, { context: req.context, signal, idPrefix: `d${k}`, debug });
+        usage.push(...r.usage);
+        const near = clampBox(expandBox(box, 4), original.width, original.height);
+        for (const nb of r.blocks) {
+          const cut = r.blocks.length === 1 ? near : intersectBox(nb.bbox, near);
+          if (!cut) continue;
+          nb.bbox = clampBox(cut.map(Math.round) as Box, original.width, original.height);
+          nb.polygon = boxToPolygon(nb.bbox);
+          nb.fontSizeEstimate = estimateFontSize(nb.bbox, nb.originalText);
+          if (!nb.originalText.trim() || !nb.translatedText.trim() || blocks.some((o) => overlapRatio(o.bbox, nb.bbox) > 0.5)) continue;
+          // The user's filters: only bubbles, sound effects left as they are.
+          if ((config.bubblesOnly && (nb.textType === 'SFX' || nb.textType === 'SIGN' || nb.textType === 'OTHER')) || (nb.textType === 'SFX' && !config.translateSfx)) continue;
+          nb.language = blocks[0]?.language ?? nb.language;
+          cleanOne(nb);
+          const at = blocks.findIndex((o) => o.bbox[1] > nb.bbox[1]);
+          blocks.splice(at < 0 ? blocks.length : at, 0, nb);
+        }
+      } catch (e) {
+        if ((e as { code?: string }).code === 'CANCELLED') throw e;
+      }
+    }
   }
+  const before = blocks.length;
   blocks = mergeSharedBubbles(blocks, closedBubble);
+  if (blocks.length < before) addStep(debug, `${before - blocks.length} block(s) merged into shared bubbles`);
   separateAreas(blocks);
   if (artMasks.length && config.lama) {
     // The engine gets the picture only on this computer / network, unless the cloud is allowed.
@@ -798,6 +915,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         // Includes inpaintMs (as before LaMa was measured on its own).
         cleanMs: blocksOut.length ? Math.round(tCleaned - tTranslated) : 0,
         inpaintMs,
+        ...(detectorMs ? { detectorMs } : {}),
         totalMs: Math.round(performance.now() - t0),
         ...(prepared ? { prefetched: true } : {}),
       },
@@ -806,6 +924,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       summary,
       ...(artMasks.length ? { artText: artMasks.length, artRedrawn } : {}),
       ...(skipped ? { skippedNoText: true } : {}),
+      debug,
       createdAt: new Date().toISOString(),
     };
     const contextUpdate: ContextUpdate = {
@@ -816,7 +935,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     // A skipped picture adds nothing to the story (and is not counted as a page of it).
     const context = req.context && !skipped ? mergeContext(req.context, contextUpdate) : undefined;
     stage('done', 1);
-    return { page, original, cleaned: cleaned ?? original.clone(), context, ...(req.context && !skipped ? { contextUpdate } : {}) };
+    const check = config.selfCheck !== false && !req.generic && blocksOut.length > 0;
+    return { page, original, cleaned: cleaned ?? original.clone(), context, ...(req.context && !skipped ? { contextUpdate } : {}), ...(check ? { selfCheck: true } : {}) };
   }
 }
 
@@ -864,7 +984,7 @@ export async function recognizeRegion(
   box: Box,
   config: PipelineConfig,
   deps: StandaloneDeps,
-  opts: { context?: TranslationContext; signal?: AbortSignal; idPrefix?: string } = {},
+  opts: { context?: TranslationContext; signal?: AbortSignal; idPrefix?: string; debug?: PageDebug } = {},
 ): Promise<{ blocks: TextBlock[]; usage: Usage[] }> {
   if (!config.vision?.vision) throw new AppError('NOT_CONFIGURED', { retryable: false });
   assertPrivacy(config.privacy, config.vision, 'image');
@@ -877,7 +997,7 @@ export async function recognizeRegion(
   ctx.putImageData(id, 0, 0);
   const sub = new TiledImage(deps.backend, region[2], region[3], [{ y: 0, h: region[3], canvas }]);
   const separate = !!config.translator && config.translator.id !== config.vision.id;
-  const vision = createProvider(config.vision, deps.fetchImpl);
+  const vision = recording(createProvider(config.vision, deps.fetchImpl), 'region', opts.debug);
   const { answer, usage } = await readView(vision, sub, { y: 0, h: region[3] }, { ...config, quality: 'best' }, opts.context, !separate, deps, opts.signal);
   const usages = [usage];
   const blocks: TextBlock[] = answer.blocks.map((b, i): TextBlock => {
@@ -902,7 +1022,7 @@ export async function recognizeRegion(
   });
   if (separate && blocks.length) {
     assertPrivacy(config.privacy, config.translator!, 'text');
-    const res = await translateBlocks(createProvider(config.translator!, deps.fetchImpl), promptInput(config, opts.context), blocks.map((b) => ({ id: b.id, type: b.textType, text: b.originalText })), { signal: opts.signal });
+    const res = await translateBlocks(recording(createProvider(config.translator!, deps.fetchImpl), 'region', opts.debug), promptInput(config, opts.context), blocks.map((b) => ({ id: b.id, type: b.textType, text: b.originalText })), { signal: opts.signal });
     usages.push(...res.usage);
     for (const b of blocks) {
       const t = res.translations.get(b.id);

@@ -20,7 +20,10 @@ export function SpeedBenchmark({ settings }: { settings: AppSettings }) {
     const service = platform.service;
     // LaMa in this browser takes part like on a real page (the studio's own service has none by default).
     const before = service.inpainter;
+    const beforeDetector = service.detector;
     if (lamaModeOf(settings) === 'browser' && platform.inpaint && (await platform.lama?.downloaded().catch(() => false))) service.inpainter = platform.inpaint;
+    // So does the text detector.
+    if (settings.detectorMode === 'browser' && platform.detector?.detect && (await platform.detector.downloaded().catch(() => false))) service.detector = platform.detector.detect;
     const t0 = performance.now();
     try {
       const { result } = await service.translate(bytes, 'image/png', { title: tr('Замер скорости'), force: true });
@@ -28,6 +31,7 @@ export function SpeedBenchmark({ settings }: { settings: AppSettings }) {
       setBench(benchmarkOf(result.page, performance.now() - t0, fallback));
     } finally {
       service.inpainter = before;
+      service.detector = beforeDetector;
     }
   });
   return (

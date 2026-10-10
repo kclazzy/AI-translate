@@ -151,7 +151,9 @@ const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', '
 
 export async function exportProjectZip(project: Project, getAssets: (pageId: string) => Promise<PageAssets | undefined>): Promise<Uint8Array> {
   const zip = new JSZip();
-  zip.file('project.json', JSON.stringify({ ...project, updatedAt: new Date().toISOString() }, null, 2));
+  // The problem-report data (model answers) stays on this device: not in a shared project file.
+  const pages = project.pages.map((p) => (p.result?.debug ? { ...p, result: { ...p.result, debug: undefined } } : p));
+  zip.file('project.json', JSON.stringify({ ...project, pages, updatedAt: new Date().toISOString() }, null, 2));
   for (const p of project.pages) {
     const a = await getAssets(p.id);
     if (!a) continue;

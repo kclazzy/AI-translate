@@ -33,6 +33,13 @@ const CSS = `
 .pill.err small { display: block; color: #1c2230; margin-top: 4px; font-size: 12px; }
 .bar button[aria-pressed="true"] { background: #fbe6ee; }
 .split { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1px; background: #c8205f; pointer-events: auto; cursor: ew-resize; touch-action: none; }
+.info { position: absolute; top: 44px; right: 8px; width: 300px; max-width: calc(100% - 16px); box-sizing: border-box; pointer-events: auto; background: #fff; color: #1c2230; border: 1.5px solid #1c2230; border-radius: 10px; box-shadow: 2px 2px 0 #1c2230; padding: 10px; display: grid; gap: 6px; font: 13px/1.35 system-ui, sans-serif; }
+.info pre { margin: 0; white-space: pre-wrap; font: inherit; }
+.info textarea { font: inherit; min-height: 44px; resize: vertical; border: 1px solid #1c223066; border-radius: 6px; padding: 4px; }
+.info label { display: flex; gap: 6px; align-items: center; }
+.info button { justify-self: end; border: 1.5px solid #1c2230; background: #c8205f; color: #fff; border-radius: 999px; padding: 4px 10px; cursor: pointer; font: inherit; }
+.info button:disabled { opacity: .6; cursor: default; }
+.info small { color: #555; }
 .split::after { content: '⟷'; position: absolute; top: 50%; left: -12px; width: 26px; height: 26px; margin-top: -13px; border-radius: 50%; background: #c8205f; color: #fff; display: grid; place-items: center; font: 13px/1 system-ui, sans-serif; }
 `;
 
@@ -200,9 +207,13 @@ export class Overlay {
     this.bar.prepend(p);
   }
 
-  /** «ⓘ»: how this page was translated (time, tokens, cost, model). */
-  setInfo(details: string): void {
+  /**
+   * «ⓘ»: how this page was translated (time, tokens, cost, model). A click opens the details with
+   * «Сообщить о проблеме»: a zip for the developer (`onReport` builds and downloads it, returns a note).
+   */
+  setInfo(details: string, onReport?: (o: { comment: string; includeUrl: boolean }) => Promise<string>): void {
     this.bar.querySelector('[data-info]')?.remove();
+    this.wrap.querySelector('.info')?.remove();
     const b = document.createElement('button');
     b.dataset.info = '1';
     b.textContent = 'ⓘ';
@@ -211,8 +222,45 @@ export class Overlay {
     b.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (onReport) this.toggleInfo(details, onReport);
     });
     this.bar.append(b);
+  }
+
+  private toggleInfo(details: string, onReport: (o: { comment: string; includeUrl: boolean }) => Promise<string>): void {
+    const open = this.wrap.querySelector('.info');
+    if (open) return void open.remove();
+    const p = document.createElement('div');
+    p.className = 'info';
+    p.dataset.aitInfo = '1';
+    const pre = document.createElement('pre');
+    pre.textContent = details;
+    const comment = document.createElement('textarea');
+    comment.placeholder = tr('Что не так?');
+    comment.setAttribute('aria-label', tr('Что не так?'));
+    comment.maxLength = 2000;
+    const label = document.createElement('label');
+    const url = document.createElement('input');
+    url.type = 'checkbox';
+    label.append(url, tr('включить адрес страницы'));
+    const send = document.createElement('button');
+    send.type = 'button';
+    send.textContent = tr('Сообщить о проблеме');
+    send.title = tr('Сохранить файл для разработчика: картинка, результат и ответы модели (без ключей API)');
+    const note = document.createElement('small');
+    send.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      send.disabled = true;
+      note.textContent = tr('Собираю файл…');
+      onReport({ comment: comment.value, includeUrl: url.checked }).then(
+        (msg) => (note.textContent = msg),
+        (err) => (note.textContent = err instanceof Error ? err.message : String(err)),
+      ).finally(() => (send.disabled = false));
+    });
+    for (const el of [p, comment, url]) el.addEventListener('click', (e) => e.stopPropagation());
+    p.append(pre, comment, label, send, note);
+    this.wrap.append(p);
   }
 
   /** Translation check result: a small button that opens the editor with the report. */

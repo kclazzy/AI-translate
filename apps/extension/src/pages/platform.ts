@@ -1,4 +1,5 @@
 import { deleteLama, downloadLama, lamaDownloaded, lamaInpainter } from '../offscreen/lama';
+import { deleteDetector, detectorDownloaded, downloadDetector, textDetector } from '../offscreen/detector';
 import { browserBackend, TranslateService } from '@ait/core';
 import { downloadFile, type StudioPlatform } from '@ait/studio';
 import { db, loadSettings, saveSettings, secrets } from '../shared/store';
@@ -18,6 +19,8 @@ export function extensionPlatform(): StudioPlatform {
     saveSettings,
     saveFile: downloadFile,
     ...(lamaHere ? { lama: { downloaded: lamaDownloaded, download: (p: (share: number) => void) => downloadLama(p), remove: deleteLama }, inpaint: lamaInpainter } : {}),
+    // The text detector runs on the same runtime as LaMa: wherever LaMa can.
+    ...(lamaHere ? { detector: { downloaded: detectorDownloaded, download: (p: (share: number) => void) => downloadDetector(p), remove: deleteDetector, detect: textDetector } } : {}),
     notifyResultChanged: (key) => void chrome.runtime.sendMessage({ type: 'result-changed', key }).catch(() => undefined),
     version: chrome.runtime.getManifest().version,
     installUpdate: installExtensionUpdate,

@@ -1,100 +1,35 @@
 import type { Inpainter, PixelData } from '@ait/core';
-import { tr } from '@ait/core/i18n';
+import { cached, downloadWithRuntime, LAMA_URL, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, resizePixels, type Ort } from './ortRuntime';
 
 /**
  * LaMa in the browser: the same model the local engine uses (Carve/LaMa-ONNX, 512×512), run with
  * ONNX Runtime on the video card (WebGPU) or the processor (WebAssembly). The model (~200 MB) is
- * downloaded once, on request, and kept in the extension's cache.
+ * downloaded once, on request, and kept in the extension's cache (with the runtime, see ortRuntime).
  */
-export const LAMA_URL = 'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx';
-export const LAMA_CACHE = 'ait-models';
+export { LAMA_URL, MODELS_CACHE as LAMA_CACHE, ORT_VERSION, ORT_WASM_SHA256, ORT_WASM_URL } from './ortRuntime';
 const SIZE = 512;
 
-/**
- * The ONNX Runtime engine (.wasm, ~21 MB) is not shipped with the extension: it is downloaded with
- * the model from jsDelivr, pinned to the exact onnxruntime-web version the extension is built with,
- * and checked against the SHA-256 of that file (both taken from node_modules at build time).
- */
-export const ORT_VERSION = __ORT_VERSION__;
-export const ORT_WASM_SHA256 = __ORT_WASM_SHA256__;
-export const ORT_WASM_URL = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/ort-wasm-simd-threaded.jsep.wasm`;
-const ORT_WASM_SIZE = __ORT_WASM_SIZE__;
-
 export async function lamaDownloaded(): Promise<boolean> {
-  try {
-    const cache = await caches.open(LAMA_CACHE);
-    return !!(await cache.match(LAMA_URL)) && !!(await cache.match(ORT_WASM_URL));
-  } catch {
-    return false;
-  }
-}
-
-async function sha256(buf: ArrayBuffer): Promise<string> {
-  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', buf))].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-/** Fetch a file whole, reporting the bytes received. */
-async function fetchAll(url: string, onBytes: (got: number, total: number) => void, guess: number, signal?: AbortSignal): Promise<Blob> {
-  const res = await fetch(url, { signal });
-  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-  const total = Number(res.headers.get('content-length')) || guess;
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let got = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    got += value.length;
-    onBytes(got, total);
-  }
-  return new Blob(chunks as BlobPart[], { type: 'application/octet-stream' });
+  return (await cached(LAMA_URL)) && (await cached(ORT_WASM_URL));
 }
 
 /** Download the runtime and the model into the cache, reporting progress (0–1) over both. */
 export async function downloadLama(progress: (share: number) => void, signal?: AbortSignal): Promise<void> {
-  const cache = await caches.open(LAMA_CACHE);
-  const MODEL_GUESS = 208_000_000;
-  let wasmTotal = ORT_WASM_SIZE;
-  let wasmGot = 0;
-  let modelTotal = MODEL_GUESS;
-  let modelGot = 0;
-  const report = () => progress(Math.min(0.99, (wasmGot + modelGot) / (wasmTotal + modelTotal)));
-  if (!(await cache.match(ORT_WASM_URL))) {
-    const wasm = await fetchAll(ORT_WASM_URL, (got, total) => ((wasmGot = got), (wasmTotal = total), report()), ORT_WASM_SIZE, signal);
-    if ((await sha256(await wasm.arrayBuffer())) !== ORT_WASM_SHA256) throw new Error(tr('файл движка ONNX Runtime скачался с ошибкой или подменён (контрольная сумма не совпала). Попробуйте ещё раз позже.'));
-    await cache.put(ORT_WASM_URL, new Response(wasm, { headers: { 'content-length': String(wasm.size) } }));
-  }
-  wasmGot = wasmTotal;
-  report();
-  if (!(await cache.match(LAMA_URL))) {
-    const blob = await fetchAll(LAMA_URL, (got, total) => ((modelGot = got), (modelTotal = total), report()), MODEL_GUESS, signal);
-    await cache.put(LAMA_URL, new Response(blob, { headers: { 'content-length': String(blob.size) } }));
-  }
-  progress(1);
+  await downloadWithRuntime(LAMA_URL, 208_000_000, progress, signal);
 }
 
 export async function deleteLama(): Promise<void> {
-  const cache = await caches.open(LAMA_CACHE);
-  await cache.delete(LAMA_URL);
-  await cache.delete(ORT_WASM_URL);
+  await removeModel([LAMA_URL]);
   session = null;
 }
 
-type Ort = typeof import('onnxruntime-web/webgpu');
 let session: Promise<{ ort: Ort; s: import('onnxruntime-web').InferenceSession; image: string; mask: string }> | null = null;
 
 function load() {
   session ??= (async () => {
-    const cache = await caches.open(LAMA_CACHE);
-    const hit = await cache.match(LAMA_URL);
-    const runtime = await cache.match(ORT_WASM_URL);
-    if (!hit || !runtime) throw new Error('LaMa is not downloaded');
-    const ort = await import('onnxruntime-web/webgpu');
-    // The runtime (.wasm) comes from the cache as bytes: no URL to fetch, nothing for the CSP to block.
-    // No threads: the page is not cross-origin isolated.
-    ort.env.wasm.numThreads = 1;
-    ort.env.wasm.wasmBinary = await runtime.arrayBuffer();
+    const hit = await (await caches.open(MODELS_CACHE)).match(LAMA_URL);
+    if (!hit || !(await cached(ORT_WASM_URL))) throw new Error('LaMa is not downloaded');
+    const ort = await loadOrt();
     const bytes = new Uint8Array(await hit.arrayBuffer());
     const gpu = typeof navigator !== 'undefined' && 'gpu' in navigator;
     let s: import('onnxruntime-web').InferenceSession;
@@ -111,16 +46,7 @@ function load() {
   return session;
 }
 
-/** Resize RGBA pixels with a canvas (smooth), returning RGBA. */
-function resize(img: PixelData, w: number, h: number): Uint8ClampedArray {
-  const src = new OffscreenCanvas(img.width, img.height);
-  src.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(img.data), img.width, img.height), 0, 0);
-  const dst = new OffscreenCanvas(w, h);
-  const ctx = dst.getContext('2d')!;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(src, 0, 0, w, h);
-  return ctx.getImageData(0, 0, w, h).data;
-}
+const resize = resizePixels;
 
 export const lamaInpainter: Inpainter = async (img, mask) => {
   const { ort, s, image, mask: maskName } = await load();

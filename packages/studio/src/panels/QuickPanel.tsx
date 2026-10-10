@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { sniffImageMime, type StageEvent, type StoredResult } from '@ait/core';
 import { flattenTiles } from '../files';
 import { usePlatform } from '../platform';
+import { ProblemReportButton } from '../ProblemReportButton';
 import { ErrorBox, Progress, useAction, useObjectUrl } from '../ui';
 import { tr } from '@ait/core/i18n';
 
@@ -96,6 +97,7 @@ export function QuickPanel({ onEdit, sharedFile, onSharedUsed }: { onEdit: (key:
             </button>
             <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => onEdit(result.key)}>{tr('Править')}</button>
             <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void save.run()}>{tr('Сохранить картинку')}</button>
+            <ProblemReportButton where="quick" parts={async () => ({ page: result.page, original: result.original, rendered: result.rendered, cleaned: result.cleaned })} />
             <span className="ait-muted" style={{ flex: '1 1 auto', textAlign: 'right', fontSize: 13 }}>
               {tr('Блоков:')}{' '}{result.page.blocks.length} · {((result.page.timings.totalMs ?? 0) / 1000).toFixed(1)}{' '}{tr('с')}
             </span>

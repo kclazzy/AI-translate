@@ -55,7 +55,7 @@ export function checkForText(image: TiledImage, opts: { full?: boolean } = {}): 
     ctx.imageSmoothingQuality = 'high';
     image.drawRegion(ctx, 0, top / scale, image.width, bh / scale, W, bh);
     const data: Uint8ClampedArray = ctx.getImageData(0, 0, W, bh).data;
-    const r = scanBand(data, W, bh);
+    const r = scanBand(data, W, bh, { top: top === 0, bottom: top + bh >= H });
     lines += r.lines;
     letters += r.letters;
     // One line of text is enough for the verdict; `full` counts every band (tests, statistics).
@@ -65,7 +65,7 @@ export function checkForText(image: TiledImage, opts: { full?: boolean } = {}): 
 }
 
 /** Grey values, local means and marks of one band; returns the lines of text in it. */
-function scanBand(data: Uint8ClampedArray, w: number, h: number): { lines: number; letters: number } {
+function scanBand(data: Uint8ClampedArray, w: number, h: number, edge: { top: boolean; bottom: boolean } = { top: true, bottom: true }): { lines: number; letters: number } {
   const n = w * h;
   const grey = new Uint8Array(n);
   for (let p = 0; p < n; p++) grey[p] = (data[p * 4] * 77 + data[p * 4 + 1] * 150 + data[p * 4 + 2] * 29) >> 8;
@@ -131,10 +131,12 @@ function scanBand(data: Uint8ClampedArray, w: number, h: number): { lines: numbe
     }
     marks.push({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1, area, dark: k === 1, label: id });
   }
-  // Letter-sized marks only.
+  // Letter-sized marks only. A mark cut by the picture's own border is a piece of the art running
+  // on past it (speed lines, hatching), not a letter: lettering stands inside the picture.
   const letterLike = marks.filter((m) => {
     const big = Math.max(m.w, m.h);
     if (m.area < 6 || big < 4 || big > maxH) return false;
+    if (m.x === 0 || m.x + m.w >= w || (edge.top && m.y === 0) || (edge.bottom && m.y + m.h >= h)) return false;
     if (m.w > m.h * 4 || m.h > m.w * 12) return false;
     const fill = m.area / (m.w * m.h);
     return fill >= 0.08 && fill <= 0.97;
@@ -196,7 +198,7 @@ function scanBand(data: Uint8ClampedArray, w: number, h: number): { lines: numbe
   let lines = 0;
   let letters = 0;
   for (const g of groups.values()) {
-    if (g.length < 3 || !varied(g)) continue;
+    if (g.length < 3 || !varied(g) || strokesOnly(g)) continue;
     // On a bubble / caption / plate, or outlined letters straight over the art (sound effects, titles).
     if (!flatAround(g, grey, label, w, h) && !outlinedLine(g, grey, label, w, h)) continue;
     lines++;
@@ -285,6 +287,14 @@ function outlined(m: Mark, grey: Uint8Array, label: Int32Array, w: number, h: nu
     }
   }
   return ring >= 8 && edge / ring >= 0.6 && outer >= 8 && same / outer < 0.5;
+}
+
+/**
+ * Speed lines, rain, a fence cut by a figure: a run of long thin straight strokes. Letters have
+ * both height and width (only I, l, 1, ! are bars, and a line is never made of those alone).
+ */
+function strokesOnly(g: Mark[]): boolean {
+  return g.every((m) => Math.max(m.w, m.h) >= Math.min(m.w, m.h) * 3.5);
 }
 
 /** Letters differ in shape; screentone dots, hatching and grids are copies of one mark. */

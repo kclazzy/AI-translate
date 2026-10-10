@@ -21,6 +21,7 @@ import { readSettingsFile, settingsToFile } from '../settingsFile';
 import { LocalModels, LocalSetup, ModelCheckCard, ModelPicker, UpdateCheck } from '../ModelPicker';
 import { usePlatform } from '../platform';
 import { LamaGetButton, lamaModeOf, useLamaDownloaded } from '../lama';
+import { DetectorChoice } from '../detector';
 import { SpeedBenchmark } from './SpeedBenchmark';
 import { ErrorBox, Field, FoldPanel, NumberInput, Segmented, Switch, toast, useAction } from '../ui';
 import { resolveUiLang, tr, uiLocale, UI_LANGS } from '@ait/core/i18n';
@@ -496,6 +497,10 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               <Switch checked={!!s.qaBatch} onChange={(qaBatch) => update({ qaBatch })} label={tr('Проверять несколько коротких страниц за раз')} />
               <small className="ait-muted" style={{ display: 'block' }}>{tr('Быстрее в режимах „Быстро“ и „Баланс“; в „Максимум“ каждая страница проверяется отдельно.')}</small>
             </div>
+            <div style={{ marginTop: 8 }} data-testid="self-check">
+              <Switch checked={s.selfCheck !== false} onChange={(selfCheck) => update({ selfCheck })} label={tr('Самопроверка после вёрстки')} />
+              <small className="ait-muted" style={{ display: 'block' }}>{tr('Ищет недостёртый оригинал, текст за краем бабла, слишком мелкий текст, задетый рисунок и неподходящий цвет. Очевидное исправляет сам, остальное показывает в редакторе («Следующее замечание»).')}</small>
+            </div>
             <div style={{ marginTop: 8 }}>
               <Switch checked={!!s.bubblesOnly} onChange={(bubblesOnly) => update({ bubblesOnly })} label={tr('Только баблы: звуки и надписи на фоне оставлять как в оригинале')} />
             </div>
@@ -524,6 +529,9 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
             </div>
             <div style={{ marginTop: 8 }}>
               <LamaChoice settings={s} update={update} offer={params.get('offer') === 'lama'} />
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <DetectorChoice settings={s} update={update} />
             </div>
             <div style={{ marginTop: 8 }}>
               <Segmented label={tr('Страницы главы в редакторе')} value={s.editorPageList ?? 'bottom'} onChange={(editorPageList) => update({ editorPageList })} options={[{ value: 'bottom', label: tr('Снизу') }, { value: 'right', label: tr('Справа') }]} />

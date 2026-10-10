@@ -41,6 +41,13 @@ export interface TextStyle {
   letterSpacing?: number;
 }
 
+/**
+ * What the self-check after typesetting can find wrong with a block: original lettering left,
+ * text outside the bubble, text too small to read, art around the bubble changed by cleaning,
+ * text colour that does not suit the background.
+ */
+export type SelfCheckIssue = 'not_erased' | 'outside' | 'too_small' | 'art_changed' | 'style';
+
 export interface BubbleInfo {
   /** Bubble bounding box. */
   box: Box;
@@ -88,6 +95,11 @@ export interface TextBlock {
   speakerGender?: 'male' | 'female' | 'unknown';
   /** Result of the translation check (linguistic + semantic QA). */
   qa?: import('./translate/qa').BlockQa;
+  /**
+   * Problems the self-check after typesetting found and could not fix (see pipeline/selfcheck.ts);
+   * absent when everything is fine. The editor lists them among the remarks.
+   */
+  selfCheck?: { issues: SelfCheckIssue[] };
   overflow?: boolean;
   /** Set when the user edited this block by hand. */
   edited?: boolean;
@@ -126,6 +138,8 @@ export interface PageTimings {
   cleanMs?: number;
   /** LaMa redrawing text over artwork (engine or browser); part of cleanMs. */
   inpaintMs?: number;
+  /** The neural text / bubble detector (browser), when it is on. */
+  detectorMs?: number;
   /** Typesetting the translation and encoding the tiles. */
   renderMs?: number;
   /** The whole page, from the bytes to the stored result. */
@@ -157,7 +171,18 @@ export interface PageResult {
    * The UI offers «Текста не найдено — ⟳ перевести всё равно»: ⟳ translates with `force`.
    */
   skippedNoText?: boolean;
+  /** What the model answered and what was done with it (problem report); local only, not in the cache key. */
+  debug?: PageDebug;
+  /** The self-check after typesetting: blocks it fixed by itself and blocks left for the user to look at. */
+  selfCheck?: { fixed: number; flagged: number };
   createdAt: string;
+}
+
+/** Raw model answers for a page (each cut to 20 KB, at most 8), its boxes before snapping/merging, notable decisions. */
+export interface PageDebug {
+  answers: { stage: 'read' | 'translate' | 'review' | 'region'; model: string; kind?: string; text: string }[];
+  modelBlocks: { box: Box; text: string; translation?: string }[];
+  steps?: string[];
 }
 
 export type JobStage = 'queued' | 'fetching' | 'decoding' | 'detecting' | 'ocr' | 'translating' | 'checking' | 'cleaning' | 'rendering' | 'done' | 'error';

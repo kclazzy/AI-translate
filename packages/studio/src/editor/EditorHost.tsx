@@ -130,6 +130,11 @@ export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose }: 
       settings={settings}
       onClose={onClose}
       marks={data.segments.length > 1 ? data.segments.slice(1).map((s) => s.y) : undefined}
+      reportSource={async () => {
+        if (data.segments.length !== 1) return undefined;
+        const r = await platform.service.getResult(data.segments[0].key);
+        return r ? { original: r.original, sourceUrl: r.sourceUrl } : undefined;
+      }}
       chapterTexts={
         chapterKeys && chapterKeys.length > 1 && data.segments.length === 1
           ? async (current) => {
@@ -213,6 +218,10 @@ export function ProjectPageEditor({ store, project, page, settings, onClose, onS
       onClose={onClose}
       onDirtyChange={onDirtyChange}
       chapterTexts={async (current) => project.pages.map((p) => (p.id === page.id ? current : p.result?.blocks ?? []))}
+      reportSource={async () => {
+        const a = await store.assets(project.id, page.id);
+        return a ? { original: a.original } : undefined;
+      }}
       onCrop={async (rect, blocks) => {
         const fresh = (await store.get(project.id)) ?? project;
         onSaved(await cropProjectPage(store, platform.backend, settings, fresh, page, { ...data.page, blocks }, data.original, data.cleaned, rect));

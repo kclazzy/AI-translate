@@ -26,12 +26,14 @@ import {
   type TiledImage,
   QA_LABELS,
   qaNote,
+  SELF_CHECK_NOTES,
 } from '@ait/core';
 import { loadUserFonts, registerUserFont, saveUserFont } from '../fonts';
 import { exportChapterTexts, exportTexts, importTexts } from './texts';
 import { EditHistory, type HistoryItem } from './history';
 import { confirmLeave, setActiveEditor, type EditorGuard } from './guard';
 import { exportPsd, psdTooBig } from '../psd';
+import { editorReportParts, ProblemReportButton } from '../ProblemReportButton';
 import { usePlatform, useUpdateSettings } from '../platform';
 import { LamaGetButton, lamaModeOf, useLamaDownloaded } from '../lama';
 import { ErrorBox, Field, Switch, toast, useAction } from '../ui';
@@ -58,6 +60,8 @@ export interface EditorProps {
   onCrop?: (rect: Box, blocks: TextBlock[]) => Promise<void>;
   /** Told whenever the page gets or loses unsaved edits (the page list marks it). */
   onDirtyChange?: (dirty: boolean) => void;
+  /** For «Сообщить о проблеме»: the original file's bytes and the page address, when known. */
+  reportSource?: () => Promise<{ original?: { bytes: Uint8Array; mime: string }; sourceUrl?: string } | undefined>;
 }
 
 const BASE_FONTS = ['"AIT Lettering"', '"AIT Comic"', '"AIT Narration"', '"AIT SFX"', 'Arial', '"Comic Sans MS"', '"Times New Roman"', 'Georgia', 'Impact'];
@@ -66,9 +70,12 @@ function clonePixels(p: PixelData): PixelData {
   return { width: p.width, height: p.height, data: new Uint8ClampedArray(p.data) };
 }
 
-/** A block the proof-reader should look at: the check found problems, or the text does not fit. */
+/**
+ * A block the proof-reader should look at: the check found problems, the self-check after
+ * typesetting left something it could not fix, or the text does not fit.
+ */
 function hasRemark(b: TextBlock, overflow: Set<string>): boolean {
-  return !!b.qa?.issues.length || overflow.has(b.id);
+  return !!b.qa?.issues.length || !!b.selfCheck?.issues.length || overflow.has(b.id);
 }
 
 /** Rows a block's letters can reach (overflowing or rotated text runs past its box). */
@@ -90,7 +97,7 @@ function blockRows(b: TextBlock, l: LayoutResult, d: StyleDefaults): [number, nu
 const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((x) => b.has(x));
 const OVERLAY_COLORS = { brush: '', eraser: '#1c6ed8', inpaint: '#c8205f' } as const;
 
-export function Editor({ page, original, cleaned, settings, onSave, onClose, title, marks, toolbarExtra, chapterTexts, onCrop, onDirtyChange }: EditorProps) {
+export function Editor({ page, original, cleaned, settings, onSave, onClose, title, marks, toolbarExtra, chapterTexts, onCrop, onDirtyChange, reportSource }: EditorProps) {
   const platform = usePlatform();
   const [blocks, setBlocks] = useState<TextBlock[]>(page.blocks);
   const [selected, setSelected] = useState<string | null>(page.blocks[0]?.id ?? null);
@@ -1024,6 +1031,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
         >
           {psd.busy ? 'PSD…' : 'PSD'}
         </button>
+        <ProblemReportButton small where="editor" parts={async () => editorReportParts(platform.backend, { ...page, blocks: blocksRef.current }, original, cleaned, defaults, await reportSource?.().catch(() => undefined))} />
         <span style={{ flex: 1 }} />
         <button className="ait-bubble-btn" style={{ fontSize: 16, minHeight: 36, padding: '4px 18px' }} onClick={() => void saveNow()} disabled={saving || !dirty} title={tr('Сохранить (Ctrl+S)')}>
           {saving ? tr('Сохраняю…') : dirty ? tr('Сохранить') : tr('Сохранено')}
@@ -1262,6 +1270,19 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                   ) : null}
                 </div>
               ) : null}
+              {sel.selfCheck?.issues.length ? (
+                <div className="ait-notice" data-testid="selfcheck-report" style={{ display: 'grid', gap: 4, marginBottom: 8 }}>
+                  <b>{tr('Самопроверка')}</b>
+                  {sel.selfCheck.issues.map((i) => (
+                    <small key={i}>⚠ {SELF_CHECK_NOTES[i]}</small>
+                  ))}
+                  <small>
+                    <button className="pp-link" onClick={() => commitWith((prev) => prev.map((b) => (b.id === sel.id ? { ...b, selfCheck: undefined } : b)))}>
+                      {tr('Убрать')}
+                    </button>
+                  </small>
+                </div>
+              ) : null}
               {multi.size ? <p className="ait-notice" data-testid="multi-note">{tr('Выбрано блоков: {0}. Стиль меняется у всех выбранных (Esc — снять выбор).', multi.size + 1)}</p> : null}
               <Field label={tr('Перевод')}>
                 <button className="ait-copy" onClick={() => copyText(sel.translatedText)} title={tr('Копировать перевод')} aria-label={tr('Копировать перевод')}>⧉</button>
@@ -1426,6 +1447,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                 <button key={b.id} aria-pressed={b.id === selected || multi.has(b.id)} onClick={(e) => { const add = e.ctrlKey || e.shiftKey || e.metaKey; pick(b.id, add); if (!add) scrollToBlock(b); setTool('select'); }}>
                   {i + 1}. {b.translatedText.slice(0, 40) || <em className="ait-muted">{tr('пусто')}</em>} {overflow.has(b.id) ? '⚠' : ''}
                   {b.qa?.issues.length ? <span title={b.qa.issues.map((q) => `${QA_LABELS[q.kind]}: ${qaNote(q)}`).join('\n')}> 🔍{b.qa.issues.length}</span> : null}
+                  {b.selfCheck?.issues.length ? <span title={b.selfCheck.issues.map((i) => SELF_CHECK_NOTES[i]).join('\n')}> ⚠{b.selfCheck.issues.length}</span> : null}
                 </button>
               ))}
             </div>

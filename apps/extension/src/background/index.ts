@@ -524,6 +524,14 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       dlog('download', r.name, r.pages, r.size);
       return { ok: true, name: r.name, pages: r.pages, id };
     }
+    case 'problem-report': {
+      const r = await toOffscreen<{ url: string; name: string; size: number }>({ target: 'offscreen', type: 'build-problem-report', key: msg.key, comment: msg.comment, pageUrl: msg.pageUrl, version: chrome.runtime.getManifest().version });
+      if (!r?.url) throw new AppError('UNKNOWN', { retryable: false, detail: 'report failed' });
+      // The name is Latin already (ait-problem-<date>-<id>.zip).
+      const id = await chrome.downloads.download({ url: r.url, filename: r.name, saveAs: false, conflictAction: 'uniquify' });
+      dlog('problem report', r.name, r.size);
+      return { ok: true, name: r.name, id };
+    }
     case 'open-setup':
       readyCache = null;
       await offerSetup(tabId, true);
@@ -538,6 +546,8 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       const s = await loadSettings();
       const urls = new Set(s.providers.filter((p) => isOllama(p)).map((p) => p.baseUrl));
       for (const u of urls) await ollamaUnloadAll(u).catch(() => undefined);
+      // …and the text detector's session in the worker.
+      await toOffscreen({ target: 'offscreen', type: 'free-memory' }).catch(() => undefined);
       return { ok: true };
     }
     case 'lama-offer': {

@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { AppSettings, IdbStore, ImageBackend, Inpainter, SecretStore, TranslateService, UpdateInfo } from '@ait/core';
+import type { AppSettings, IdbStore, ImageBackend, Inpainter, SecretStore, TextDetector, TranslateService, UpdateInfo } from '@ait/core';
 
 /** What the studio needs from its host (extension page, mobile app, web app). */
 export interface StudioPlatform {
@@ -23,6 +23,8 @@ export interface StudioPlatform {
   setupReady?(params: URLSearchParams): void;
   /** Optional: LaMa running in this browser (download the model once, then it redraws art under text). */
   lama?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void> };
+  /** Optional: the neural text / bubble detector in this browser (model downloaded once). */
+  detector?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void>; detect?: TextDetector };
   /** Optional: LaMa itself (needs the downloaded model), for the editor's «Дорисовать фон». */
   inpaint?: Inpainter;
 }

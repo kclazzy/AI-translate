@@ -1,11 +1,13 @@
 import { AppError, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type StoredResult } from '@ait/core';
 import { loadBundledFonts, loadUserFonts } from '@ait/studio/fonts';
 import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
+import { buildProblemReport } from '@ait/studio/problem-report';
 import type { StageEvent } from '@ait/core';
 import { CANCELLED_ALL, type FromOffscreen, type JobStatus, type RenderedTiles, type SpeedStats, type ToOffscreen } from '../shared/messages';
 import { deleteJobBytes, getJobBytes, pruneJobBytes } from '../shared/jobstore';
 import { db, loadSettings, secrets } from '../shared/store';
 import { lamaDownloaded, lamaInpainter } from './lama';
+import { detectorDownloaded, releaseDetector, textDetector } from './detector';
 import { setUiLang, tr } from '@ait/core/i18n';
 
 /**
@@ -173,7 +175,7 @@ export function toRendered(r: StoredResult, cached: boolean): RenderedTiles {
     height: r.page.height,
     tiles: omit ? [] : r.rendered.map((_, i) => tileOf(r, i)),
     tilesOmitted: omit ? r.rendered.length : undefined,
-    page: { blocks: r.page.blocks, timings: r.page.timings, usage: r.page.usage, pipeline: r.page.pipeline, stripLang: r.page.stripLang, artText: r.page.artText, artRedrawn: r.page.artRedrawn, skippedNoText: r.page.skippedNoText },
+    page: { blocks: r.page.blocks, timings: r.page.timings, usage: r.page.usage, pipeline: r.page.pipeline, stripLang: r.page.stripLang, artText: r.page.artText, artRedrawn: r.page.artRedrawn, skippedNoText: r.page.skippedNoText, selfCheck: r.page.selfCheck },
     cached,
   };
 }
@@ -229,6 +231,7 @@ function watchdogError(limitMin: number) {
 async function prepare() {
   const settings = await loadSettings();
   service.inpainter = await browserLama(settings.lamaMode);
+  service.detector = settings.detectorMode === 'browser' && (await detectorDownloaded()) ? textDetector : undefined;
   // This document can live for days: follow a language changed since it opened.
   setUiLang(settings.interfaceLang, false);
   const vision = settings.providers.find((p) => p.id === settings.visionProviderId);
@@ -449,6 +452,10 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       }
       return { cancelled: n };
     }
+    case 'free-memory':
+      // «Освободить и повторить»: the detector's session (video memory) is made again when needed.
+      await releaseDetector();
+      return { ok: true };
     case 'status':
       return Object.fromEntries(msg.jobIds.map((id) => [id, jobStatus(id)]));
     case 'lookup-cached': {
@@ -469,6 +476,28 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
     case 'get-tile': {
       const r = await service.getResult(msg.key);
       return r && r.rendered[msg.index] ? tileOf(r, msg.index) : null;
+    }
+    case 'build-problem-report': {
+      // «Сообщить о проблеме»: the stored result as a zip for the developer (settings without keys).
+      const r = await service.getResult(msg.key);
+      if (!r) throw new AppError('UNKNOWN', { retryable: false, message: tr('Перевод этой картинки не найден') });
+      const { name, bytes } = await buildProblemReport({
+        page: r.page,
+        original: r.original,
+        rendered: r.rendered,
+        cleaned: r.cleaned,
+        settings: await loadSettings(),
+        // Offscreen documents have no chrome.runtime.getManifest: the worker sends it.
+        version: msg.version,
+        platform: `extension${r.degraded ? ' (lighter settings)' : ''}${r.strip ? ' (part of a strip)' : ''}`,
+        backend: browserBackend,
+        sourceUrl: msg.pageUrl,
+        includeUrl: !!msg.pageUrl,
+        comment: msg.comment,
+      });
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/zip' }));
+      setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
+      return { url, name, size: bytes.length };
     }
     case 'build-file': {
       // Assemble the translated pages of a chapter into one file and hand back a blob URL.

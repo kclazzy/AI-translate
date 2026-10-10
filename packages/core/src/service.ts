@@ -12,6 +12,7 @@ import type { PageResult, StageEvent, TextBlock, Usage } from './types';
 import { sha256Hex, sniffImageMime } from './util/bytes';
 import { tr } from './i18n';
 import { preparePage, type Inpainter, type PreparedPage } from './pipeline/standalone';
+import type { TextDetector } from './pipeline/detect';
 import { QA_BATCH, qaPages } from './translate/qa';
 import { translateBlocks } from './translate/translator';
 import { createProvider } from './llm/presets';
@@ -125,6 +126,8 @@ export function seriesKeyFromUrl(url: string | undefined): string | undefined {
 export class TranslateService {
   /** LaMa in this browser (set by the extension when the model is downloaded). */
   inpainter?: Inpainter;
+  /** The neural text / bubble detector in this browser (set by the extension when the model is downloaded). */
+  detector?: TextDetector;
   /**
    * A stored result changed after it was delivered (the batched translation check fixed it):
    * the app redraws the picture like after an edit (extension: 'result-changed').
@@ -137,7 +140,11 @@ export class TranslateService {
   /** Read-modify-write of series contexts and usage totals by pages translated at the same time. */
   private locks = new KeyedMutex();
   /** The next picture, made ready while the model works on the current one (one at most). */
-  private ahead: { id: string; promise: Promise<PreparedPage | undefined> } | null = null;
+  /**
+   * Pictures prepared ahead, by key. Two slots: the queue may start preparing page N+2 before page
+   * N+1 has picked up its own preparation; one slot would throw that work away.
+   */
+  private ahead = new Map<string, Promise<PreparedPage | undefined>>();
   /** Short pages waiting for the batched translation check, by chapter + settings. */
   private reviews = new Map<string, { items: PendingReview[]; timer?: ReturnType<typeof setTimeout> }>();
   private reviewRuns = new Set<Promise<void>>();
@@ -215,7 +222,7 @@ export class TranslateService {
       const { value: out, lighter } = await this.runFitting(config, opts, (cfg) =>
         runPipeline(
           { bytes, mime: realMime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic, noSkip, prepared, batchReview: !!config.qaBatch && !opts.generic },
-          { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter },
+          { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector },
         ),
       );
       // A result made with lighter settings must not answer for the full-quality key.
@@ -281,9 +288,11 @@ export class TranslateService {
       const key = await this.cacheKey(bytes, config, { generic: opts.generic, fonts: lookOf(settings.fonts) });
       const noSkip = opts.noSkip ?? !!opts.force;
       const id = `${key}|${noSkip ? 1 : 0}`;
-      if (this.ahead?.id === id) return void (await this.ahead.promise);
-      const promise = preparePage({ bytes, mime: realMime, config, generic: opts.generic, noSkip }, { backend: this.backend, fetchImpl: this.fetchImpl }).catch(() => undefined);
-      this.ahead = { id, promise };
+      const known = this.ahead.get(id);
+      if (known) return void (await known);
+      const promise = preparePage({ bytes, mime: realMime, config, generic: opts.generic, noSkip }, { backend: this.backend, fetchImpl: this.fetchImpl, detect: this.detector }).catch(() => undefined);
+      this.ahead.set(id, promise);
+      while (this.ahead.size > 2) this.ahead.delete(this.ahead.keys().next().value!);
       await promise;
     } catch {
       /* best effort */
@@ -292,10 +301,10 @@ export class TranslateService {
 
   /** The prepared picture for this key, if it is the one prepared ahead (it is handed out once). */
   private async takeAhead(id: string): Promise<PreparedPage | undefined> {
-    const a = this.ahead;
-    if (!a || a.id !== id) return undefined;
-    this.ahead = null;
-    return a.promise;
+    const a = this.ahead.get(id);
+    if (!a) return undefined;
+    this.ahead.delete(id);
+    return a;
   }
 
   /**

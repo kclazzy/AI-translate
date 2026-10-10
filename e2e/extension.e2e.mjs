@@ -1,7 +1,8 @@
 // End-to-end test of the browser extension in a real Chromium:
 // load the unpacked build, configure a (mock) vision model, translate a manga page,
 // and check the result on screen. Run under a display (xvfb-run on Linux CI).
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { inflateRawSync } from 'node:zlib';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -84,6 +85,75 @@ try {
   check('browser launches with the extension', false, String(e?.stack ?? e));
   writeFileSync(join(OUT, `e2e-extension-${MODE}.json`), JSON.stringify(results, null, 2));
   process.exit(1);
+}
+
+/** Text of a node from DOM.getDocument (pierce). */
+function textOf(n) {
+  let t = '';
+  const walk = (x) => {
+    if (x.nodeType === 3) t += x.nodeValue;
+    (x.children ?? []).forEach(walk);
+  };
+  walk(n);
+  return t.trim();
+}
+
+/** Nodes of the page including closed shadow roots (our overlays). */
+async function shadowNodes(p) {
+  const c = await p.target().createCDPSession();
+  const { root } = await c.send('DOM.getDocument', { depth: -1, pierce: true });
+  const out = [];
+  const walk = (n) => {
+    out.push(n);
+    (n.children ?? []).forEach(walk);
+    (n.shadowRoots ?? []).forEach(walk);
+  };
+  walk(root);
+  return { c, nodes: out };
+}
+
+async function shadowTexts(p) {
+  const { c, nodes } = await shadowNodes(p);
+  await c.detach();
+  return nodes.filter((n) => n.nodeType === 3 && n.nodeValue?.trim()).map((n) => n.nodeValue.trim());
+}
+
+/** Click the first element (also inside closed shadow roots) that matches. */
+async function clickInShadow(p, match) {
+  const { c, nodes } = await shadowNodes(p);
+  const n = nodes.find(match);
+  if (!n) {
+    await c.detach();
+    throw new Error(`element not found; buttons: ${nodes.filter((x) => x.localName === 'button').map((x) => `${textOf(x)}[${x.attributes}]`).join(' | ')}`);
+  }
+  const { model } = await c.send('DOM.getBoxModel', { backendNodeId: n.backendNodeId });
+  await c.detach();
+  const q = model.content;
+  await p.mouse.click((q[0] + q[4]) / 2, (q[1] + q[5]) / 2);
+}
+
+/** Files of a zip (central directory; stored or deflated). */
+function readZip(buf) {
+  const out = {};
+  let eocd = buf.length - 22;
+  while (eocd >= 0 && buf.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+  if (eocd < 0) return out;
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  for (let i = 0; i < count; i++) {
+    const method = buf.readUInt16LE(p + 10);
+    const size = buf.readUInt32LE(p + 20);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extra = buf.readUInt16LE(p + 30);
+    const comment = buf.readUInt16LE(p + 32);
+    const local = buf.readUInt32LE(p + 42);
+    const name = buf.subarray(p + 46, p + 46 + nameLen).toString('utf8');
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const data = buf.subarray(start, start + size);
+    out[name] = method === 8 ? inflateRawSync(data) : data;
+    p += 46 + nameLen + extra + comment;
+  }
+  return out;
 }
 
 try {
@@ -204,6 +274,47 @@ try {
     const d0 = diffInside(before, b);
     const d1 = diffInside(after, b);
     check(`bubble ${i + 1}: original text replaced`, d0 > 150 && d1 > 40 && Math.abs(d1 - d0) > 30, `dark px before=${d0}, after=${d1}`);
+  }
+
+  // ⓘ → «Сообщить о проблеме»: a zip for the developer is downloaded (page, model answers, no keys).
+  {
+    const DL = join(tmpdir(), `ait-ext-report-${MODE}`);
+    if (existsSync(DL)) rmSync(DL, { recursive: true });
+    mkdirSync(DL, { recursive: true });
+    const bc = await browser.target().createCDPSession();
+    await bc.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: DL, eventsEnabled: true });
+    await page.bringToFront();
+    const r = await page.$eval('#p1', (el) => el.getBoundingClientRect().toJSON());
+    await page.mouse.move(r.x + r.width / 2, r.y + 40);
+    // The overlay may still be finishing (the review redraws it): wait for its ⓘ.
+    for (let i = 0; i < 40; i++) {
+      const ok = await clickInShadow(page, (n) => n.localName === 'button' && n.attributes?.includes('data-info')).then(() => true, () => false);
+      if (ok) break;
+      await new Promise((res) => setTimeout(res, 300));
+    }
+    await new Promise((res) => setTimeout(res, 300));
+    await clickInShadow(page, (n) => n.localName === 'textarea');
+    await page.keyboard.type('Пузырь пустой');
+    await clickInShadow(page, (n) => n.localName === 'button' && textOf(n) === 'Сообщить о проблеме');
+    let zipName = null;
+    for (let i = 0; i < 60 && !zipName; i++) {
+      await new Promise((res) => setTimeout(res, 300));
+      zipName = readdirSync(DL).find((f) => f.endsWith('.zip'));
+    }
+    const files = zipName ? readZip(readFileSync(join(DL, zipName))) : {};
+    const texts = await shadowTexts(page);
+    const note = texts.find((t) => t.startsWith('Файл сохранён')) ?? '';
+    if (!zipName) {
+      await page.screenshot({ path: join(OUT, 'e2e-report-fail.png') });
+      console.log('report UI:', texts.slice(-15).join(' | '));
+    }
+    check('ⓘ → «Сообщить о проблеме» downloads a zip with the page data', !!files['page.json'] && !!files['original.png'] && !!files['result.png'] && !!files['cleaned.png'], `${zipName ?? 'no zip'}: ${Object.keys(files).join(', ')}`);
+    const pj = files['page.json'] ? JSON.parse(files['page.json'].toString('utf8')) : null;
+    const info = files['info.txt']?.toString('utf8') ?? '';
+    const settingsJson = files['settings.json']?.toString('utf8') ?? '';
+    check('the report has the model answers, the comment, no keys and no page address', (MODE === 'engine' || pj?.debug?.answers?.length > 0) && info.includes('Пузырь пустой') && !info.includes('127.0.0.1:18081') && !settingsJson.includes('e2e-token') && /ait-problem-\d{8}-\d{4}-[0-9a-z]+\.zip/.test(note), `answers=${pj?.debug?.answers?.length} note=${note}`);
+    await clickInShadow(page, (n) => n.localName === 'button' && n.attributes?.includes('data-info')).catch(() => undefined);
+    await bc.detach();
   }
 
   // Cached result opens in the editor.

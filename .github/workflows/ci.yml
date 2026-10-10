@@ -27,8 +27,15 @@ jobs:
         run: node packages/core/scripts/i18n-extract.mjs --check
       - name: Fonts for the test pictures (Japanese text and Latin)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk fonts-dejavu-core >/dev/null
-      - name: Unit and pipeline tests (core)
+      - name: Unit and pipeline tests (core, including the golden set)
         run: pnpm --filter @ait/core test
+      - name: Golden set pictures and report (when something failed)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-set
+          path: .test-output/golden/
+          if-no-files-found: ignore
       - run: pnpm --filter @ait/extension build
       - run: pnpm --filter @ait/mobile build
       - name: Engine (for the engine e2e)
@@ -61,6 +68,7 @@ jobs:
           xvfb-run -a node e2e/power.e2e.mjs 2>&1 | tee .test-output/e2e-power.log
           xvfb-run -a node e2e/strip.e2e.mjs 2>&1 | tee .test-output/e2e-strip.log
           xvfb-run -a node e2e/lama.e2e.mjs 2>&1 | tee .test-output/e2e-lama.log
+          xvfb-run -a node e2e/detector.e2e.mjs 2>&1 | tee .test-output/e2e-detector.log
           xvfb-run -a node e2e/phrasebook.e2e.mjs 2>&1 | tee .test-output/e2e-phrasebook.log
           pnpm --filter @ait/studio test
       - name: Package release files

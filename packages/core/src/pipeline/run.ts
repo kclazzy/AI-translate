@@ -8,6 +8,8 @@ import { runStandalonePipeline, type PipelineOutput, type PipelineRequest, type 
 import { createProvider } from '../llm/presets';
 import { assertPrivacy } from '../llm/privacy';
 import { qaBatchPlan, qaPage } from '../translate/qa';
+import { addStep, recording } from './debug';
+import { selfCheckPage } from './selfcheck';
 
 export async function runPipeline(req: PipelineRequest & { batchReview?: boolean }, deps: StandaloneDeps): Promise<PipelineOutput & { reviewLater?: boolean }> {
   const out: PipelineOutput & { reviewLater?: boolean } = req.config.mode === 'engine' ? await runEnginePipeline(req, deps) : await runStandalonePipeline(req, deps);
@@ -17,7 +19,7 @@ export async function runPipeline(req: PipelineRequest & { batchReview?: boolean
     // Check the translation (linguistic + semantic) with the model that translated the text.
     req.onStage?.({ stage: 'checking' });
     const cfg = req.config.translator ?? req.config.vision;
-    let provider = cfg ? createProvider(cfg, deps.fetchImpl) : null;
+    let provider = cfg ? recording(createProvider(cfg, deps.fetchImpl), 'review', out.page.debug) : null;
     // The review sends the texts to that model: never outside the privacy mode (rule checks still run).
     if (cfg) {
       try {
@@ -60,15 +62,29 @@ export interface RenderedPage {
   mime: ImageMime;
 }
 
-/** Typeset translated text over the cleaned image and encode the result as image tiles. */
-export async function renderOutput(backend: ImageBackend, out: Pick<PipelineOutput, 'page' | 'cleaned'>, defaults: StyleDefaults, mime: ImageMime = 'image/png'): Promise<RenderedPage> {
+/**
+ * Typeset translated text over the cleaned image and encode the result as image tiles. A fresh
+ * pipeline result (`original` with `selfCheck`) is self-checked first: fixes change its blocks and
+ * its cleaned picture (`out.cleaned`, in place), so callers store the cleaned layer afterwards.
+ */
+export async function renderOutput(backend: ImageBackend, out: Pick<PipelineOutput, 'page' | 'cleaned'> & Partial<Pick<PipelineOutput, 'original' | 'selfCheck'>>, defaults: StyleDefaults, mime: ImageMime = 'image/png'): Promise<RenderedPage> {
   const t0 = performance.now();
-  const { tiles, overflow } = renderTiles(backend, out.cleaned, out.page.blocks, defaults);
+  let src = out.page;
+  if (out.selfCheck && out.original && !src.selfCheck) {
+    try {
+      const r = selfCheckPage({ backend, original: out.original, cleaned: out.cleaned, page: src, defaults });
+      src = { ...src, blocks: r.blocks, selfCheck: { fixed: r.fixed, flagged: r.flagged } };
+    } catch (e) {
+      // The check never fails a page.
+      addStep(src.debug, `selfcheck failed: ${(e as Error)?.message ?? e}`);
+    }
+  }
+  const { tiles, overflow } = renderTiles(backend, out.cleaned, src.blocks, defaults);
   const encoded = await encodeTiles(backend, tiles, mime, mime === 'image/png' ? undefined : 0.92);
   const page: PageResult = {
-    ...out.page,
-    blocks: out.page.blocks.map((b) => ({ ...b, overflow: overflow.has(b.id) })),
-    timings: { ...out.page.timings, renderMs: Math.round(performance.now() - t0) },
+    ...src,
+    blocks: src.blocks.map((b) => ({ ...b, overflow: overflow.has(b.id) })),
+    timings: { ...src.timings, renderMs: Math.round(performance.now() - t0) },
   };
   return { page, tiles: encoded, mime };
 }

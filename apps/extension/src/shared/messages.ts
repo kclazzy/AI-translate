@@ -19,7 +19,7 @@ export interface RenderedTiles {
   width: number;
   height: number;
   tiles: { y: number; h: number; dataUrl: string }[];
-  page: Pick<PageResult, 'blocks' | 'timings' | 'usage' | 'pipeline' | 'stripLang' | 'artText' | 'artRedrawn' | 'skippedNoText'>;
+  page: Pick<PageResult, 'blocks' | 'timings' | 'usage' | 'pipeline' | 'stripLang' | 'artText' | 'artRedrawn' | 'skippedNoText' | 'selfCheck'>;
   cached: boolean;
   /**
    * The tiles were too big for one message (browsers refuse messages over 64 MiB): `tiles` is
@@ -54,7 +54,9 @@ export type ContentToBackground =
   /** Pictures translated before: picture address → result key (results are fetched one by one). */
   | { type: 'lookup-cached'; srcs: string[] }
   | { type: 'get-tile'; key: string; index: number }
-  | { type: 'build-download'; keys: string[]; title: string; format: ChapterFormat };
+  | { type: 'build-download'; keys: string[]; title: string; format: ChapterFormat }
+  /** «Сообщить о проблеме» on a page's ⓘ: a zip to reproduce it (page address only when ticked). */
+  | { type: 'problem-report'; key: string; comment?: string; pageUrl?: string };
 
 /** Time per translated page (kv 'speed'), written by the worker, shown in the popup. */
 export interface SpeedStats {
@@ -115,9 +117,11 @@ export type ToOffscreen =
   | { target: 'offscreen'; type: 'cancel-tab'; tabId?: number; doc?: string }
   | { target: 'offscreen'; type: 'status'; jobIds: string[] }
   | { target: 'offscreen'; type: 'build-file'; keys: string[]; title: string; format: ChapterFormat; lang: string }
+  | { target: 'offscreen'; type: 'build-problem-report'; key: string; comment?: string; pageUrl?: string; version: string }
   | { target: 'offscreen'; type: 'get-result'; key: string }
   | { target: 'offscreen'; type: 'get-tile'; key: string; index: number }
-  | { target: 'offscreen'; type: 'lookup-cached'; srcs: string[] };
+  | { target: 'offscreen'; type: 'lookup-cached'; srcs: string[] }
+  | { target: 'offscreen'; type: 'free-memory' };
 
 export type FromOffscreen =
   | { source: 'offscreen'; type: 'stage'; jobId: string; tabId: number; event: StageEvent }

@@ -1,7 +1,7 @@
 {
   "name": "ai-translate",
   "private": true,
-  "version": "0.9.1",
+  "version": "1.0.0",
   "description": "AI translator for manga, manhwa, webtoons and comics — browser extension, local engine and mobile app",
   "license": "MIT",
   "packageManager": "pnpm@10.28.0",
@@ -16,6 +16,8 @@
     "dev:mobile": "pnpm --filter @ait/mobile dev",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
-    "release": "node scripts/package-release.mjs"
+    "release": "node scripts/package-release.mjs",
+    "golden": "pnpm --filter @ait/core exec vitest run test/golden.test.ts test/golden-sloppy.test.ts",
+    "golden:real": "node scripts/golden-real.mjs"
   }
 }

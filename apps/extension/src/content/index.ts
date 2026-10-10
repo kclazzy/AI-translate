@@ -142,13 +142,33 @@ function main() {
     // double the memory on long webtoon pages.
     it.result = { ...result, tiles: [] };
     it.overlay.setOriginal(originalsShown);
-    const qa = result.page.blocks.flatMap((b) => (b.qa?.issues ?? []).map((q) => `• ${q.code ? tr(q.code, ...(q.args ?? [])) : q.note}${b.qa?.before !== undefined ? tr(' (исправлено)') : ''}`));
+    const qa = result.page.blocks.flatMap((b) => [
+      ...(b.qa?.issues ?? []).map((q) => `• ${q.code ? tr(q.code, ...(q.args ?? [])) : q.note}${b.qa?.before !== undefined ? tr(' (исправлено)') : ''}`),
+      // What the self-check after typesetting could not fix (the editor's «Следующее замечание» goes to them too).
+      ...(b.selfCheck?.issues ?? []).map((i) => `⚠ ${selfCheckNote(i)}`),
+    ]);
     it.overlay.setQa(qa.length, qa.slice(0, 8).join('\n'));
-    it.overlay.setInfo(pageInfo(result));
+    it.overlay.setInfo(pageInfo(result), (o) => reportProblem(result.key, o));
     // No lettering found, the model was not asked: say so (⟳ translates it anyway).
     if (result.page.skippedNoText) it.overlay.setSkipped(tr('Текста не найдено'));
     it.overlay.position();
     if (artPlain(result)) void offerLama();
+  }
+
+  /** A problem the self-check after typesetting left for the reader (same notes as in the editor). */
+  function selfCheckNote(issue: string): string {
+    switch (issue) {
+      case 'not_erased':
+        return tr('Оригинал стёрт не полностью');
+      case 'outside':
+        return tr('Текст выходит за бабл');
+      case 'too_small':
+        return tr('Слишком мелкий текст');
+      case 'art_changed':
+        return tr('Задет рисунок вокруг бабла');
+      default:
+        return tr('Цвет текста не подходит к фону');
+    }
   }
 
   /** Text stood over artwork and the background there was only painted over (no LaMa). */
@@ -242,9 +262,16 @@ function main() {
       tr('Текстов на картинке: {0}', r.page.blocks.length),
       artPlain(r) ? tr('Текст поверх рисунка: {0} — фон без LaMa', r.page.artText) : '',
       r.page.skippedNoText ? tr('Пропущена: текста не найдено') : '',
+      r.page.selfCheck && r.page.selfCheck.fixed + r.page.selfCheck.flagged > 0 ? tr('Самопроверка: исправлено {0}, требуют внимания {1}', r.page.selfCheck.fixed, r.page.selfCheck.flagged) : '',
       r.cached ? tr('Взято из кэша') : '',
     ];
     return lines.filter(Boolean).join('\n');
+  }
+
+  /** «Сообщить о проблеме»: the worker builds a zip of this page (no keys) and downloads it. */
+  async function reportProblem(key: string, o: { comment: string; includeUrl: boolean }): Promise<string> {
+    const r = await send<{ ok: boolean; name: string }>({ type: 'problem-report', key, comment: o.comment.slice(0, 2000), ...(o.includeUrl ? { pageUrl: location.href } : {}) });
+    return r?.ok ? tr('Файл сохранён: {0}. Пришлите его разработчику.', r.name) : tr('Не удалось собрать файл');
   }
 
   // ---- translations made before: shown as soon as the page opens again -------------------

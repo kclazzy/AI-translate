@@ -41,12 +41,16 @@ export interface PipelineConfig {
   lamaEngine?: boolean;
   /** Where LaMa runs: the local engine, or the browser (needs `inpaint` in the pipeline deps). */
   lama?: 'engine' | 'browser';
+  /** Neural text/bubble detector in this browser (needs `detect` in the pipeline deps). */
+  detector?: boolean;
   /** Разговорник: hints for recurring expressions (see translate/phrasebook). */
   phrasebook?: PhrasebookSettings;
   /** Pictures without lettering (local check) are not sent to the model; default on. */
   skipEmptyPages?: boolean;
   /** Short pages are reviewed in batches, tiny ones by rules only (see settings.qaBatch). */
   qaBatch?: boolean;
+  /** Self-check after typesetting (see pipeline/selfcheck.ts); default on. */
+  selfCheck?: boolean;
 }
 
 /** Longest side of the picture sent to the vision model, by quality. */
@@ -115,8 +119,10 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     inpaintExpand: s.inpaintExpand,
     phrasebook: s.phrasebook,
     lama: (s.lamaMode ?? (s.lamaEngine ? 'engine' : 'off')) === 'off' ? undefined : (s.lamaMode ?? 'engine') as 'engine' | 'browser',
+    detector: s.detectorMode === 'browser' || undefined,
     skipEmptyPages: s.skipEmptyPages ?? true,
     qaBatch: s.qaBatch || undefined,
+    selfCheck: s.selfCheck ?? true,
   };
 }
 
@@ -147,6 +153,8 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     // Only the non-default values: results made before these settings existed keep their keys.
     nse: c.skipEmptyPages === false ? 1 : undefined,
     qb: c.qaBatch ? 1 : undefined,
+    det: c.detector ? 1 : undefined,
+    nsc: c.selfCheck === false ? 1 : undefined,
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);
 }

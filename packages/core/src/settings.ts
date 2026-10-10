@@ -141,6 +141,8 @@ export interface AppSettings {
   lamaMode?: 'off' | 'engine' | 'browser';
   /** The user said «Не предлагать» to the LaMa offer shown after a page with text over artwork. */
   lamaOfferDismissed?: boolean;
+  /** Neural text/bubble detector running in the browser (model downloaded once): 'browser' after the download. */
+  detectorMode?: 'off' | 'browser';
   /** models.json fetched from the repository (recommended local models, family settings). */
   modelCatalog?: import('./llm/catalog').ModelCatalog;
   modelCatalogCheckedAt?: string;
@@ -159,6 +161,12 @@ export interface AppSettings {
    * 1–2 short bubbles (≤ 40 characters) get only the rule checks.
    */
   qaBatch?: boolean;
+  /**
+   * Self-check after typesetting (default on): leftover lettering, text outside the bubble, too
+   * small text, art changed around the bubble, text colour; fixed locally where it is obvious,
+   * otherwise shown among the editor's remarks.
+   */
+  selfCheck?: boolean;
   /** Most space the translation cache may take, MB (default 2048); the least recently used pages go first. */
   cacheMaxMb?: number;
 }
@@ -384,11 +392,13 @@ export function migrateSettings(raw: unknown): AppSettings {
     lamaEngine: 'boolean',
     lamaMode: 'string',
     lamaOfferDismissed: 'boolean',
+    detectorMode: 'string',
     modelCatalog: 'object',
     modelCatalogCheckedAt: 'string',
     interfaceLang: 'string',
     skipEmptyPages: 'boolean',
     qaBatch: 'boolean',
+    selfCheck: 'boolean',
     cacheMaxMb: 'number',
   });
   // At least 50 MB (a few chapters), at most 100 GB.
@@ -397,6 +407,7 @@ export function migrateSettings(raw: unknown): AppSettings {
   if (out.exportPageLength !== undefined && !['normal', 'long', 'whole'].includes(out.exportPageLength as string)) delete out.exportPageLength;
   if (out.editorPageList !== undefined && !['bottom', 'right'].includes(out.editorPageList as string)) delete out.editorPageList;
   if (out.lamaMode !== undefined && !['off', 'engine', 'browser'].includes(out.lamaMode as string)) delete out.lamaMode;
+  if (out.detectorMode !== undefined && !['off', 'browser'].includes(out.detectorMode as string)) delete out.detectorMode;
   if (Array.isArray(r.presets)) out.presets = r.presets.map(cleanPreset).filter((p): p is ModelPreset => !!p);
   return out as unknown as AppSettings;
 }
