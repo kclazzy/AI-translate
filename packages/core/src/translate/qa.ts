@@ -214,7 +214,7 @@ async function review(items: { id: string; b: TextBlock }[], provider: LlmProvid
 }
 
 /** Batched review limits (settings → qaBatch). */
-export const QA_BATCH = { maxBlocks: 6, maxChars: 400, maxPages: 4, tinyBlocks: 2, tinyChars: 40, waitMs: 1500 };
+export const QA_BATCH = { maxBlocks: 6, maxChars: 400, maxPages: 4, tinyBlocks: 2, tinyChars: 40, waitMs: 20000 };
 
 /** How a page is checked with qaBatch on: 'rules' (1–2 short bubbles), 'batch' (short page) or 'page' (as usual). */
 export function qaBatchPlan(blocks: TextBlock[]): 'rules' | 'batch' | 'page' {
