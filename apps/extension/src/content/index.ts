@@ -189,6 +189,17 @@ function main() {
     lamaCard = host;
   }
 
+  /** Time on the clock since the start: «45 с», «4 мин 12 с», «1 ч 3 мин». */
+  function fmtElapsed(ms: number): string {
+    const sec = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (h) return tr('{0} ч {1} мин', h, m);
+    if (m) return tr('{0} мин {1} с', m, s);
+    return tr('{0} с', s);
+  }
+
   /** The whole chapter (or page): pictures, model time, tokens and cost — shown when it is done. */
   function chapterStats(list: Item[]): string {
     let ms = 0, tokens = 0, cost = 0, cached = 0;
@@ -673,7 +684,7 @@ function main() {
   let pageMode = false;
 
   // ---- «Перевести и скачать»: the whole chapter as one file --------------------------------
-  let chapter: { format: ChapterFormat; timer: ReturnType<typeof setInterval>; panel: HTMLElement; text: HTMLElement; lastChange: number; lastDone: number; seen: number; loaded: boolean } | null = null;
+  let chapter: { format: ChapterFormat; timer: ReturnType<typeof setInterval>; panel: HTMLElement; text: HTMLElement; lastChange: number; lastDone: number; seen: number; loaded: boolean; startedAt: number; button: HTMLButtonElement } | null = null;
 
   function downloadChapter(format: ChapterFormat) {
     if (chapter) return;
@@ -686,7 +697,8 @@ function main() {
       button { all: initial; cursor: pointer; color: #fff; font: inherit; border: 1px solid #fff6; border-radius: 6px; padding: 2px 8px; }
     </style><div class="p" role="status"><span class="t"></span><button type="button">${tr('Отменить')}</button></div>`;
     const text = root.querySelector('.t') as HTMLElement;
-    (root.querySelector('button') as HTMLButtonElement).addEventListener('click', () => {
+    const button = root.querySelector('button') as HTMLButtonElement;
+    button.addEventListener('click', () => {
       if (!chapter) return host.remove();
       clearInterval(chapter.timer);
       chapter = null;
@@ -699,7 +711,7 @@ function main() {
       host.remove();
     });
     document.documentElement.appendChild(host);
-    chapter = { format, timer: setInterval(() => void tickChapter(), 1000), panel: host, text, lastChange: Date.now(), lastDone: -1, seen: 0, loaded: false };
+    chapter = { format, timer: setInterval(() => void tickChapter(), 1000), panel: host, text, lastChange: Date.now(), lastDone: -1, seen: 0, loaded: false, startedAt: Date.now(), button };
     translatePage();
     void loadWholeChapter(chapter);
     void tickChapter();
@@ -761,7 +773,7 @@ function main() {
       c.lastChange = Date.now();
     }
     const label = c.format.toUpperCase();
-    c.text.textContent = tr('Глава → {0}: готово {1} из {2}{3}', label, done, list.length, failed ? tr(', не удалось {0}', failed) : '');
+    c.text.textContent = `${tr('Глава → {0}: готово {1} из {2}{3}', label, done, list.length, failed ? tr(', не удалось {0}', failed) : '')} · ${fmtElapsed(Date.now() - c.startedAt)}`;
     // Everything finished (or nothing moved for 15 minutes): build the file from what is ready.
     const stalled = Date.now() - c.lastChange > 15 * 60_000;
     // Finish only after the whole chapter was scrolled through (its last pages load late).
@@ -779,13 +791,15 @@ function main() {
         const r = await send<{ ok: boolean; name: string; pages: number; error?: { detail?: string } }>({ type: 'build-download', keys, title: document.title, format: c.format });
         if (!r?.ok) throw new Error(r?.error?.detail ?? tr('не удалось собрать файл'));
         c.text.textContent = `${tr('Скачано: {0}{1}', r.name, failed ? tr(' (без {0} непереведённых картинок)', failed) : '')}
+${tr('Затрачено времени: {0}', fmtElapsed(Date.now() - c.startedAt))}
 ${chapterStats(list)}`;
         c.text.style.whiteSpace = 'pre-line';
+        c.button.textContent = tr('Закрыть');
       } catch (e) {
         c.text.textContent = tr('Не удалось собрать файл: {0}', e instanceof Error ? e.message : String(e));
       }
       chapter = null;
-      setTimeout(() => c.panel.remove(), 12_000);
+      setTimeout(() => c.panel.remove(), 60_000);
     }
   }
 
@@ -821,7 +835,7 @@ ${chapterStats(list)}`;
   }
 
   // ---- progress of «Перевести страницу» ----------------------------------------------------
-  let progress: { host: HTMLElement; timer: ReturnType<typeof setInterval>; text: HTMLElement; bar: HTMLElement } | null = null;
+  let progress: { host: HTMLElement; timer: ReturnType<typeof setInterval>; text: HTMLElement; bar: HTMLElement; button: HTMLButtonElement; startedAt: number; finished: boolean } | null = null;
   function showPageProgress() {
     if (progress) return;
     const host = document.createElement('div');
@@ -839,7 +853,9 @@ ${chapterStats(list)}`;
     </style><div class="p" role="status" aria-live="polite"><div class="row"><span class="t"></span><button type="button">${tr('Остановить')}</button></div><div class="track"><div class="fill busy"></div></div></div>`;
     const text = root.querySelector('.t') as HTMLElement;
     const bar = root.querySelector('.fill') as HTMLElement;
-    (root.querySelector('button') as HTMLButtonElement).addEventListener('click', () => {
+    const button = root.querySelector('button') as HTMLButtonElement;
+    button.addEventListener('click', () => {
+      if (progress?.finished) return hidePageProgress();
       for (const it of items.values()) {
         if (it.status !== 'queued' && it.status !== 'working') continue;
         dismissed.add(it.cand.el);
@@ -849,7 +865,7 @@ ${chapterStats(list)}`;
       hidePageProgress();
     });
     document.documentElement.appendChild(host);
-    progress = { host, text, bar, timer: setInterval(tickPageProgress, 700) };
+    progress = { host, text, bar, button, startedAt: Date.now(), finished: false, timer: setInterval(tickPageProgress, 700) };
     tickPageProgress();
   }
   function hidePageProgress() {
@@ -866,9 +882,11 @@ ${chapterStats(list)}`;
     const failed = list.filter((it) => it.status === 'error').length;
     const total = list.length;
     const left = total - done - failed;
+    const elapsed = fmtElapsed(Date.now() - p.startedAt);
     p.text.textContent = left
-      ? tr('Перевожу страницу: {0} из {1}{2}', done, total, failed ? tr(', ошибок: {0}', failed) : '')
+      ? `${tr('Перевожу страницу: {0} из {1}{2}', done, total, failed ? tr(', ошибок: {0}', failed) : '')} · ${elapsed}`
       : `${tr('Готово: переведено {0} из {1}{2}', done, total, failed ? tr(', ошибок: {0}', failed) : '')}
+${tr('Затрачено времени: {0}', elapsed)}
 ${chapterStats(list)}`;
     p.text.style.whiteSpace = 'pre-line';
     // Until the first picture is ready the bar just runs; then it shows the share done.
@@ -877,7 +895,10 @@ ${chapterStats(list)}`;
     p.bar.style.width = `${Math.round(share * 100)}%`;
     if (!left && total) {
       clearInterval(p.timer);
-      setTimeout(() => progress === p && hidePageProgress(), 9000);
+      p.finished = true;
+      p.button.textContent = tr('Закрыть');
+      // Long enough to read the time; «Закрыть» hides it at once.
+      setTimeout(() => progress === p && hidePageProgress(), 60_000);
     }
   }
 

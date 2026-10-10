@@ -172,7 +172,7 @@ try {
     const walk = (n) => { if (n.nodeType === 3 && /Перевожу страницу|Готово: переведено/.test(n.nodeValue ?? '')) texts.push(n.nodeValue); (n.children ?? []).forEach(walk); (n.shadowRoots ?? []).forEach(walk); };
     walk(root);
     await c.detach();
-    check('translating the whole page shows a progress indicator', texts.some((t) => /Перевожу страницу: \d+ из 3/.test(t)), JSON.stringify(texts));
+    check('translating the whole page shows a progress indicator', texts.some((t) => /Перевожу страницу: \d+ из 3 · \d+ (с|мин)/.test(t)), JSON.stringify(texts));
   }
 
   // Simulate the worker losing its jobs (the browser closes the offscreen document mid-chapter).

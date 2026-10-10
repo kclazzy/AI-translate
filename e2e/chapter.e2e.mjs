@@ -173,6 +173,7 @@ try {
     panel = (await pageTexts(tab)).find((t) => t.startsWith('Скачано') || t.startsWith('Не удалось')) ?? '';
     if (!panel.includes('Скачано')) await new Promise((r) => setTimeout(r, 300));
   }
+  check('the finished chapter shows the time it took', /Затрачено времени: \d+ (с|мин)/.test(panel), panel);
   check('the chapter is downloaded as one PDF named after the page', !!file && /(Звёздный мечник глава 131|Zvezdnyy mechnik glava 131)\.pdf/.test(panel), `${panel || 'no panel'} · ${file ?? 'no file'} in ${Date.now() - t0} ms`);
   if (file) {
     await new Promise((r) => setTimeout(r, 500));
