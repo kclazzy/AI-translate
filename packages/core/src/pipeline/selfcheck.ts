@@ -22,6 +22,7 @@ import { resolveStyle, targetBox, type StyleDefaults } from '../render/style';
 import type { LayoutResult, Measurer } from '../typeset/layout';
 import type { Box, BubbleInfo, PageResult, SelfCheckIssue, TextBlock, TextStyle } from '../types';
 import { lazyStrings } from '../i18n';
+import { yieldIfBusy } from '../util/yield';
 import { addStep } from './debug';
 
 export type { SelfCheckIssue } from '../types';
@@ -174,6 +175,33 @@ interface Ctx {
 
 /** Run the self-check over a rendered page's blocks; returns new blocks (the cleaned image may change). */
 export function selfCheckPage(input: SelfCheckInput): SelfCheckResult {
+  // Every block reads (and may fix) regions of both pictures: keep their pixels at hand meanwhile.
+  const released = [input.original.hold(), input.cleaned.hold()];
+  try {
+    const run = checker(input);
+    return run.result(input.page.blocks.map(run.block));
+  } finally {
+    for (const release of released) release();
+  }
+}
+
+/** selfCheckPage that lets other work run between blocks (see yieldIfBusy). */
+export async function selfCheckPageAsync(input: SelfCheckInput): Promise<SelfCheckResult> {
+  const released = [input.original.hold(), input.cleaned.hold()];
+  try {
+    const run = checker(input);
+    const blocks: TextBlock[] = [];
+    for (const b of input.page.blocks) {
+      blocks.push(run.block(b));
+      await yieldIfBusy();
+    }
+    return run.result(blocks);
+  } finally {
+    for (const release of released) release();
+  }
+}
+
+function checker(input: SelfCheckInput) {
   const { page, defaults: d } = input;
   const ctx: Ctx = {
     in: input,
@@ -184,7 +212,7 @@ export function selfCheckPage(input: SelfCheckInput): SelfCheckResult {
   };
   let fixed = 0;
   let flagged = 0;
-  const blocks = page.blocks.map((b0) => {
+  const block = (b0: TextBlock): TextBlock => {
     // The user's own work and blocks that are not drawn are left alone.
     if (b0.edited || b0.continued || !shouldDraw(b0, d)) return b0;
     let b: TextBlock = { ...b0 };
@@ -206,8 +234,8 @@ export function selfCheckPage(input: SelfCheckInput): SelfCheckResult {
     }
     fixed++;
     return b;
-  });
-  return { blocks, fixed, flagged };
+  };
+  return { block, result: (blocks: TextBlock[]): SelfCheckResult => ({ blocks, fixed, flagged }) };
 }
 
 function layoutOf(ctx: Ctx, b: TextBlock): { l: LayoutResult; box: Box } {

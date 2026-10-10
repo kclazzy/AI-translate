@@ -204,10 +204,35 @@ export interface VisionAnswer {
 
 export const MAX_BLOCKS_PER_PAGE = 200;
 
+const BLOCK_KEYS = ['blocks', 'bubbles', 'texts', 'text_blocks', 'items', 'results', 'regions', 'lines', 'data'];
+const looksLikeBlock = (x: unknown) => !!x && typeof x === 'object' && !Array.isArray(x) && ['box', 'bbox', 'bbox_2d', 'box_2d', 'text'].some((k) => k in (x as object));
+
+/**
+ * The list of text blocks in a vision answer. Models do not always use our key: a bare array, another
+ * key name («bubbles», «items»…), a single block object, or an object with no blocks at all (no text
+ * on the page) are all accepted. null only when the answer has no recognisable shape.
+ */
+export function findBlocksArray(json: unknown): unknown[] | null {
+  if (Array.isArray(json)) return json;
+  if (!json || typeof json !== 'object') return null;
+  const o = json as Record<string, unknown>;
+  for (const k of BLOCK_KEYS) if (Array.isArray(o[k])) return o[k] as unknown[];
+  for (const v of Object.values(o)) if (Array.isArray(v) && v.some(looksLikeBlock)) return v;
+  for (const v of Object.values(o)) if (v && typeof v === 'object' && !Array.isArray(v)) {
+    const inner = Object.values(v as Record<string, unknown>).find((x) => Array.isArray(x) && x.some(looksLikeBlock));
+    if (inner) return inner as unknown[];
+  }
+  if (looksLikeBlock(o)) return [o];
+  // An object without any list: the model found no text ({} or only a summary).
+  const other = Object.entries(o).filter(([k, v]) => Array.isArray(v) && v.length && !['entities', 'characters', 'names', 'glossary'].includes(k));
+  if (!other.length) return [];
+  return null;
+}
+
 export function parseVisionAnswer(raw: string, expectTranslation: boolean, repair = true): VisionAnswer {
   const { value, repaired } = extractJsonInfo(raw, { repair });
   const json = (value ?? {}) as Record<string, unknown>;
-  const arr = Array.isArray(json.blocks) ? json.blocks : Array.isArray(json) ? (json as unknown[]) : null;
+  const arr = findBlocksArray(json);
   if (!arr) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'Missing "blocks" array' });
   // A bare array that holds no objects is not an answer (an empty one is: no text on the page).
   if (arr.length && !arr.some((x) => x && typeof x === 'object')) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'No blocks in answer' });
@@ -215,7 +240,9 @@ export function parseVisionAnswer(raw: string, expectTranslation: boolean, repai
   for (const item of arr.slice(0, MAX_BLOCKS_PER_PAGE)) {
     if (!item || typeof item !== 'object') continue;
     const b = item as Record<string, unknown>;
-    const box = Array.isArray(b.box) ? b.box.map(Number) : Array.isArray(b.bbox) ? (b.bbox as unknown[]).map(Number) : null;
+    // Qwen-VL habitually writes "bbox_2d" ([x0,y0,x1,y1]); Gemini "box_2d" ([y0,x0,y1,x1]).
+    const g = Array.isArray(b.box_2d) ? (b.box_2d as unknown[]).map(Number) : null;
+    const box = Array.isArray(b.box) ? b.box.map(Number) : Array.isArray(b.bbox) ? (b.bbox as unknown[]).map(Number) : Array.isArray(b.bbox_2d) ? (b.bbox_2d as unknown[]).map(Number) : g && g.length === 4 ? [g[1], g[0], g[3], g[2]] : null;
     if (!box || box.length !== 4 || box.some((n) => !Number.isFinite(n))) continue;
     let [x0, y0, x1, y1] = box;
     if (x1 < x0) [x0, x1] = [x1, x0];

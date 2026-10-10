@@ -67,8 +67,10 @@ export function DetectorChoice({ settings: s, update }: { settings: AppSettings;
   const on = s.detectorMode === 'browser';
   return (
     <div style={{ display: 'grid', gap: 6 }} data-testid="detector">
-      <span>{tr('Точный поиск текста (нейросеть ~45 МБ)')}</span>
-      <small className="ait-muted">{tr('Нейросеть находит баблы и текст точнее модели-переводчика: меньше сдвинутого текста, пропусков и стёртого рисунка.')}</small>
+      <span className="ait-set-label">{tr('Точный поиск текста (нейросеть ~45 МБ)')}</span>
+      <small className="ait-muted ait-set-hint" title={tr('Нейросеть находит баблы и текст точнее модели-переводчика: меньше сдвинутого текста, пропусков и стёртого рисунка.')}>
+        {tr('Нейросеть находит баблы и текст точнее модели-переводчика: меньше сдвинутого текста, пропусков и стёртого рисунка.')}
+      </small>
       {have ? (
         <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <span data-testid="detector-switch">

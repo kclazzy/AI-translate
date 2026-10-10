@@ -184,3 +184,18 @@ describe('line breaks in bubbles', () => {
     expect(textTranslateInstruction([{ id: 'b1', type: 'NARRATION', text: '...RIGHT\nWHERE SHE BELONGS' }], {})).toContain('"...RIGHT WHERE SHE BELONGS"');
   });
 });
+
+describe('vision answers in other shapes', () => {
+  it('accepts other keys, a single block, Qwen bbox_2d and an empty object', async () => {
+    const { parseVisionAnswer } = await import('../src/translate/parse');
+    const b = { box: [100, 100, 300, 200], text: 'あ', translation: 'А' };
+    expect(parseVisionAnswer(JSON.stringify({ bubbles: [b] }), true).blocks).toHaveLength(1);
+    expect(parseVisionAnswer(JSON.stringify({ result: { items: [b] } }), true).blocks).toHaveLength(1);
+    expect(parseVisionAnswer(JSON.stringify(b), true).blocks).toHaveLength(1);
+    expect(parseVisionAnswer(JSON.stringify([{ bbox_2d: [100, 100, 300, 200], text: 'あ', translation: 'А' }]), true).blocks[0].box).toEqual([100, 100, 300, 200]);
+    expect(parseVisionAnswer(JSON.stringify([{ box_2d: [100, 50, 300, 250], text: 'あ' }]), false).blocks[0].box).toEqual([50, 100, 250, 300]);
+    expect(parseVisionAnswer('{}', true).blocks).toHaveLength(0);
+    expect(parseVisionAnswer('{"summary":"пусто","entities":[]}', true).blocks).toHaveLength(0);
+    expect(() => parseVisionAnswer('{"foo":[1,2,3]}', true)).toThrow();
+  });
+});

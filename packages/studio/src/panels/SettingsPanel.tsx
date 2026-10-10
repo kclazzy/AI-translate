@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   applyPreset,
   configFromPreset,
@@ -191,6 +191,30 @@ function ProfileEditor({ p, onChange }: { p: PromptProfile; onChange: (p: Prompt
 }
 
 /** How much space the app takes on this device, with buttons to free it. */
+/** A small titled group of settings inside a card. */
+function SetGroup({ title, children }: { title?: string; children: ReactNode }) {
+  return (
+    <section className={title ? 'ait-set-group' : 'ait-set-group untitled'}>
+      {title ? <h3>{title}</h3> : null}
+      {children}
+    </section>
+  );
+}
+
+/** A setting's explanation: small, muted, at most two lines; the whole text is in the tooltip and shows when the setting has keyboard focus. */
+function SetHint({ text }: { text: string }) {
+  return <small className="ait-set-hint" title={text}>{text}</small>;
+}
+
+function SetSwitch({ checked, onChange, label, hint, testId }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string; testId?: string }) {
+  return (
+    <div className="ait-set-opt" data-testid={testId}>
+      <Switch checked={checked} onChange={onChange} label={label} />
+      {hint ? <SetHint text={hint} /> : null}
+    </div>
+  );
+}
+
 /** Text over artwork: redraw the background with LaMa — off, in the local engine, or in this browser. */
 function LamaChoice({ settings: s, update, offer }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; offer?: boolean }) {
   const platform = usePlatform();
@@ -430,9 +454,9 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
         <SpeedBenchmark settings={s} />
       </div>
       {s.pipeline === 'standalone' && platform.kind === 'extension' ? <LocalModels settings={s} update={update} getKey={getKey} autoStart={params.get('pull') === '1'} /> : null}
-      <div className="ait-panel">
+      <div className="ait-panel" data-testid="how-to-translate">
         <h2>{tr('Как переводить')}</h2>
-        <div className="ait-grid2">
+        <div className="ait-set-langs">
           <Field label={tr('Исходный язык')}>
             <select className="ait-select" value={s.sourceLang} onChange={(e) => update({ sourceLang: e.target.value })}>
               <option value="auto">{tr('Определять автоматически')}</option>
@@ -444,111 +468,95 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
             </select>
           </Field>
-          <Field label={tr('Проверка перевода')} hint={tr('Ещё один короткий запрос на страницу: смысл, контекст, эмоции, персонажи, грамматика, термины')}>
-            <select className="ait-select" value={s.qaMode ?? 'fix'} onChange={(e) => update({ qaMode: e.target.value as AppSettings['qaMode'] })}>
-              <option value="fix">{tr('Исправлять ошибки автоматически')}</option>
-              <option value="report">{tr('Только показывать замечания')}</option>
-              <option value="off">{tr('Выключена (быстрее)')}</option>
-            </select>
-          </Field>
-          <Field label={tr('Наборы настроек')} hint={tr('Модель, качество и проверка — одним выбором (например «Быстро локально» и «Точно в облаке»)')}>
-            <div style={{ display: 'grid', gap: 6 }} data-testid="presets">
-              {(s.presets ?? []).map((p) => (
-                <span key={p.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <b style={{ flex: 1 }}>{p.name}</b>
-                  <small className="ait-muted">{Object.values(p.models).join(' + ')}</small>
-                  <button className="ait-btn small" onClick={() => update(applyPreset(s, p))}>{tr('Применить')}</button>
-                  <button className="ait-btn small danger" aria-label={tr('Удалить набор {0}', p.name)} onClick={() => update({ presets: (s.presets ?? []).filter((x) => x.id !== p.id) })}>✕</button>
-                </span>
-              ))}
-              <button
-                className="ait-btn small"
-                style={{ justifySelf: 'start' }}
-                onClick={() => {
-                  const name = prompt(tr('Название набора'), tr('Набор {0}', (s.presets?.length ?? 0) + 1));
-                  if (name?.trim()) update({ presets: [...(s.presets ?? []), presetFrom(s, name.trim())] });
-                }}
-              >
-                {tr('Сохранить текущие как набор')}
-              </button>
-            </div>
-          </Field>
-          <Field label={tr('Качество')} hint={tr('Чем выше, тем крупнее картинка уходит модели и дольше ответ')}>
-            <Segmented label={tr('Качество')} value={s.quality} onChange={(quality) => update({ quality })} options={[{ value: 'fast', label: tr('Быстро') }, { value: 'balanced', label: tr('Баланс') }, { value: 'best', label: tr('Максимум') }]} />
-            <div style={{ marginTop: 8 }}>
-              <Switch
+        </div>
+        <div className="ait-set-grid">
+          <div className="ait-set-col">
+            <SetGroup title={tr('Качество')}>
+              <div className="ait-field">
+                <Segmented label={tr('Качество')} value={s.quality} onChange={(quality) => update({ quality })} options={[{ value: 'fast', label: tr('Быстро') }, { value: 'balanced', label: tr('Баланс') }, { value: 'best', label: tr('Максимум') }]} />
+                <small>{tr('Чем выше, тем крупнее картинка уходит модели и дольше ответ')}</small>
+              </div>
+              <Field label={tr('Проверка перевода')} hint={tr('Ещё один короткий запрос на страницу: смысл, контекст, эмоции, персонажи, грамматика, термины')}>
+                <select className="ait-select" value={s.qaMode ?? 'fix'} onChange={(e) => update({ qaMode: e.target.value as AppSettings['qaMode'] })}>
+                  <option value="fix">{tr('Исправлять ошибки автоматически')}</option>
+                  <option value="report">{tr('Только показывать замечания')}</option>
+                  <option value="off">{tr('Выключена (быстрее)')}</option>
+                </select>
+              </Field>
+              <SetSwitch testId="qa-batch" checked={!!s.qaBatch} onChange={(qaBatch) => update({ qaBatch })} label={tr('Проверять несколько коротких страниц за раз')} hint={tr('Быстрее в режимах „Быстро“ и „Баланс“; в „Максимум“ каждая страница проверяется отдельно.')} />
+              <SetSwitch
                 checked={s.twoStepTranslation ?? (s.quality !== 'fast' && !s.fastLocal)}
                 onChange={(twoStepTranslation) => update({ twoStepTranslation })}
                 label={tr('Переводить отдельным шагом — точнее смысл и окончания слов, чуть дольше')}
               />
-            </div>
-            <div style={{ marginTop: 8 }}>
-              <Switch
-                checked={s.stitchStrips !== false}
-                onChange={(stitchStrips) => update({ stitchStrips })}
-                label={tr('Склеивать соседние картинки ленты (вебтун) — баблы на стыке не теряются')}
-              />
-            </div>
-            <div style={{ marginTop: 8 }} data-testid="skip-empty">
-              <Switch checked={s.skipEmptyPages !== false} onChange={(skipEmptyPages) => update({ skipEmptyPages })} label={tr('Пропускать картинки без текста')} />
-              <small className="ait-muted" style={{ display: 'block' }}>{tr('Пейзажи и фоны без букв не отправляются модели — быстрее для вебтунов. На пропущенной картинке ⟳ переведёт её всё равно.')}</small>
-            </div>
-            <div style={{ marginTop: 8 }} data-testid="qa-batch">
-              <Switch checked={!!s.qaBatch} onChange={(qaBatch) => update({ qaBatch })} label={tr('Проверять несколько коротких страниц за раз')} />
-              <small className="ait-muted" style={{ display: 'block' }}>{tr('Быстрее в режимах „Быстро“ и „Баланс“; в „Максимум“ каждая страница проверяется отдельно.')}</small>
-            </div>
-            <div style={{ marginTop: 8 }} data-testid="self-check">
-              <Switch checked={s.selfCheck !== false} onChange={(selfCheck) => update({ selfCheck })} label={tr('Самопроверка после вёрстки')} />
-              <small className="ait-muted" style={{ display: 'block' }}>{tr('Ищет недостёртый оригинал, текст за краем бабла, слишком мелкий текст, задетый рисунок и неподходящий цвет. Очевидное исправляет сам, остальное показывает в редакторе («Следующее замечание»).')}</small>
-            </div>
-            <div style={{ marginTop: 8 }}>
-              <Switch checked={!!s.bubblesOnly} onChange={(bubblesOnly) => update({ bubblesOnly })} label={tr('Только баблы: звуки и надписи на фоне оставлять как в оригинале')} />
-            </div>
-            <div style={{ marginTop: 8 }}>
-              <Switch checked={!!s.onlySourceLang} onChange={(onlySourceLang) => update({ onlySourceLang })} label={tr('Переводить только текст на исходном языке (нужен выбранный исходный язык)')} />
-            </div>
-            <div style={{ marginTop: 8 }}>
-              <Switch checked={s.autoApplyCached !== false} onChange={(autoApplyCached) => update({ autoApplyCached })} label={tr('Сразу показывать уже переведённые картинки, когда страница открывается снова')} />
-            </div>
-            <div style={{ marginTop: 8 }}>
-              {platform.kind === 'extension' ? <AutoSaveFolder settings={s} update={update} /> : null}
-            </div>
-            <div style={{ marginTop: 8 }}>
+              <div className="ait-set-sfx">
+                <Switch checked={s.translateSfx} onChange={(translateSfx) => update({ translateSfx })} label={tr('Переводить звуковые эффекты')} />
+                <select className="ait-select" aria-label={tr('Звуки (SFX)')} value={s.sfxStyle} onChange={(e) => update({ sfxStyle: e.target.value as AppSettings['sfxStyle'] })}>
+                  <option value="translated">{tr('Перевод')}</option>
+                  <option value="original">{tr('Оставить оригинал')}</option>
+                  <option value="small">{tr('Мелкий')}</option>
+                  <option value="large">{tr('Крупный')}</option>
+                  <option value="artistic">{tr('Художественный')}</option>
+                </select>
+              </div>
+            </SetGroup>
+            <SetGroup title={tr('Наборы настроек')}>
+              <div className="ait-set-presets" data-testid="presets">
+                {(s.presets ?? []).map((p) => (
+                  <span key={p.id} className="ait-set-preset">
+                    <b>{p.name}</b>
+                    <small className="ait-muted">{Object.values(p.models).join(' + ')}</small>
+                    <button className="ait-btn small" onClick={() => update(applyPreset(s, p))}>{tr('Применить')}</button>
+                    <button className="ait-btn small danger" aria-label={tr('Удалить набор {0}', p.name)} onClick={() => update({ presets: (s.presets ?? []).filter((x) => x.id !== p.id) })}>✕</button>
+                  </span>
+                ))}
+                <SetHint text={tr('Модель, качество и проверка — одним выбором (например «Быстро локально» и «Точно в облаке»)')} />
+                <button
+                  className="ait-btn small"
+                  style={{ justifySelf: 'start' }}
+                  onClick={() => {
+                    const name = prompt(tr('Название набора'), tr('Набор {0}', (s.presets?.length ?? 0) + 1));
+                    if (name?.trim()) update({ presets: [...(s.presets ?? []), presetFrom(s, name.trim())] });
+                  }}
+                >
+                  {tr('Сохранить текущие как набор')}
+                </button>
+              </div>
+            </SetGroup>
+            {platform.kind === 'extension' ? (
+              <SetGroup>
+                <AutoSaveFolder settings={s} update={update} />
+              </SetGroup>
+            ) : null}
+          </div>
+          <div className="ait-set-col">
+            <SetGroup title={tr('Страницы')}>
+              <SetSwitch checked={s.stitchStrips !== false} onChange={(stitchStrips) => update({ stitchStrips })} label={tr('Склеивать соседние картинки ленты (вебтун) — баблы на стыке не теряются')} />
+              <SetSwitch checked={!!s.bubblesOnly} onChange={(bubblesOnly) => update({ bubblesOnly })} label={tr('Только баблы: звуки и надписи на фоне оставлять как в оригинале')} />
+              <SetSwitch checked={!!s.onlySourceLang} onChange={(onlySourceLang) => update({ onlySourceLang })} label={tr('Переводить только текст на исходном языке (нужен выбранный исходный язык)')} />
+              <SetSwitch testId="skip-empty" checked={s.skipEmptyPages !== false} onChange={(skipEmptyPages) => update({ skipEmptyPages })} label={tr('Пропускать картинки без текста')} hint={tr('Пейзажи и фоны без букв не отправляются модели — быстрее для вебтунов. На пропущенной картинке ⟳ переведёт её всё равно.')} />
+              <SetSwitch checked={s.autoApplyCached !== false} onChange={(autoApplyCached) => update({ autoApplyCached })} label={tr('Сразу показывать уже переведённые картинки, когда страница открывается снова')} />
+              <div className="ait-field">
+                <span>{tr('Страницы главы в редакторе')}</span>
+                <Segmented label={tr('Страницы главы в редакторе')} value={s.editorPageList ?? 'bottom'} onChange={(editorPageList) => update({ editorPageList })} options={[{ value: 'bottom', label: tr('Снизу') }, { value: 'right', label: tr('Справа') }]} />
+              </div>
+            </SetGroup>
+            <SetGroup title={tr('Вёрстка')}>
               <label className="ait-field" data-testid="font-scale">
                 <span>{tr('Размер текста перевода: {0}%', Math.round((s.fonts.scale ?? 1) * 100))}</span>
                 <input type="range" min={0.6} max={1.5} step={0.05} value={s.fonts.scale ?? 1} onChange={(e) => update({ fonts: { ...s.fonts, scale: Number(e.target.value) } })} aria-label={tr('Размер текста перевода')} />
-                <small className="ait-muted">{tr('Меньше 100% — текст мельче, чем помещается в бабл; больше — крупнее, пока помещается. Размер, заданный в редакторе вручную, не меняется.')}</small>
+                <SetHint text={tr('Меньше 100% — текст мельче, чем помещается в бабл; больше — крупнее, пока помещается. Размер, заданный в редакторе вручную, не меняется.')} />
               </label>
-            </div>
-            <div style={{ marginTop: 8 }}>
               <label className="ait-field">
                 <span>{tr('Стирать оригинал с запасом: {0} px', s.inpaintExpand ?? 3)}</span>
                 <input type="range" min={0} max={12} value={s.inpaintExpand ?? 3} onChange={(e) => update({ inpaintExpand: Number(e.target.value) })} aria-label={tr('Запас вокруг букв при стирании')} />
-                <small className="ait-muted">{tr('Больше — если вокруг перевода остаются следы старых букв; меньше — если стирается лишний рисунок.')}</small>
+                <SetHint text={tr('Больше — если вокруг перевода остаются следы старых букв; меньше — если стирается лишний рисунок.')} />
               </label>
-            </div>
-            <div style={{ marginTop: 8 }}>
               <LamaChoice settings={s} update={update} offer={params.get('offer') === 'lama'} />
-            </div>
-            <div style={{ marginTop: 8 }}>
               <DetectorChoice settings={s} update={update} />
-            </div>
-            <div style={{ marginTop: 8 }}>
-              <Segmented label={tr('Страницы главы в редакторе')} value={s.editorPageList ?? 'bottom'} onChange={(editorPageList) => update({ editorPageList })} options={[{ value: 'bottom', label: tr('Снизу') }, { value: 'right', label: tr('Справа') }]} />
-            </div>
-          </Field>
-          <Field label={tr('Звуки (SFX)')}>
-            <div style={{ display: 'grid', gap: 8 }}>
-              <Switch checked={s.translateSfx} onChange={(translateSfx) => update({ translateSfx })} label={tr('Переводить звуковые эффекты')} />
-              <select className="ait-select" value={s.sfxStyle} onChange={(e) => update({ sfxStyle: e.target.value as AppSettings['sfxStyle'] })}>
-                <option value="translated">{tr('Перевод')}</option>
-                <option value="original">{tr('Оставить оригинал')}</option>
-                <option value="small">{tr('Мелкий')}</option>
-                <option value="large">{tr('Крупный')}</option>
-                <option value="artistic">{tr('Художественный')}</option>
-              </select>
-            </div>
-          </Field>
+              <SetSwitch testId="self-check" checked={s.selfCheck !== false} onChange={(selfCheck) => update({ selfCheck })} label={tr('Самопроверка после вёрстки')} hint={tr('Ищет недостёртый оригинал, текст за краем бабла, слишком мелкий текст, задетый рисунок и неподходящий цвет. Очевидное исправляет сам, остальное показывает в редакторе («Следующее замечание»).')} />
+            </SetGroup>
+          </div>
         </div>
       </div>
 

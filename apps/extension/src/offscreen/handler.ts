@@ -242,11 +242,18 @@ async function prepare() {
   return local;
 }
 
+/**
+ * Messages answered at once, whatever runs: they only read what is stored or known (never queued
+ * behind the translations, and not waiting for the fonts). A translation in progress lets them in
+ * between its steps (the pipeline yields, see yieldIfBusy).
+ */
+const QUICK = new Set<ToOffscreen['type']>(['status', 'lookup-cached', 'get-result', 'get-tile', 'cancel', 'cancel-tab', 'free-memory']);
+
 export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen) => void): Promise<unknown> {
   // The batched translation check fixed a picture after it was shown: the pages showing it redraw
   // it (Chrome: a message to the background; Firefox: a direct call, the handler runs there).
   service.onResultChanged = (key) => emit({ source: 'offscreen', type: 'result-changed', key });
-  await ensureFonts();
+  if (!QUICK.has(msg.type)) await ensureFonts();
   if (!pruned) {
     pruned = true;
     void service.prune();

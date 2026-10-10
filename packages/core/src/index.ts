@@ -7,6 +7,7 @@ export * from './util/bytes';
 export * from './util/retry';
 export * from './util/queue';
 export * from './util/mutex';
+export * from './util/yield';
 export * from './llm/types';
 export * from './llm/presets';
 export * from './llm/privacy';

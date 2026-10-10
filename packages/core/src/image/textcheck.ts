@@ -1,4 +1,5 @@
 import type { TiledImage } from './tiled';
+import { yieldIfBusy } from '../util/yield';
 
 /**
  * A cheap local check for "is there any lettering on this picture at all?", run before the vision
@@ -41,6 +42,25 @@ interface Mark {
 }
 
 export function checkForText(image: TiledImage, opts: { full?: boolean } = {}): TextCheck {
+  const steps = checkSteps(image, opts);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** checkForText that lets other work run between the bands (see yieldIfBusy). */
+export async function checkForTextAsync(image: TiledImage, opts: { full?: boolean } = {}): Promise<TextCheck> {
+  const steps = checkSteps(image, opts);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+    await yieldIfBusy();
+  }
+}
+
+/** The check band by band (a step per band). */
+function* checkSteps(image: TiledImage, opts: { full?: boolean }): Generator<void, TextCheck> {
   const t0 = performance.now();
   const scale = Math.min(1, TARGET_W / image.width);
   const W = Math.max(1, Math.round(image.width * scale));
@@ -60,6 +80,7 @@ export function checkForText(image: TiledImage, opts: { full?: boolean } = {}): 
     letters += r.letters;
     // One line of text is enough for the verdict; `full` counts every band (tests, statistics).
     if (top + bh >= H || (lines && !opts.full)) break;
+    yield;
   }
   return { lines, letters, noText: lines === 0, ms: Math.round(performance.now() - t0) };
 }

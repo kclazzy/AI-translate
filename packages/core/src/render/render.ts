@@ -4,6 +4,7 @@ import type { TiledImage } from '../image/tiled';
 import type { Box, BubbleRows, TextBlock } from '../types';
 import { layoutText, type LayoutResult, type Measurer } from '../typeset/layout';
 import { resolveStyle, targetBox, type StyleDefaults, DEFAULT_STYLE_DEFAULTS } from './style';
+import { yieldIfBusy } from '../util/yield';
 
 export function ctxMeasurer(ctx: any): Measurer {
   const cache = new Map<string, number>();
@@ -221,8 +222,29 @@ export function drawBlock(ctx: any, block: TextBlock, layout: LayoutResult, d: S
   ctx.restore();
 }
 
+type RenderedTiles = { tiles: { y: number; h: number; canvas: AnyCanvas }[]; overflow: Set<string> };
+
 /** Render cleaned image + translated text into new tiles. Returns per-block layouts (for overflow flags). */
-export function renderTiles(backend: ImageBackend, cleaned: TiledImage, blocks: TextBlock[], d: StyleDefaults = DEFAULT_STYLE_DEFAULTS): { tiles: { y: number; h: number; canvas: AnyCanvas }[]; overflow: Set<string> } {
+export function renderTiles(backend: ImageBackend, cleaned: TiledImage, blocks: TextBlock[], d: StyleDefaults = DEFAULT_STYLE_DEFAULTS): RenderedTiles {
+  const steps = renderSteps(backend, cleaned, blocks, d);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** renderTiles that lets other work run between the blocks' layouts (see yieldIfBusy). */
+export async function renderTilesAsync(backend: ImageBackend, cleaned: TiledImage, blocks: TextBlock[], d: StyleDefaults = DEFAULT_STYLE_DEFAULTS): Promise<RenderedTiles> {
+  const steps = renderSteps(backend, cleaned, blocks, d);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+    await yieldIfBusy();
+  }
+}
+
+/** The rendering, a step per block laid out and per tile drawn. */
+function* renderSteps(backend: ImageBackend, cleaned: TiledImage, blocks: TextBlock[], d: StyleDefaults): Generator<void, RenderedTiles> {
   const measureCanvas = backend.createCanvas(8, 8);
   const measurer = ctxMeasurer(measureCanvas.getContext('2d'));
   const layouts = new Map<string, LayoutResult>();
@@ -232,8 +254,10 @@ export function renderTiles(backend: ImageBackend, cleaned: TiledImage, blocks: 
     const l = layoutBlock(measurer, b, d, { width: cleaned.width, height: cleaned.height });
     layouts.set(b.id, l);
     if (l.overflow) overflow.add(b.id);
+    yield;
   }
-  const tiles = cleaned.tiles.map((t) => {
+  const tiles: RenderedTiles['tiles'] = [];
+  for (const t of cleaned.tiles) {
     const canvas = backend.createCanvas(cleaned.width, t.h);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(t.canvas, 0, 0);
@@ -248,8 +272,9 @@ export function renderTiles(backend: ImageBackend, cleaned: TiledImage, blocks: 
       if (bottom < t.y || top > t.y + t.h) continue;
       drawBlock(ctx, b, l, d, t.y);
     }
-    return { y: t.y, h: t.h, canvas };
-  });
+    tiles.push({ y: t.y, h: t.h, canvas });
+    yield;
+  }
   return { tiles, overflow };
 }
 

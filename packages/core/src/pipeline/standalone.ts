@@ -16,8 +16,9 @@ import type { Box, BubbleInfo, PageDebug, PageResult, StageEvent, TextBlock, Tex
 import { bytesToBase64, sha256Hex } from '../util/bytes';
 import { mapLimit } from '../util/queue';
 import { withRetry } from '../util/retry';
+import { yieldIfBusy } from '../util/yield';
 import { MAX_SIDE, pipelineHash, type PipelineConfig } from './config';
-import { checkForText, type TextCheck } from '../image/textcheck';
+import { checkForTextAsync, type TextCheck } from '../image/textcheck';
 import { EngineClient } from './engine';
 import { addStep, createDebug, recording } from './debug';
 import { backgroundUnder, colourFor } from './selfcheck';
@@ -90,7 +91,7 @@ export async function preparePage(req: Pick<PipelineRequest, 'bytes' | 'mime' | 
       // The detector failed (model broken, out of memory): the page goes on without it.
     }
   }
-  if (checksText(req) && !prep.textCheck) prep.textCheck = checkForText(original);
+  if (checksText(req) && !prep.textCheck) prep.textCheck = await checkForTextAsync(original);
   if (req.config.mode === 'standalone' && req.config.vision?.vision && !prep.textCheck?.noText) {
     prep.views = [];
     for (const view of planViews(original.width, original.height)) prep.views.push(await encodeView(original, view, req.config, req.config.vision.model, deps));
@@ -705,191 +706,210 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
 
   stage('cleaning');
   cleaned = original.clone();
-  if (dets?.length && !req.generic) {
-    // The detector knows where the lettering really is: the model's boxes move onto it.
-    const moved = snapBlocksToDetections(blocks, dets, original.width, original.height);
-    for (const b of blocks) if (moved.has(b.id)) b.fontSizeEstimate = estimateFontSize(b.bbox, b.originalText);
-    if (moved.size) addStep(debug, `snapped to the detector's text boxes: ${[...moved].join(', ')}`);
-  }
-  const closedBubble = new Map<string, boolean>();
-  const letterHeight = new Map<string, number>();
-  const cleanOne = (b: TextBlock) => {
-    const erase = b.translate && !(b.textType === 'SFX' && config.sfxStyle === 'original');
-    if (req.generic) {
-      // UI/screen text: no bubbles; paint a plate behind the text instead.
-      const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, expand: config.inpaintExpand });
-      b.bubble = r.bubble ? { ...r.bubble, shape: 'rect', safeArea: [...b.bbox] as Box } : null;
-      return;
+  await yieldIfBusy();
+  // Cleaning reads hundreds of regions of both pictures: keep their pixels at hand meanwhile.
+  const released = [original.hold()];
+  await yieldIfBusy();
+  released.push(cleaned.hold());
+  await yieldIfBusy();
+  try {
+    if (dets?.length && !req.generic) {
+      // The detector knows where the lettering really is: the model's boxes move onto it.
+      const moved = snapBlocksToDetections(blocks, dets, original.width, original.height);
+      for (const b of blocks) if (moved.has(b.id)) b.fontSizeEstimate = estimateFontSize(b.bbox, b.originalText);
+      if (moved.size) addStep(debug, `snapped to the detector's text boxes: ${[...moved].join(', ')}`);
     }
-    if (erase && b.textType !== 'SFX' && !placeOnLettering(b)) {
-      // The model's box holds no letters and none stand nearby: keep the translation where the
-      // model put it, but never erase the art there and never shout over it in big light letters.
-      b.lowConfidence = true;
-      addStep(debug, `no lettering in the box of ${b.id} → text over art`);
-      // Inside a light bubble (empty, or its letters too faint to find) the text may follow its outline.
-      const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: true });
-      b.bubble = r.closed && r.bubble && luminance(...parseHex(r.bubble.fill)) >= 190 ? r.bubble : null;
-      b.fontSizeEstimate = Math.min(b.fontSizeEstimate, Math.round(Math.max(12, original.width * 0.022)));
-      b.style = { color: '#111111', strokeColor: '#ffffff', strokeWidth: 3, ...matchLettering(b, undefined), ...(b.style ?? {}) };
-      return;
-    }
-    // The detector's bubble around the text limits the bubble the cleaner looks for.
-    const bubbleBox = dets && b.textType !== 'SFX' ? bubbleAround(b.bbox, dets) : undefined;
-    const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, sfx: b.textType === 'SFX', expand: config.inpaintExpand, ...(bubbleBox ? { bubbleBox } : {}) });
-    if (bubbleBox && !r.closed && !r.artMask) {
-      // The outline was not found, but the detector saw a bubble: lay the text out in an ellipse
-      // inscribed in it (erasing still went by the letters' mask).
-      r.bubble = ellipseBubble(bubbleBox, r.bubble?.fill ?? '#ffffff', original.width, original.height);
-      r.closed = true;
-      addStep(debug, `bubble of ${b.id} taken from the detector`);
-    }
-    if (r.artMask) artMasks.push(r.artMask);
-    if (!r.bubble && b.textType !== 'SFX') addStep(debug, `bubble not found for ${b.id} → text over art`);
-    b.bubble = r.bubble;
-    closedBubble.set(b.id, r.closed);
-    if (r.lettering) letterHeight.set(b.id, r.lettering.letterHeight);
-    if (r.textBox && b.textType === 'SFX' && !b.textBox) {
-      // Sound effects go where the original letters were, not in the middle of a loose model box.
-      const [x, y, w, h] = r.textBox;
-      b.textBox = clampBox([x - w * 0.08, y - h * 0.15, w * 1.16, h * 1.3].map(Math.round) as Box, original.width, original.height);
-    }
-    if (r.textBox && b.textType !== 'SFX') {
-      // Use the measured text pixels to correct an imprecise model box (keep the larger safe area).
-      b.fontSizeEstimate = fontFromLettering(r.textBox, b.originalText, r.lettering);
-    }
-    b.style = { ...plainBackgroundStyle(b, r.textBox), ...matchLettering(b, r.lettering), ...(b.style ?? {}) };
-    if (r.textGroups && b.textType !== 'SFX' && b.translate) groupsOf.set(b.id, { groups: r.textGroups, lettering: r.lettering });
-  };
-  /**
-   * Text with no bubble found (a loose box over a dark caption plate, a sign): its colours follow
-   * what lies under it once cleaned — light letters on a dark plate, dark ones on a light ground.
-   */
-  const plainBackgroundStyle = (b: TextBlock, textBox: Box | null): Partial<TextStyle> => {
-    if (b.bubble || b.textType === 'SFX') return {};
-    const bg = backgroundUnder(cleaned!, [textBox ?? b.bbox]);
-    if (!bg || bg.flat < 0.6 || bg.lum > 85) return {};
-    addStep(debug, `${b.id}: text over a dark plate → light letters`);
-    return colourFor(bg.lum);
-  };
-  /**
-   * Make sure the block's box holds the letters the model read. A box with no letters at all (put
-   * next to the bubble, over the art) is moved onto the lettering standing nearby that fits the
-   * text; false when there is none.
-   */
-  const placeOnLettering = (b: TextBlock): boolean => {
-    // On the original: another block in the same bubble may have erased these letters already.
-    if (findLetterClusters(original, expandBox(b.bbox, 12)).some((c) => intersects(c.box, b.bbox))) return true;
-    // Lettering the quick look does not know (coloured, outlined): the cleaner's own search.
-    if (cleanBlock(original, b.bbox, { analyzeOnly: true }).textBox) return true;
-    // The detector's text box nearby, if it saw one nobody else has.
-    const det = dets ? detectedTextNear(b, blocks, dets, original.width) : null;
-    if (det) {
-      addStep(debug, `block ${b.id} snapped to the detector's text box nearby`);
-      b.bbox = clampBox(expandBox(det, 2), original.width, original.height);
+    const closedBubble = new Map<string, boolean>();
+    const letterHeight = new Map<string, number>();
+    const cleanOne = async (b: TextBlock): Promise<void> => {
+      const erase = b.translate && !(b.textType === 'SFX' && config.sfxStyle === 'original');
+      if (req.generic) {
+        // UI/screen text: no bubbles; paint a plate behind the text instead.
+        const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, expand: config.inpaintExpand });
+        b.bubble = r.bubble ? { ...r.bubble, shape: 'rect', safeArea: [...b.bbox] as Box } : null;
+        return;
+      }
+      const placed = erase && b.textType !== 'SFX' ? placeOnLettering(b) : true;
+      await yieldIfBusy();
+      if (!placed) {
+        // The model's box holds no letters and none stand nearby: keep the translation where the
+        // model put it, but never erase the art there and never shout over it in big light letters.
+        b.lowConfidence = true;
+        addStep(debug, `no lettering in the box of ${b.id} → text over art`);
+        // Inside a light bubble (empty, or its letters too faint to find) the text may follow its outline.
+        const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: true });
+        b.bubble = r.closed && r.bubble && luminance(...parseHex(r.bubble.fill)) >= 190 ? r.bubble : null;
+        b.fontSizeEstimate = Math.min(b.fontSizeEstimate, Math.round(Math.max(12, original.width * 0.022)));
+        b.style = { color: '#111111', strokeColor: '#ffffff', strokeWidth: 3, ...matchLettering(b, undefined), ...(b.style ?? {}) };
+        return;
+      }
+      // The detector's bubble around the text limits the bubble the cleaner looks for.
+      const bubbleBox = dets && b.textType !== 'SFX' ? bubbleAround(b.bbox, dets) : undefined;
+      const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, sfx: b.textType === 'SFX', expand: config.inpaintExpand, ...(bubbleBox ? { bubbleBox } : {}) });
+      if (bubbleBox && !r.closed && !r.artMask) {
+        // The outline was not found, but the detector saw a bubble: lay the text out in an ellipse
+        // inscribed in it (erasing still went by the letters' mask).
+        r.bubble = ellipseBubble(bubbleBox, r.bubble?.fill ?? '#ffffff', original.width, original.height);
+        r.closed = true;
+        addStep(debug, `bubble of ${b.id} taken from the detector`);
+      }
+      if (r.artMask) artMasks.push(r.artMask);
+      if (!r.bubble && b.textType !== 'SFX') addStep(debug, `bubble not found for ${b.id} → text over art`);
+      b.bubble = r.bubble;
+      closedBubble.set(b.id, r.closed);
+      if (r.lettering) letterHeight.set(b.id, r.lettering.letterHeight);
+      if (r.textBox && b.textType === 'SFX' && !b.textBox) {
+        // Sound effects go where the original letters were, not in the middle of a loose model box.
+        const [x, y, w, h] = r.textBox;
+        b.textBox = clampBox([x - w * 0.08, y - h * 0.15, w * 1.16, h * 1.3].map(Math.round) as Box, original.width, original.height);
+      }
+      if (r.textBox && b.textType !== 'SFX') {
+        // Use the measured text pixels to correct an imprecise model box (keep the larger safe area).
+        b.fontSizeEstimate = fontFromLettering(r.textBox, b.originalText, r.lettering);
+      }
+      b.style = { ...plainBackgroundStyle(b, r.textBox), ...matchLettering(b, r.lettering), ...(b.style ?? {}) };
+      if (r.textGroups && b.textType !== 'SFX' && b.translate) groupsOf.set(b.id, { groups: r.textGroups, lettering: r.lettering });
+    };
+    /**
+     * Text with no bubble found (a loose box over a dark caption plate, a sign): its colours follow
+     * what lies under it once cleaned — light letters on a dark plate, dark ones on a light ground.
+     */
+    const plainBackgroundStyle = (b: TextBlock, textBox: Box | null): Partial<TextStyle> => {
+      if (b.bubble || b.textType === 'SFX') return {};
+      const bg = backgroundUnder(cleaned!, [textBox ?? b.bbox]);
+      if (!bg || bg.flat < 0.6 || bg.lum > 85) return {};
+      addStep(debug, `${b.id}: text over a dark plate → light letters`);
+      return colourFor(bg.lum);
+    };
+    /**
+     * Make sure the block's box holds the letters the model read. A box with no letters at all (put
+     * next to the bubble, over the art) is moved onto the lettering standing nearby that fits the
+     * text; false when there is none.
+     */
+    const placeOnLettering = (b: TextBlock): boolean => {
+      // On the original: another block in the same bubble may have erased these letters already.
+      if (findLetterClusters(original, expandBox(b.bbox, 12)).some((c) => intersects(c.box, b.bbox))) return true;
+      // Lettering the quick look does not know (coloured, outlined): the cleaner's own search.
+      if (cleanBlock(original, b.bbox, { analyzeOnly: true }).textBox) return true;
+      // The detector's text box nearby, if it saw one nobody else has.
+      const det = dets ? detectedTextNear(b, blocks, dets, original.width) : null;
+      if (det) {
+        addStep(debug, `block ${b.id} snapped to the detector's text box nearby`);
+        b.bbox = clampBox(expandBox(det, 2), original.width, original.height);
+        b.polygon = boxToPolygon(b.bbox);
+        b.fontSizeEstimate = estimateFontSize(b.bbox, b.originalText);
+        return true;
+      }
+      // Only lettering nobody has erased yet can be this block's.
+      const found = letteringNear(b, blocks, cleaned!);
+      if (!found) return false;
+      addStep(debug, `block ${b.id} snapped to lettering nearby`);
+      const pad = Math.round(found.letterHeight * 0.2);
+      b.bbox = clampBox(expandBox(found.box, pad), original.width, original.height);
       b.polygon = boxToPolygon(b.bbox);
       b.fontSizeEstimate = estimateFontSize(b.bbox, b.originalText);
       return true;
+    };
+    const groupsOf = new Map<string, { groups: Box[]; lettering?: Lettering }>();
+    for (const b of blocks) {
+      await cleanOne(b);
+      // Other messages (the editor, status polls) get their turn between blocks.
+      await yieldIfBusy();
     }
-    // Only lettering nobody has erased yet can be this block's.
-    const found = letteringNear(b, blocks, cleaned!);
-    if (!found) return false;
-    addStep(debug, `block ${b.id} snapped to lettering nearby`);
-    const pad = Math.round(found.letterHeight * 0.2);
-    b.bbox = clampBox(expandBox(found.box, pad), original.width, original.height);
-    b.polygon = boxToPolygon(b.bbox);
-    b.fontSizeEstimate = estimateFontSize(b.bbox, b.originalText);
-    return true;
-  };
-  const groupsOf = new Map<string, { groups: Box[]; lettering?: Lettering }>();
-  for (const b of blocks) cleanOne(b);
-  // One block whose lettering stands in separate groups far apart (two speeches in joined
-  // bubbles, read by the model as one): each group gets its share of the translation in place.
-  // Several blocks in that shape already: each is a speech of its own (see mergeSharedBubbles).
-  const shares = (b: TextBlock) => blocks.some((o) => o !== b && o.bubble && b.bubble && overlapRatio(o.bubble.box, b.bubble.box) > 0.6);
-  const spans = (b: TextBlock, groups: Box[]) => groups.filter((g) => intersects(g, b.bbox)).length;
-  if (groupsOf.size)
-    blocks = blocks.flatMap((b) => {
-      const info = groupsOf.get(b.id);
-      if (!info) return [b];
-      if (spans(b, info.groups) < 2 && shares(b)) return [b];
-      if (info.groups.length > 1) addStep(debug, `block ${b.id} split by ${info.groups.length} lettering groups`);
-      return splitByGroups(b, info.groups, info.lettering, original.width, original.height);
-    });
-  if (!req.generic) {
-    // The model sometimes skips text: a second remark in the same bubble, a line of a long one.
-    // Lettering still standing on a bubble after cleaning is read again from just that part.
-    const probes: LeftoverProbe[] = blocks
-      .filter((b) => b.translate && b.textType !== 'SFX' && b.bubble && (letterHeight.get(b.id) ?? 0) >= 6)
-      .map((b) => ({ area: b.bubble!.box, fill: parseHex(b.bubble!.fill), letterHeight: letterHeight.get(b.id)! }));
-    // …and lettering in light areas nobody reported: a bubble of an unusual shape the model skipped.
-    probes.push(...findTextRegions(cleaned));
-    const known = blocks.flatMap((b) => (b.textBox ? [b.bbox, b.textBox] : [b.bbox]));
-    for (const [k, box] of findLeftoverText(cleaned, probes, known).slice(0, 4).entries()) {
-      try {
-        const pad = Math.round(Math.max(box[2], box[3]) * 0.3) + 12;
-        addStep(debug, `left-over lettering read again at [${box.join(',')}]`);
-        const r = await recognizeRegion(original, expandBox(box, pad), config, deps, { context: req.context, signal, idPrefix: `x${k}`, debug });
-        usage.push(...r.usage);
-        const near = expandBox(box, 6);
-        for (const nb of r.blocks) {
-          // We know where the left-over letters are; the model's box in a crop is only approximate.
-          const cut = r.blocks.length === 1 ? near : intersectBox(nb.bbox, near);
-          if (!cut) continue;
-          nb.bbox = clampBox(cut.map(Math.round) as Box, original.width, original.height);
-          nb.polygon = boxToPolygon(nb.bbox);
-          nb.fontSizeEstimate = estimateFontSize(nb.bbox, nb.originalText);
-          if (!nb.originalText.trim() || !nb.translatedText.trim() || blocks.some((o) => overlapRatio(o.bbox, nb.bbox) > 0.5)) continue;
-          nb.language = blocks[0]?.language ?? nb.language;
-          cleanOne(nb);
-          // Keep reading order: before the first block that starts below it.
-          const at = blocks.findIndex((o) => o.bbox[1] > nb.bbox[1]);
-          blocks.splice(at < 0 ? blocks.length : at, 0, nb);
+    // One block whose lettering stands in separate groups far apart (two speeches in joined
+    // bubbles, read by the model as one): each group gets its share of the translation in place.
+    // Several blocks in that shape already: each is a speech of its own (see mergeSharedBubbles).
+    const shares = (b: TextBlock) => blocks.some((o) => o !== b && o.bubble && b.bubble && overlapRatio(o.bubble.box, b.bubble.box) > 0.6);
+    const spans = (b: TextBlock, groups: Box[]) => groups.filter((g) => intersects(g, b.bbox)).length;
+    if (groupsOf.size)
+      blocks = blocks.flatMap((b) => {
+        const info = groupsOf.get(b.id);
+        if (!info) return [b];
+        if (spans(b, info.groups) < 2 && shares(b)) return [b];
+        if (info.groups.length > 1) addStep(debug, `block ${b.id} split by ${info.groups.length} lettering groups`);
+        return splitByGroups(b, info.groups, info.lettering, original.width, original.height);
+      });
+    if (!req.generic) {
+      // The model sometimes skips text: a second remark in the same bubble, a line of a long one.
+      // Lettering still standing on a bubble after cleaning is read again from just that part.
+      const probes: LeftoverProbe[] = blocks
+        .filter((b) => b.translate && b.textType !== 'SFX' && b.bubble && (letterHeight.get(b.id) ?? 0) >= 6)
+        .map((b) => ({ area: b.bubble!.box, fill: parseHex(b.bubble!.fill), letterHeight: letterHeight.get(b.id)! }));
+      // …and lettering in light areas nobody reported: a bubble of an unusual shape the model skipped.
+      probes.push(...(await findTextRegions(cleaned)));
+      const known = blocks.flatMap((b) => (b.textBox ? [b.bbox, b.textBox] : [b.bbox]));
+      for (const [k, box] of (await findLeftoverText(cleaned, probes, known)).slice(0, 4).entries()) {
+        try {
+          const pad = Math.round(Math.max(box[2], box[3]) * 0.3) + 12;
+          addStep(debug, `left-over lettering read again at [${box.join(',')}]`);
+          const r = await recognizeRegion(original, expandBox(box, pad), config, deps, { context: req.context, signal, idPrefix: `x${k}`, debug });
+          usage.push(...r.usage);
+          const near = expandBox(box, 6);
+          for (const nb of r.blocks) {
+            // We know where the left-over letters are; the model's box in a crop is only approximate.
+            const cut = r.blocks.length === 1 ? near : intersectBox(nb.bbox, near);
+            if (!cut) continue;
+            nb.bbox = clampBox(cut.map(Math.round) as Box, original.width, original.height);
+            nb.polygon = boxToPolygon(nb.bbox);
+            nb.fontSizeEstimate = estimateFontSize(nb.bbox, nb.originalText);
+            if (!nb.originalText.trim() || !nb.translatedText.trim() || blocks.some((o) => overlapRatio(o.bbox, nb.bbox) > 0.5)) continue;
+            nb.language = blocks[0]?.language ?? nb.language;
+            await cleanOne(nb);
+            await yieldIfBusy();
+            // Keep reading order: before the first block that starts below it.
+            const at = blocks.findIndex((o) => o.bbox[1] > nb.bbox[1]);
+            blocks.splice(at < 0 ? blocks.length : at, 0, nb);
+          }
+        } catch (e) {
+          if ((e as { code?: string }).code === 'CANCELLED') throw e;
+          // A failed extra read never fails the page.
         }
-      } catch (e) {
-        if ((e as { code?: string }).code === 'CANCELLED') throw e;
-        // A failed extra read never fails the page.
+      }
+      // Text the detector is sure of that no block covers: the model skipped it; read it from there.
+      for (const [k, box] of (dets ? missedText(blocks, dets) : []).entries()) {
+        try {
+          addStep(debug, `text found by the detector read again at [${box.map(Math.round).join(',')}]`);
+          const pad = Math.round(Math.max(box[2], box[3]) * 0.3) + 12;
+          const r = await recognizeRegion(original, expandBox(box, pad), config, deps, { context: req.context, signal, idPrefix: `d${k}`, debug });
+          usage.push(...r.usage);
+          const near = clampBox(expandBox(box, 4), original.width, original.height);
+          for (const nb of r.blocks) {
+            const cut = r.blocks.length === 1 ? near : intersectBox(nb.bbox, near);
+            if (!cut) continue;
+            nb.bbox = clampBox(cut.map(Math.round) as Box, original.width, original.height);
+            nb.polygon = boxToPolygon(nb.bbox);
+            nb.fontSizeEstimate = estimateFontSize(nb.bbox, nb.originalText);
+            if (!nb.originalText.trim() || !nb.translatedText.trim() || blocks.some((o) => overlapRatio(o.bbox, nb.bbox) > 0.5)) continue;
+            // The user's filters: only bubbles, sound effects left as they are.
+            if ((config.bubblesOnly && (nb.textType === 'SFX' || nb.textType === 'SIGN' || nb.textType === 'OTHER')) || (nb.textType === 'SFX' && !config.translateSfx)) continue;
+            nb.language = blocks[0]?.language ?? nb.language;
+            await cleanOne(nb);
+            await yieldIfBusy();
+            const at = blocks.findIndex((o) => o.bbox[1] > nb.bbox[1]);
+            blocks.splice(at < 0 ? blocks.length : at, 0, nb);
+          }
+        } catch (e) {
+          if ((e as { code?: string }).code === 'CANCELLED') throw e;
+        }
       }
     }
-    // Text the detector is sure of that no block covers: the model skipped it; read it from there.
-    for (const [k, box] of (dets ? missedText(blocks, dets) : []).entries()) {
-      try {
-        addStep(debug, `text found by the detector read again at [${box.map(Math.round).join(',')}]`);
-        const pad = Math.round(Math.max(box[2], box[3]) * 0.3) + 12;
-        const r = await recognizeRegion(original, expandBox(box, pad), config, deps, { context: req.context, signal, idPrefix: `d${k}`, debug });
-        usage.push(...r.usage);
-        const near = clampBox(expandBox(box, 4), original.width, original.height);
-        for (const nb of r.blocks) {
-          const cut = r.blocks.length === 1 ? near : intersectBox(nb.bbox, near);
-          if (!cut) continue;
-          nb.bbox = clampBox(cut.map(Math.round) as Box, original.width, original.height);
-          nb.polygon = boxToPolygon(nb.bbox);
-          nb.fontSizeEstimate = estimateFontSize(nb.bbox, nb.originalText);
-          if (!nb.originalText.trim() || !nb.translatedText.trim() || blocks.some((o) => overlapRatio(o.bbox, nb.bbox) > 0.5)) continue;
-          // The user's filters: only bubbles, sound effects left as they are.
-          if ((config.bubblesOnly && (nb.textType === 'SFX' || nb.textType === 'SIGN' || nb.textType === 'OTHER')) || (nb.textType === 'SFX' && !config.translateSfx)) continue;
-          nb.language = blocks[0]?.language ?? nb.language;
-          cleanOne(nb);
-          const at = blocks.findIndex((o) => o.bbox[1] > nb.bbox[1]);
-          blocks.splice(at < 0 ? blocks.length : at, 0, nb);
-        }
-      } catch (e) {
-        if ((e as { code?: string }).code === 'CANCELLED') throw e;
+    const before = blocks.length;
+    blocks = mergeSharedBubbles(blocks, closedBubble);
+    if (blocks.length < before) addStep(debug, `${before - blocks.length} block(s) merged into shared bubbles`);
+    separateAreas(blocks);
+    if (artMasks.length && config.lama) {
+      // The engine gets the picture only on this computer / network, unless the cloud is allowed.
+      const viaEngine = config.lama === 'engine' && config.engine?.url && (config.privacy === 'cloud' || isLocalUrl(config.engine.url));
+      const inpaint = viaEngine ? engineInpainter(config.engine!, deps) : config.lama === 'browser' ? deps.inpaint : undefined;
+      if (inpaint) {
+        const tl = performance.now();
+        artRedrawn = (await redrawArt(original, cleaned, artMasks, inpaint, signal)) > 0;
+        inpaintMs = Math.round(performance.now() - tl);
       }
     }
-  }
-  const before = blocks.length;
-  blocks = mergeSharedBubbles(blocks, closedBubble);
-  if (blocks.length < before) addStep(debug, `${before - blocks.length} block(s) merged into shared bubbles`);
-  separateAreas(blocks);
-  if (artMasks.length && config.lama) {
-    // The engine gets the picture only on this computer / network, unless the cloud is allowed.
-    const viaEngine = config.lama === 'engine' && config.engine?.url && (config.privacy === 'cloud' || isLocalUrl(config.engine.url));
-    const inpaint = viaEngine ? engineInpainter(config.engine!, deps) : config.lama === 'browser' ? deps.inpaint : undefined;
-    if (inpaint) {
-      const tl = performance.now();
-      artRedrawn = (await redrawArt(original, cleaned, artMasks, inpaint, signal)) > 0;
-      inpaintMs = Math.round(performance.now() - tl);
-    }
+  } finally {
+    // Also when the page fails half-way (cancelled): the copies are not kept with the pictures.
+    for (const release of released) release();
   }
   tCleaned = performance.now();
   return finish();

@@ -1,5 +1,5 @@
 import type { ImageBackend, ImageMime } from '../image/backend';
-import { renderTiles, encodeTiles } from '../render/render';
+import { renderTilesAsync, encodeTiles } from '../render/render';
 import { DEFAULT_STYLE_DEFAULTS, type StyleDefaults } from '../render/style';
 import type { PageResult } from '../types';
 import type { PipelineConfig } from './config';
@@ -9,7 +9,7 @@ import { createProvider } from '../llm/presets';
 import { assertPrivacy } from '../llm/privacy';
 import { qaBatchPlan, qaPage } from '../translate/qa';
 import { addStep, recording } from './debug';
-import { selfCheckPage } from './selfcheck';
+import { selfCheckPageAsync } from './selfcheck';
 
 export async function runPipeline(req: PipelineRequest & { batchReview?: boolean }, deps: StandaloneDeps): Promise<PipelineOutput & { reviewLater?: boolean }> {
   const out: PipelineOutput & { reviewLater?: boolean } = req.config.mode === 'engine' ? await runEnginePipeline(req, deps) : await runStandalonePipeline(req, deps);
@@ -72,14 +72,14 @@ export async function renderOutput(backend: ImageBackend, out: Pick<PipelineOutp
   let src = out.page;
   if (out.selfCheck && out.original && !src.selfCheck) {
     try {
-      const r = selfCheckPage({ backend, original: out.original, cleaned: out.cleaned, page: src, defaults });
+      const r = await selfCheckPageAsync({ backend, original: out.original, cleaned: out.cleaned, page: src, defaults });
       src = { ...src, blocks: r.blocks, selfCheck: { fixed: r.fixed, flagged: r.flagged } };
     } catch (e) {
       // The check never fails a page.
       addStep(src.debug, `selfcheck failed: ${(e as Error)?.message ?? e}`);
     }
   }
-  const { tiles, overflow } = renderTiles(backend, out.cleaned, src.blocks, defaults);
+  const { tiles, overflow } = await renderTilesAsync(backend, out.cleaned, src.blocks, defaults);
   const encoded = await encodeTiles(backend, tiles, mime, mime === 'image/png' ? undefined : 0.92);
   const page: PageResult = {
     ...src,

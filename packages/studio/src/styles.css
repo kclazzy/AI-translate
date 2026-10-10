@@ -201,6 +201,34 @@ a { color: var(--magenta); }
 .ait-panel h2 { font-size: 16px; margin: 0 0 12px; }
 .ait-panel h3 { font-size: 14px; margin: 18px 0 8px; color: var(--ink-2); }
 .ait-muted { color: var(--ink-3); }
+
+/* «Как переводить»: titled groups in two independent columns (one on narrow screens). */
+.ait-set-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); align-items: start; gap: 18px 28px; }
+.ait-set-col { display: grid; gap: 18px; align-content: start; min-width: 0; }
+.ait-set-group { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.ait-panel .ait-set-group h3 {
+  margin: 0; padding-bottom: 6px; border-bottom: 1px solid var(--rule);
+  font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-3);
+}
+.ait-set-group .ait-field > span, .ait-set-label { font-size: 13px; color: var(--ink-2); }
+.ait-set-group .ait-switch { display: flex; align-items: flex-start; font-size: 14px; line-height: 1.35; }
+.ait-set-group .ait-switch input { margin-top: 0; }
+.ait-set-opt { display: grid; gap: 2px; }
+.ait-set-opt > .ait-set-hint { padding-left: 48px; }
+.ait-set-hint, .ait-set-group .ait-field > small {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+  color: var(--ink-3); font-size: 12px; line-height: 1.4;
+}
+.ait-set-group :focus-within > .ait-set-hint, .ait-set-group .ait-field:focus-within > small { -webkit-line-clamp: unset; line-clamp: none; }
+.ait-set-langs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 10px 28px; margin-bottom: 18px; }
+.ait-set-group.untitled { border-top: 1px solid var(--rule); padding-top: 12px; }
+.ait-set-sfx { display: flex; align-items: center; gap: 12px; }
+.ait-set-sfx > .ait-switch { flex: 1 1 auto; min-width: 0; }
+.ait-set-sfx > .ait-select { flex: 0 0 140px; width: 140px; }
+.ait-set-presets { display: grid; gap: 6px; }
+.ait-set-preset { display: flex; gap: 6px; align-items: center; }
+.ait-set-preset > b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ait-set-preset > small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ait-hint { color: var(--ink-2); font-size: 13px; margin: 6px 0 0; }
 
 .ait-seg { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r-control); overflow: hidden; background: var(--sheet); }

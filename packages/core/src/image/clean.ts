@@ -1,6 +1,7 @@
 import type { Box, BubbleInfo, BubbleRows } from '../types';
 import type { PixelData } from './backend';
 import { boxArea, clampBox, expandBox, type TiledImage } from './tiled';
+import { yieldIfBusy } from '../util/yield';
 
 type RGB = [number, number, number];
 
@@ -56,12 +57,15 @@ export function ringStats(img: PixelData, inner: Box, bandFrom = 2, bandTo = 7):
 
 /** Pixels inside `rect` that differ from the background colour by more than `threshold`. */
 export function textMask(img: PixelData, rect: Box, bg: RGB, threshold: number): Uint8Array {
-  const mask = new Uint8Array(img.width * img.height);
-  const [x0, y0, w, h] = clampBox(rect, img.width, img.height);
+  const { width, data } = img;
+  const mask = new Uint8Array(width * img.height);
+  const [x0, y0, w, h] = clampBox(rect, width, img.height);
+  const [r0, g0, b0] = bg;
   for (let y = y0; y < y0 + h; y++) {
-    for (let x = x0; x < x0 + w; x++) {
-      const p = y * img.width + x;
-      if (colorDist(img.data, p * 4, bg) > threshold) mask[p] = 1;
+    for (let p = y * width + x0, end = p + w; p < end; p++) {
+      const i = p * 4;
+      const dr = data[i] - r0, dg = data[i + 1] - g0, db = data[i + 2] - b0;
+      if (Math.sqrt(dr * dr + dg * dg + db * db) > threshold) mask[p] = 1;
     }
   }
   return mask;
@@ -69,37 +73,54 @@ export function textMask(img: PixelData, rect: Box, bg: RGB, threshold: number):
 
 export function dilate(mask: Uint8Array, width: number, height: number, radius: number): Uint8Array {
   if (radius <= 0) return mask;
-  // Separable box dilation: horizontal then vertical.
+  // Separable box dilation: horizontal then vertical. Both passes walk the rows in memory order
+  // (the vertical one keeps the last ink row of every column), so big masks stay cache-friendly.
   const tmp = new Uint8Array(mask.length);
   for (let y = 0; y < height; y++) {
-    let run = -1;
-    for (let x = 0; x < width; x++) if (mask[y * width + x]) run = x;
-    // forward/backward passes
+    const row = y * width;
     let last = -Infinity;
     for (let x = 0; x < width; x++) {
-      if (mask[y * width + x]) last = x;
-      if (x - last <= radius) tmp[y * width + x] = 1;
+      if (mask[row + x]) last = x;
+      if (x - last <= radius) tmp[row + x] = 1;
     }
     last = Infinity;
     for (let x = width - 1; x >= 0; x--) {
-      if (mask[y * width + x]) last = x;
-      if (last - x <= radius) tmp[y * width + x] = 1;
+      if (mask[row + x]) last = x;
+      if (last - x <= radius) tmp[row + x] = 1;
     }
-    void run;
   }
   const out = new Uint8Array(mask.length);
-  for (let x = 0; x < width; x++) {
-    let last = -Infinity;
-    for (let y = 0; y < height; y++) {
-      if (tmp[y * width + x]) last = y;
-      if (y - last <= radius) out[y * width + x] = 1;
-    }
-    last = Infinity;
-    for (let y = height - 1; y >= 0; y--) {
-      if (tmp[y * width + x]) last = y;
-      if (last - y <= radius) out[y * width + x] = 1;
+  const lastRow = new Float64Array(width).fill(-Infinity);
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      if (tmp[row + x]) lastRow[x] = y;
+      if (y - lastRow[x] <= radius) out[row + x] = 1;
     }
   }
+  lastRow.fill(Infinity);
+  for (let y = height - 1; y >= 0; y--) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      if (tmp[row + x]) lastRow[x] = y;
+      if (lastRow[x] - y <= radius) out[row + x] = 1;
+    }
+  }
+  return out;
+}
+
+/**
+ * dilate() worked out only inside `box` (zero elsewhere): reads the mask within `box` grown by the
+ * radius. Used where the mask is set only inside a small box, or only part of the result is read.
+ */
+export function dilateIn(mask: Uint8Array, width: number, height: number, radius: number, box: Box | null): Uint8Array {
+  const out = new Uint8Array(width * height);
+  if (!box || box[2] <= 0 || box[3] <= 0) return radius <= 0 ? mask.slice() : out;
+  const [bx, by, bw, bh] = clampBox(box, width, height);
+  const src = clampBox(expandBox([bx, by, bw, bh], Math.ceil(Math.max(0, radius))), width, height);
+  const [sx, sy, sw] = src;
+  const d = dilate(cropMask(mask, width, src), sw, src[3], radius);
+  for (let y = by; y < by + bh; y++) out.set(d.subarray((y - sy) * sw + (bx - sx), (y - sy) * sw + (bx - sx) + bw), y * width + bx);
   return out;
 }
 
@@ -270,51 +291,83 @@ export interface FloodResult {
   touchesEdge: boolean;
 }
 
+/** Sides of an analysed region that lie inside the picture (a flood reaching them ran out). */
+export interface LeakSides {
+  left: boolean;
+  top: boolean;
+  right: boolean;
+  bottom: boolean;
+}
+
 /**
  * Flood the bubble interior: start from background-coloured pixels inside the
  * text box (text pixels count as passable) and spread through pixels close
  * to the bubble colour. The dark outline stops it.
  */
-export function floodBubble(img: PixelData, seed: Box, bg: RGB, tol: number, passable?: Uint8Array): FloodResult {
+export function floodBubble(img: PixelData, seed: Box, bg: RGB, tol: number, passable?: Uint8Array, stopAt?: LeakSides): FloodResult & { stopped?: boolean } {
+  return startFlood(img, seed, bg, tol, passable)(stopAt);
+}
+
+/**
+ * A flood (see floodBubble) that can stop as soon as it reaches one of the `stopAt` sides and be
+ * resumed later (call it again): it ends with the same pixels as one run to the end.
+ */
+export function startFlood(img: PixelData, seed: Box, bg: RGB, tol: number, passable?: Uint8Array): (stopAt?: LeakSides) => FloodResult & { stopped?: boolean } {
   const { width, height, data } = img;
   const mask = new Uint8Array(width * height);
-  const stack: number[] = [];
+  const [r0, g0, b0] = bg;
+  const ok = (p: number): boolean => {
+    if (mask[p]) return false;
+    if (passable !== undefined && passable[p]) return true;
+    const i = p * 4;
+    const dr = data[i] - r0, dg = data[i + 1] - g0, db = data[i + 2] - b0;
+    return Math.sqrt(dr * dr + dg * dg + db * db) <= tol;
+  };
+  // Scanline fill (whole runs of a row at a time): the same pixels as a pixel-by-pixel flood.
+  const seeds: number[] = [];
   const [sx, sy, sw, sh] = clampBox(seed, width, height);
-  for (let y = sy; y < sy + sh; y++) {
-    for (let x = sx; x < sx + sw; x++) {
-      const p = y * width + x;
-      if (colorDist(data, p * 4, bg) <= tol || passable?.[p]) {
-        mask[p] = 1;
-        stack.push(p);
+  for (let y = sy; y < sy + sh; y++) for (let x = sx; x < sx + sw; x++) if (ok(y * width + x)) seeds.push(y * width + x);
+  let area = 0;
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+  let done: FloodResult | null = null;
+  return (stopAt) => {
+    if (done) return done;
+    while (seeds.length) {
+      const p = seeds.pop()!;
+      if (!ok(p)) continue;
+      const x = p % width;
+      const y = (p - x) / width;
+      const row = y * width;
+      let l = x;
+      let r = x;
+      while (l > 0 && ok(row + l - 1)) l--;
+      while (r < width - 1 && ok(row + r + 1)) r++;
+      mask.fill(1, row + l, row + r + 1);
+      area += r - l + 1;
+      if (l < minX) minX = l;
+      if (r > maxX) maxX = r;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      for (let ny = y - 1; ny <= y + 1; ny += 2) {
+        if (ny < 0 || ny >= height) continue;
+        const nrow = ny * width;
+        let inRun = false;
+        for (let i = l; i <= r; i++) {
+          if (ok(nrow + i)) {
+            if (!inRun) seeds.push(nrow + i);
+            inRun = true;
+          } else inRun = false;
+        }
+      }
+      if (stopAt && ((stopAt.left && l === 0) || (stopAt.top && y === 0) || (stopAt.right && r === width - 1) || (stopAt.bottom && y === height - 1))) {
+        // The caller only needs to know that it runs out of the region: the rest can wait.
+        return { mask, area, box: [0, 0, width, height], touchesEdge: true, stopped: true };
       }
     }
-  }
-  let area = stack.length;
-  let minX = width, minY = height, maxX = -1, maxY = -1;
-  let touchesEdge = false;
-  while (stack.length) {
-    const p = stack.pop()!;
-    const x = p % width;
-    const y = (p - x) / width;
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-    if (x === 0 || y === 0 || x === width - 1 || y === height - 1) touchesEdge = true;
-    const visit = (q: number) => {
-      if (mask[q]) return;
-      if (colorDist(data, q * 4, bg) <= tol || passable?.[q]) {
-        mask[q] = 1;
-        area++;
-        stack.push(q);
-      }
-    };
-    if (x > 0) visit(p - 1);
-    if (x < width - 1) visit(p + 1);
-    if (y > 0) visit(p - width);
-    if (y < height - 1) visit(p + width);
-  }
-  return { mask, area, box: maxX < 0 ? [0, 0, 0, 0] : [minX, minY, maxX - minX + 1, maxY - minY + 1], touchesEdge };
+    const touchesEdge = maxX >= 0 && (minX === 0 || minY === 0 || maxX === width - 1 || maxY === height - 1);
+    done = { mask, area, box: maxX < 0 ? [0, 0, 0, 0] : [minX, minY, maxX - minX + 1, maxY - minY + 1], touchesEdge };
+    return done;
+  };
 }
 
 /**
@@ -325,31 +378,52 @@ export function floodBubble(img: PixelData, seed: Box, bg: RGB, tol: number, pas
  * Returns null when nothing is left or the cut-off part is as big as the body (open space, not
  * a bubble with a leaky outline).
  */
-export function trimFlood(f: FloodResult, width: number, height: number, seed: Box, radius: number): FloodResult | null {
+export function trimFlood(f: FloodResult, width: number, height: number, seed: Box, radius: number, leak?: LeakSides): FloodResult | null | 'leaks' {
   const r = Math.max(2, Math.round(radius));
+  // All the work happens in a window just around the flood: outside it nothing is flooded, so
+  // everything there is "outside" anyway (the window's frame stands for it), whatever the size
+  // of the analysed region.
+  const [wx, wy, ww, wh] = clampBox(expandBox(f.box, 1), width, height);
+  const fm = cropMask(f.mask, width, [wx, wy, ww, wh]);
+  const sat = summedArea(fm, ww, wh);
+  if (leak && reachesSide(fm, sat, [wx, wy, ww, wh], width, height, seed, r, leak)) return 'leaks';
   // The letters inside count as body: dense lettering would otherwise eat the middle of the bubble.
-  const solid = enclosedHoles(f.mask, width, height, clampBox(expandBox(f.box, 1), width, height));
-  for (let p = 0; p < solid.length; p++) if (f.mask[p]) solid[p] = 1;
-  // Erode = complement of the dilated complement, with a frame of "outside" around the picture.
-  const pw = width + 2;
-  const ph = height + 2;
-  const comp = new Uint8Array(pw * ph);
-  for (let y = 0; y < ph; y++) {
-    for (let x = 0; x < pw; x++) {
-      const inner = x > 0 && y > 0 && x <= width && y <= height;
-      if (!inner || !solid[(y - 1) * width + x - 1]) comp[y * pw + x] = 1;
+  // Body = the flood and what it encloses = everything not reached from the window's border.
+  const outside = outsideOf(fm, ww, wh, [0, 0, ww, wh]);
+  // Erode: the pixels whose whole (2r+1)² square is solid; outside the window counts as not solid.
+  // Rows first (runs of solid pixels shrunk by r at both ends), then columns (r rows of such
+  // pixels above and below).
+  const rowCore = new Uint8Array(ww * wh);
+  for (let y = 0; y < wh; y++) {
+    const row = y * ww;
+    for (let x = 0; x < ww; ) {
+      if (outside[row + x]) {
+        x++;
+        continue;
+      }
+      let end = x;
+      while (end + 1 < ww && !outside[row + end + 1]) end++;
+      for (let k = x + r; k <= end - r; k++) rowCore[row + k] = 1;
+      x = end + 1;
     }
   }
-  const grown = dilate(comp, pw, ph, r);
-  const core = new Uint8Array(width * height);
-  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) if (!grown[(y + 1) * pw + x + 1]) core[y * width + x] = 1;
+  const core = new Uint8Array(ww * wh);
+  const run = new Int32Array(ww);
+  for (let y = 0; y < wh; y++) {
+    const row = y * ww;
+    const at = (y - r) * ww;
+    for (let x = 0; x < ww; x++) {
+      if (!rowCore[row + x]) run[x] = 0;
+      else if (++run[x] > 2 * r) core[at + x] = 1;
+    }
+  }
   // Keep only the core parts that reach into the seed (where the letters are).
   const [sx, sy, sw, sh] = clampBox(seed, width, height);
-  const keep = new Uint8Array(width * height);
+  const keep = new Uint8Array(ww * wh);
   const stack: number[] = [];
-  for (let y = sy; y < sy + sh; y++) {
-    for (let x = sx; x < sx + sw; x++) {
-      const p = y * width + x;
+  for (let y = Math.max(sy, wy); y < Math.min(sy + sh, wy + wh); y++) {
+    for (let x = Math.max(sx, wx); x < Math.min(sx + sw, wx + ww); x++) {
+      const p = (y - wy) * ww + (x - wx);
       if (core[p] && !keep[p]) {
         keep[p] = 1;
         stack.push(p);
@@ -357,84 +431,170 @@ export function trimFlood(f: FloodResult, width: number, height: number, seed: B
     }
   }
   if (!stack.length) return null;
+  let kx0 = ww, ky0 = wh, kx1 = -1, ky1 = -1;
   while (stack.length) {
     const p = stack.pop()!;
-    const x = p % width;
-    const visit = (q: number) => {
-      if (core[q] && !keep[q]) {
-        keep[q] = 1;
-        stack.push(q);
-      }
-    };
-    if (x > 0) visit(p - 1);
-    if (x < width - 1) visit(p + 1);
-    if (p >= width) visit(p - width);
-    if (p < width * (height - 1)) visit(p + width);
+    const x = p % ww;
+    const y = (p - x) / ww;
+    if (x < kx0) kx0 = x;
+    if (x > kx1) kx1 = x;
+    if (y < ky0) ky0 = y;
+    if (y > ky1) ky1 = y;
+    if (x > 0 && core[p - 1] && !keep[p - 1]) (keep[p - 1] = 1), stack.push(p - 1);
+    if (x < ww - 1 && core[p + 1] && !keep[p + 1]) (keep[p + 1] = 1), stack.push(p + 1);
+    if (p >= ww && core[p - ww] && !keep[p - ww]) (keep[p - ww] = 1), stack.push(p - ww);
+    if (p < ww * (wh - 1) && core[p + ww] && !keep[p + ww]) (keep[p + ww] = 1), stack.push(p + ww);
   }
-  const back = dilate(keep, width, height, r);
+  {
+    // The body grown back lies within the kept part's box grown by r: when even all the flood in
+    // there is less than the rest, the body is the smaller part (null below) — no need to grow it.
+    const bx0 = Math.max(0, kx0 - r), by0 = Math.max(0, ky0 - r), bx1 = Math.min(ww, kx1 + r + 1), by1 = Math.min(wh, ky1 + r + 1);
+    const sw = ww + 1;
+    const most = sat[by1 * sw + bx1] - sat[by0 * sw + bx1] - sat[by1 * sw + bx0] + sat[by0 * sw + bx0];
+    if (f.area - most > most) return null;
+  }
+  const back = dilate(keep, ww, wh, r);
   const mask = new Uint8Array(width * height);
   let area = 0;
   let minX = width, minY = height, maxX = -1, maxY = -1;
-  for (let p = 0; p < mask.length; p++) {
-    if (!back[p] || !f.mask[p]) continue;
-    mask[p] = 1;
-    area++;
-    const x = p % width;
-    const y = (p - x) / width;
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
+  for (let ly = 0; ly < wh; ly++) {
+    for (let lx = 0; lx < ww; lx++) {
+      const q = ly * ww + lx;
+      if (!back[q] || !fm[q]) continue;
+      const x = lx + wx;
+      const y = ly + wy;
+      mask[y * width + x] = 1;
+      area++;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
   }
   if (!area || f.area - area > area) return null;
   const touchesEdge = minX === 0 || minY === 0 || maxX === width - 1 || maxY === height - 1;
   return { mask, area, box: [minX, minY, maxX - minX + 1, maxY - minY + 1], touchesEdge };
 }
 
-/** Pixels not in `region` that are fully enclosed by it (the glyphs inside a bubble). */
-export function enclosedHoles(region: Uint8Array, width: number, height: number, within: Box): Uint8Array {
-  const [bx, by, bw, bh] = within;
-  const outside = new Uint8Array(width * height);
-  const stack: number[] = [];
-  const seed = (x: number, y: number) => {
-    const p = y * width + x;
-    if (!region[p] && !outside[p]) {
-      outside[p] = 1;
-      stack.push(p);
-    }
+/**
+ * Will the flood trimmed around the seed (see trimFlood) touch one of the `leak` sides of the
+ * region? A cheap test that can only say yes: the flood alone (without the letters it encloses)
+ * is eroded, and its part reached from the seed already comes within the radius of flooded
+ * pixels on such a side — the trimmed flood, made from more, holds those pixels too.
+ */
+function reachesSide(fm: Uint8Array, sat: Int32Array, win: Box, width: number, height: number, seed: Box, r: number, leak: LeakSides): boolean {
+  const [wx, wy, ww, wh] = win;
+  if (!((leak.left && wx === 0) || (leak.top && wy === 0) || (leak.right && wx + ww === width) || (leak.bottom && wy + wh === height))) return false;
+  // A pixel is in the eroded flood when its whole (2r+1)² square is flooded.
+  const sw = ww + 1;
+  const full = (2 * r + 1) * (2 * r + 1);
+  const core = (x: number, y: number) => x - r >= 0 && y - r >= 0 && x + r < ww && y + r < wh && sat[(y + r + 1) * sw + x + r + 1] - sat[(y - r) * sw + x + r + 1] - sat[(y + r + 1) * sw + x - r] + sat[(y - r) * sw + x - r] === full;
+  // Flooded pixels on a side, within the radius of (x, y) (window coordinates).
+  const sideHit = (x: number, y: number): boolean => {
+    const gx = x + wx;
+    const gy = y + wy;
+    if (leak.left && wx === 0 && gx <= r) for (let yy = Math.max(0, y - r); yy <= Math.min(wh - 1, y + r); yy++) if (fm[yy * ww]) return true;
+    if (leak.right && wx + ww === width && gx >= width - 1 - r) for (let yy = Math.max(0, y - r); yy <= Math.min(wh - 1, y + r); yy++) if (fm[yy * ww + ww - 1]) return true;
+    if (leak.top && wy === 0 && gy <= r) for (let xx = Math.max(0, x - r); xx <= Math.min(ww - 1, x + r); xx++) if (fm[xx]) return true;
+    if (leak.bottom && wy + wh === height && gy >= height - 1 - r) for (let xx = Math.max(0, x - r); xx <= Math.min(ww - 1, x + r); xx++) if (fm[(wh - 1) * ww + xx]) return true;
+    return false;
   };
-  for (let x = bx; x < bx + bw; x++) {
-    seed(x, by);
-    seed(x, by + bh - 1);
-  }
-  for (let y = by; y < by + bh; y++) {
-    seed(bx, y);
-    seed(bx + bw - 1, y);
+  const seen = new Uint8Array(ww * wh);
+  const stack: number[] = [];
+  const [sx, sy, sw0, sh] = clampBox(seed, width, height);
+  for (let y = Math.max(sy, wy); y < Math.min(sy + sh, wy + wh); y++) {
+    for (let x = Math.max(sx, wx); x < Math.min(sx + sw0, wx + ww); x++) {
+      const p = (y - wy) * ww + (x - wx);
+      if (!seen[p] && core(x - wx, y - wy)) (seen[p] = 1), stack.push(p);
+    }
   }
   while (stack.length) {
     const p = stack.pop()!;
-    const x = p % width;
-    const y = (p - x) / width;
-    const visit = (q: number, qx: number, qy: number) => {
-      if (qx < bx || qy < by || qx >= bx + bw || qy >= by + bh) return;
-      if (!region[q] && !outside[q]) {
-        outside[q] = 1;
-        stack.push(q);
-      }
-    };
-    visit(p - 1, x - 1, y);
-    visit(p + 1, x + 1, y);
-    visit(p - width, x, y - 1);
-    visit(p + width, x, y + 1);
+    const x = p % ww;
+    const y = (p - x) / ww;
+    if (sideHit(x, y)) return true;
+    if (x > 0 && !seen[p - 1] && core(x - 1, y)) (seen[p - 1] = 1), stack.push(p - 1);
+    if (x < ww - 1 && !seen[p + 1] && core(x + 1, y)) (seen[p + 1] = 1), stack.push(p + 1);
+    if (y > 0 && !seen[p - ww] && core(x, y - 1)) (seen[p - ww] = 1), stack.push(p - ww);
+    if (y < wh - 1 && !seen[p + ww] && core(x, y + 1)) (seen[p + ww] = 1), stack.push(p + ww);
   }
-  const holes = new Uint8Array(width * height);
-  for (let y = by; y < by + bh; y++) {
-    for (let x = bx; x < bx + bw; x++) {
-      const p = y * width + x;
-      if (!region[p] && !outside[p]) holes[p] = 1;
+  return false;
+}
+
+/** Summed-area table of a mask (w+1 by h+1: the count of set pixels above and left of each corner). */
+function summedArea(m: Uint8Array, w: number, h: number): Int32Array {
+  const sw = w + 1;
+  const sat = new Int32Array(sw * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let run = 0;
+    for (let x = 0; x < w; x++) {
+      run += m[y * w + x];
+      sat[(y + 1) * sw + x + 1] = sat[y * sw + x + 1] + run;
     }
   }
+  return sat;
+}
+
+/** A copy of the pixels inside `box`. */
+export function cropPixels(img: PixelData, box: Box): PixelData {
+  const [x0, y0, w, h] = box;
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) data.set(img.data.subarray(((y0 + y) * img.width + x0) * 4, ((y0 + y) * img.width + x0 + w) * 4), y * w * 4);
+  return { width: w, height: h, data };
+}
+
+/** A copy of the part of a mask (`width` wide) inside `box`. */
+export function cropMask(mask: Uint8Array, width: number, box: Box): Uint8Array {
+  const [x0, y0, w, h] = box;
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) out.set(mask.subarray((y0 + y) * width + x0, (y0 + y) * width + x0 + w), y * w);
+  return out;
+}
+
+/** Pixels not in `region` that are fully enclosed by it (the glyphs inside a bubble). */
+export function enclosedHoles(region: Uint8Array, width: number, height: number, within: Box): Uint8Array {
+  const [bx, by, bw, bh] = within;
+  const outside = outsideOf(region, width, height, within);
+  const holes = new Uint8Array(width * height);
+  for (let y = by; y < by + bh; y++) {
+    for (let p = y * width + bx, end = p + bw; p < end; p++) if (!region[p] && !outside[p]) holes[p] = 1;
+  }
   return holes;
+}
+
+/** Pixels not in `region` reached from the border of `within` without crossing it (4-connected). */
+function outsideOf(region: Uint8Array, width: number, height: number, within: Box): Uint8Array {
+  const [bx, by, bw, bh] = within;
+  const outside = new Uint8Array(width * height);
+  const open = (p: number) => !region[p] && !outside[p];
+  // Scanline fill of the outside from the border of `within` (4-connected, inside `within` only).
+  const seeds: number[] = [];
+  for (let x = bx; x < bx + bw; x++) seeds.push(by * width + x, (by + bh - 1) * width + x);
+  for (let y = by; y < by + bh; y++) seeds.push(y * width + bx, y * width + bx + bw - 1);
+  while (seeds.length) {
+    const p = seeds.pop()!;
+    if (!open(p)) continue;
+    const x = p % width;
+    const y = (p - x) / width;
+    const row = y * width;
+    let l = x;
+    let r = x;
+    while (l > bx && open(row + l - 1)) l--;
+    while (r < bx + bw - 1 && open(row + r + 1)) r++;
+    outside.fill(1, row + l, row + r + 1);
+    for (const ny of [y - 1, y + 1]) {
+      if (ny < by || ny >= by + bh) continue;
+      const nrow = ny * width;
+      let inRun = false;
+      for (let i = l; i <= r; i++) {
+        if (open(nrow + i)) {
+          if (!inRun) seeds.push(nrow + i);
+          inRun = true;
+        } else inRun = false;
+      }
+    }
+  }
+  return outside;
 }
 
 export interface CleanResult {
@@ -472,20 +632,27 @@ export interface Lettering {
 
 /** Lean of the lettering (x per y, right = positive): the shear giving the sharpest column profile. */
 export function slantOf(mask: Uint8Array, width: number, [x0, y0, w, h]: Box): number {
-  const pts: [number, number][] = [];
-  for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) if (mask[y * width + x]) pts.push([x - x0, y - y0]);
-  if (pts.length < 40) return 0;
+  let n = 0;
+  for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) if (mask[y * width + x]) n++;
+  if (n < 40) return 0;
+  const xs = new Int32Array(n);
+  const ys = new Int32Array(n);
+  n = 0;
+  for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) if (mask[y * width + x]) (xs[n] = x - x0), (ys[n] = y - y0), n++;
+  // Column counts for every shear (columns run from about -0.4·h to w + 0.4·h).
+  const off = Math.ceil(0.4 * h) + 2;
+  const cols = new Int32Array(w + 2 * off + 2);
   let best = 0;
   let bestScore = -1;
   for (let k = -8; k <= 8; k++) {
     const s = k * 0.05;
-    const cols = new Map<number, number>();
-    for (const [x, y] of pts) {
-      const c = Math.round(x + s * y);
-      cols.set(c, (cols.get(c) ?? 0) + 1);
-    }
+    cols.fill(0);
     let score = 0;
-    for (const n of cols.values()) score += n * n;
+    for (let i = 0; i < n; i++) {
+      const c = Math.round(xs[i] + s * ys[i]) + off;
+      // n² summed as the counts grow: (m+1)² − m² = 2m + 1.
+      score += 2 * cols[c]++ + 1;
+    }
     if (score > bestScore * 1.02 || (Math.abs(score - bestScore) <= bestScore * 0.02 && Math.abs(s) < Math.abs(best))) {
       if (score > bestScore) bestScore = score;
       best = s;
@@ -511,24 +678,26 @@ export interface CleanOptions {
 /** Colour, stroke thickness and letter height of the lettering in `mask` (before erasing). */
 export function measureLettering(img: PixelData, mask: Uint8Array, rect: Box, bg?: RGB): Lettering | undefined {
   const [x0, y0, w, h] = clampBox(rect, img.width, img.height);
+  const W = img.width;
+  const D = img.data;
   let area = 0;
   let edges = 0;
   const rs: number[] = [], gs: number[] = [], bs: number[] = [];
   for (let y = y0; y < y0 + h; y++) {
     for (let x = x0; x < x0 + w; x++) {
-      const p = y * img.width + x;
+      const p = y * W + x;
       if (!mask[p]) continue;
       area++;
-      if (!mask[p - 1] || !mask[p + 1] || !mask[p - img.width] || !mask[p + img.width]) edges++;
+      if (!mask[p - 1] || !mask[p + 1] || !mask[p - W] || !mask[p + W]) edges++;
       if (area % 3 === 0) {
-        rs.push(img.data[p * 4]);
-        gs.push(img.data[p * 4 + 1]);
-        bs.push(img.data[p * 4 + 2]);
+        rs.push(D[p * 4]);
+        gs.push(D[p * 4 + 1]);
+        bs.push(D[p * 4 + 2]);
       }
     }
   }
   if (area < 30 || !edges) return undefined;
-  const comps = components(mask, img.width, [x0, y0, w, h]).filter((c) => c.pixels.length >= 8);
+  const comps = components(mask, W, [x0, y0, w, h]).filter((c) => c.pixels.length >= 8);
   const heights = comps.map((c) => c.box[3]).sort((a, b) => a - b);
   const letterHeight = heights.length ? heights[Math.floor(heights.length / 2)] : 0;
   // A stroke of width s has about 2 edge pixels per s pixels of area.
@@ -558,7 +727,7 @@ export function measureLettering(img: PixelData, mask: Uint8Array, rect: Box, bg
     // edge, a blend with the background, is only part of it).
     const rimBins = new Map<number, { n: number; r: number; g: number; b: number }>();
     const bin = (bins: typeof deepBins, p: number) => {
-      const [r0, g0, b0] = [img.data[p * 4], img.data[p * 4 + 1], img.data[p * 4 + 2]];
+      const [r0, g0, b0] = [D[p * 4], D[p * 4 + 1], D[p * 4 + 2]];
       const k = ((r0 >> 5) << 6) | ((g0 >> 5) << 3) | (b0 >> 5);
       const e = bins.get(k) ?? { n: 0, r: 0, g: 0, b: 0 };
       e.n++;
@@ -570,11 +739,11 @@ export function measureLettering(img: PixelData, mask: Uint8Array, rect: Box, bg
     let inn = 0;
     for (let y = y0 + 1; y < y0 + h - 1; y++) {
       for (let x = x0 + 1; x < x0 + w - 1; x++) {
-        const p = y * img.width + x;
+        const p = y * W + x;
         if (!mask[p]) continue;
-        const edge = !mask[p - 1] || !mask[p + 1] || !mask[p - img.width] || !mask[p + img.width];
-        const deep = !edge && mask[p - 2] && mask[p + 2] && mask[p - 2 * img.width] && mask[p + 2 * img.width];
-        if (edge) (er += img.data[p * 4]), (eg += img.data[p * 4 + 1]), (eb += img.data[p * 4 + 2]), en++;
+        const edge = !mask[p - 1] || !mask[p + 1] || !mask[p - W] || !mask[p + W];
+        const deep = !edge && mask[p - 2] && mask[p + 2] && mask[p - 2 * W] && mask[p + 2 * W];
+        if (edge) (er += D[p * 4]), (eg += D[p * 4 + 1]), (eb += D[p * 4 + 2]), en++;
         if (!deep) bin(rimBins, p);
         else {
           bin(deepBins, p);
@@ -641,7 +810,7 @@ export function measureLettering(img: PixelData, mask: Uint8Array, rect: Box, bg
   }
   // Italic: the letters lean. Shearing the lettering back by its slant makes the vertical strokes
   // line up into sharp columns; the shear that gives the sharpest columns is the slant.
-  const slope = slantOf(mask, img.width, [x0, y0, w, h]);
+  const slope = slantOf(mask, W, [x0, y0, w, h]);
   if (slope >= 0.12 && letterHeight >= 8) out.italic = true;
   return out;
 }
@@ -649,17 +818,19 @@ export function measureLettering(img: PixelData, mask: Uint8Array, rect: Box, bg
 /** Most common colour in a rectangle (coarse histogram) and the share of pixels close to it. */
 export function dominantColor(img: PixelData, rect: Box, tol = 40): { color: RGB; share: number } {
   const [x0, y0, w, h] = clampBox(rect, img.width, img.height);
+  const W = img.width;
+  const D = img.data;
   const bins = new Map<number, { n: number; r: number; g: number; b: number }>();
   const step = Math.max(1, Math.floor(Math.sqrt((w * h) / 40000)));
   for (let y = y0; y < y0 + h; y += step) {
     for (let x = x0; x < x0 + w; x += step) {
-      const i = (y * img.width + x) * 4;
-      const k = ((img.data[i] >> 5) << 6) | ((img.data[i + 1] >> 5) << 3) | (img.data[i + 2] >> 5);
+      const i = (y * W + x) * 4;
+      const k = ((D[i] >> 5) << 6) | ((D[i + 1] >> 5) << 3) | (D[i + 2] >> 5);
       const e = bins.get(k) ?? { n: 0, r: 0, g: 0, b: 0 };
       e.n++;
-      e.r += img.data[i];
-      e.g += img.data[i + 1];
-      e.b += img.data[i + 2];
+      e.r += D[i];
+      e.g += D[i + 1];
+      e.b += D[i + 2];
       bins.set(k, e);
     }
   }
@@ -672,7 +843,7 @@ export function dominantColor(img: PixelData, rect: Box, tol = 40): { color: RGB
   for (let y = y0; y < y0 + h; y += step) {
     for (let x = x0; x < x0 + w; x += step) {
       total++;
-      if (colorDist(img.data, (y * img.width + x) * 4, color) <= tol) near++;
+      if (colorDist(D, (y * W + x) * 4, color) <= tol) near++;
     }
   }
   return { color, share: near / Math.max(1, total) };
@@ -686,15 +857,18 @@ interface Component {
 /** 8-connected components of a mask inside `rect`. */
 export function components(mask: Uint8Array, width: number, rect: Box): Component[] {
   const [x0, y0, w, h] = rect;
-  const seen = new Uint8Array(mask.length);
+  // Visited marks only for the rect (it is often a small part of a big mask).
+  const seen = new Uint8Array(w * h);
   const out: Component[] = [];
+  const stack: number[] = [];
   for (let y = y0; y < y0 + h; y++) {
     for (let x = x0; x < x0 + w; x++) {
       const p0 = y * width + x;
-      if (!mask[p0] || seen[p0]) continue;
+      const s0 = (y - y0) * w + (x - x0);
+      if (!mask[p0] || seen[s0]) continue;
       const pixels: number[] = [];
-      const stack = [p0];
-      seen[p0] = 1;
+      stack.push(p0);
+      seen[s0] = 1;
       let minX = x, maxX = x, minY = y, maxY = y;
       while (stack.length) {
         const p = stack.pop()!;
@@ -706,13 +880,15 @@ export function components(mask: Uint8Array, width: number, rect: Box): Componen
         if (py < minY) minY = py;
         if (py > maxY) maxY = py;
         for (let dy = -1; dy <= 1; dy++) {
+          const qy = py + dy;
+          if (qy < y0 || qy >= y0 + h) continue;
           for (let dx = -1; dx <= 1; dx++) {
             const qx = px + dx;
-            const qy = py + dy;
-            if (qx < x0 || qy < y0 || qx >= x0 + w || qy >= y0 + h) continue;
+            if (qx < x0 || qx >= x0 + w) continue;
             const q = qy * width + qx;
-            if (mask[q] && !seen[q]) {
-              seen[q] = 1;
+            const sq = (qy - y0) * w + (qx - x0);
+            if (mask[q] && !seen[sq]) {
+              seen[sq] = 1;
               stack.push(q);
             }
           }
@@ -805,12 +981,56 @@ export function snapToLettering(candidates: Uint8Array, width: number, search: B
  * pixels are all within a few pixels of the bubble colour, artwork beyond an outline is not.
  */
 export function onBackground(cand: Uint8Array, width: number, height: number, rect: Box, floodMask: Uint8Array, reach = 5): Uint8Array {
-  const near = dilate(floodMask, width, height, reach);
+  const near = dilateIn(floodMask, width, height, reach, rect);
   const out = new Uint8Array(cand.length);
-  for (const c of components(cand, width, rect)) {
-    let n = 0;
-    for (const p of c.pixels) if (near[p]) n++;
-    if (n >= c.pixels.length * 0.85) for (const p of c.pixels) out[p] = 1;
+  // 8-connected components as runs of a row joined to the touching runs of the row above (union-
+  // find; no pixel lists: on busy art one "component" can be most of the region).
+  const [x0, y0, w, h] = rect;
+  const rs: number[] = []; // per run: y, first x, last x
+  const parent: number[] = [];
+  const find = (i: number): number => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]];
+    return i;
+  };
+  let prevFrom = 0;
+  let prevTo = 0;
+  for (let y = y0; y < y0 + h; y++) {
+    const from = parent.length;
+    const row = y * width;
+    let k = prevFrom;
+    for (let x = x0; x < x0 + w; x++) {
+      if (!cand[row + x]) continue;
+      let e = x;
+      while (e + 1 < x0 + w && cand[row + e + 1]) e++;
+      const id = parent.length;
+      parent.push(id);
+      rs.push(y, x, e);
+      // Runs of the row above touching this one (diagonals count): x-1 … e+1.
+      while (k < prevTo && rs[k * 3 + 2] < x - 1) k++;
+      for (let j = k; j < prevTo && rs[j * 3 + 1] <= e + 1; j++) {
+        const a = find(j);
+        const b = find(id);
+        if (a !== b) parent[Math.max(a, b)] = Math.min(a, b);
+      }
+      x = e;
+    }
+    prevFrom = from;
+    prevTo = parent.length;
+  }
+  const n = parent.length;
+  const total = new Int32Array(n);
+  const close = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    const root = find(i);
+    const row = rs[i * 3] * width;
+    total[root] += rs[i * 3 + 2] - rs[i * 3 + 1] + 1;
+    for (let p = row + rs[i * 3 + 1], end = row + rs[i * 3 + 2]; p <= end; p++) if (near[p]) close[root]++;
+  }
+  for (let i = 0; i < n; i++) {
+    const root = find(i);
+    if (close[root] < total[root] * 0.85) continue;
+    const row = rs[i * 3] * width;
+    out.fill(1, row + rs[i * 3 + 1], row + rs[i * 3 + 2] + 1);
   }
   return out;
 }
@@ -828,26 +1048,33 @@ function residual(img: PixelData, rect: Box, bg: RGB, threshold: number, within?
  * (which a loose box takes in) run on past the box or are solid: the flood must not run through
  * them into the picture. `reach`: about half the thickest stroke.
  */
-function letterLike(img: PixelData, rect: Box, bg: RGB, reach: number): Uint8Array {
+function letterLike(img: PixelData, rect: Box, bg: RGB, reach: number): { x: number; y: number }[] {
   const { width, height } = img;
   const outer = clampBox(expandBox(rect, reach * 2 + 8), width, height);
-  const cand = textMask(img, outer, bg, 60);
-  const near = new Uint8Array(width * height);
+  // Worked out in the small window around the box (nothing outside it can count).
   const [ox, oy, ow, oh] = outer;
-  for (let y = oy; y < oy + oh; y++) for (let x = ox; x < ox + ow; x++) if (!cand[y * width + x]) near[y * width + x] = 1;
-  const around = dilate(near, width, height, reach);
-  const out = new Uint8Array(width * height);
+  const cand = new Uint8Array(ow * oh);
+  const near = new Uint8Array(ow * oh);
+  for (let y = 0; y < oh; y++) {
+    for (let x = 0; x < ow; x++) {
+      if (colorDist(img.data, ((y + oy) * width + x + ox) * 4, bg) > 60) cand[y * ow + x] = 1;
+      else near[y * ow + x] = 1;
+    }
+  }
+  const around = dilate(near, ow, oh, reach);
+  const out: { x: number; y: number }[] = [];
   const [x0, y0, w, h] = rect;
-  for (const c of components(cand, width, outer)) {
+  for (const c of components(cand, ow, [0, 0, ow, oh])) {
     const [bx, by, bw, bh] = c.box;
-    if (bx <= ox || by <= oy || bx + bw >= ox + ow || by + bh >= oy + oh) continue;
+    if (bx <= 0 || by <= 0 || bx + bw >= ow || by + bh >= oh) continue;
     let n = 0;
     for (const p of c.pixels) if (around[p]) n++;
     if (n < c.pixels.length * 0.85) continue;
     for (const p of c.pixels) {
-      const x = p % width;
-      const y = (p - x) / width;
-      if (x >= x0 && y >= y0 && x < x0 + w && y < y0 + h) out[p] = 1;
+      const lx = p % ow;
+      const x = lx + ox;
+      const y = (p - lx) / ow + oy;
+      if (x >= x0 && y >= y0 && x < x0 + w && y < y0 + h) out.push({ x, y });
     }
   }
   return out;
@@ -885,7 +1112,10 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
   // Bubbles are often much larger than their text: grow the analysed region until the
   // bubble closes (open page background never closes and ends as open lettering).
   // The last one: a short remark in a big oval (an exclamation in a webtoon bubble).
-  let pads = [Math.max(40, 0.9 * maxDim), Math.max(70, 1.8 * maxDim), Math.max(110, 3 * maxDim), Math.max(240, 6 * maxDim)].map(Math.round);
+  // The search stays local: a bubble is never more than a few times its text away from it (the
+  // cap keeps a long line of text from analysing most of a tall strip).
+  const cap = Math.max(600, 3 * maxDim);
+  let pads = [...new Set([Math.max(40, 0.9 * maxDim), Math.max(70, 1.8 * maxDim), Math.max(110, 3 * maxDim), Math.max(240, 6 * maxDim)].map((p) => Math.round(Math.min(p, cap))))];
   const known = opts.bubbleBox;
   if (known) {
     // The detector's bubble: analyse just past its outline first.
@@ -899,22 +1129,58 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
   let flat = false;
   let flood = null as FloodResult | null;
   let leaked = true;
+  // The flood is tried with the same pads several times (plain, trimmed, other colours): the
+  // pixels of each analysed region are read once (nothing is changed until the very end).
+  const regions = new Map<number, PixelData>();
   const setRegion = (pad: number) => {
     region = clampBox(expandBox(bbox, pad), image.width, image.height);
-    img = image.getRegion(...region);
+    let got = regions.get(pad);
+    if (!got) regions.set(pad, (got = image.getRegion(...region)));
+    img = got;
     local = [bbox[0] - region[0], bbox[1] - region[1], bbox[2], bbox[3]];
+  };
+  const floods = new Map<string, ReturnType<typeof startFlood>>();
+  // The letter-like marks the flood may pass (see letterLike) depend only on the pixels near the
+  // box: found once per colour, in page px, and laid onto each analysed region.
+  const letters = new Map<string, { x: number; y: number }[]>();
+  const lettersFor = (colour: RGB, seedRect: Box): Uint8Array => {
+    const reach = Math.min(12, Math.max(5, Math.round(minDim * 0.2)));
+    const outer = clampBox(expandBox(seedRect, reach * 2 + 8), img.width, img.height);
+    const key = `${colour.join(',')}|${seedRect[0] + region[0]},${seedRect[1] + region[1]},${seedRect[2]},${seedRect[3]}|${outer[0] + region[0]},${outer[1] + region[1]},${outer[2]},${outer[3]}`;
+    let pts = letters.get(key);
+    if (!pts) {
+      pts = letterLike(img, seedRect, colour, reach).map(({ x, y }) => ({ x: x + region[0], y: y + region[1] }));
+      letters.set(key, pts);
+    }
+    const mask = new Uint8Array(img.width * img.height);
+    for (const { x, y } of pts) mask[(y - region[1]) * img.width + x - region[0]] = 1;
+    return mask;
   };
   const floodFrom = (colour: RGB, trim = false) => {
     for (let attempt = 0; attempt < pads.length; attempt++) {
       setRegion(pads[attempt]);
       const seedRect = clampBox(expandBox(local, 4), img.width, img.height);
       const seed = clampBox(expandBox(local, 2), img.width, img.height);
-      flood = floodBubble(img, seed, colour, 42, letterLike(img, seedRect, colour, Math.min(12, Math.max(5, Math.round(minDim * 0.2)))));
+      // A plain flood that is not the last try only tells whether it runs out of the region.
+      const sides: LeakSides = { left: region[0] > 0, top: region[1] > 0, right: region[0] + region[2] < image.width, bottom: region[1] + region[3] < image.height };
+      const stopAt = !trim && attempt < pads.length - 1 ? sides : undefined;
+      // The trimmed pass starts from the same flood as the plain one (when that one was finished).
+      // (A plain flood stopped early is finished by the trimmed pass.)
+      const key = `${colour.join(',')}@${pads[attempt]}`;
+      let run = floods.get(key);
+      if (!run) floods.set(key, (run = startFlood(img, seed, colour, 42, lettersFor(colour, seedRect))));
+      const f = run(stopAt);
+      flood = f;
+      if (f.stopped) {
+        leaked = true;
+        continue;
+      }
       if (trim) {
         // A broken, glowing or spiky outline, or a bubble touching the page's light margin: the
         // flood runs out through narrow gaps. Cut those off and keep the round body around the text.
-        const t = trimFlood(flood, img.width, img.height, seed, Math.min(24, Math.max(4, Math.min(flood.box[2], flood.box[3]) * 0.035)));
-        if (!t) {
+        // (A trimmed flood that runs out anyway need not be made: it is not used.)
+        const t = trimFlood(flood, img.width, img.height, seed, Math.min(24, Math.max(4, Math.min(flood.box[2], flood.box[3]) * 0.035)), sides);
+        if (!t || t === 'leaks') {
           leaked = true;
           continue;
         }
@@ -1003,36 +1269,60 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     setRegion(pads[0]);
   }
 
-  const search = clampBox(expandBox(local, Math.round(minDim * 1.2) + 12), img.width, img.height);
+  let search = clampBox(expandBox(local, Math.round(minDim * 1.2) + 12), img.width, img.height);
+  {
+    // From here on only the text's neighbourhood (and the bubble, when it closes) matters: work on
+    // that window of the analysed region, not on all of it (it may span most of a tall strip).
+    const margin = 16 + 2 * Math.max(0, Math.ceil(opts.expand ?? 3));
+    const win = clampBox(expandBox(flat && closed ? unionBox(flood!.box, search) : search, margin), img.width, img.height);
+    if (win[2] < img.width || win[3] < img.height) {
+      const [wx, wy] = win;
+      if (flood) flood = { ...flood, mask: cropMask(flood.mask, img.width, win), box: [flood.box[0] - wx, flood.box[1] - wy, flood.box[2], flood.box[3]] };
+      img = cropPixels(img, win);
+      local = [local[0] - wx, local[1] - wy, local[2], local[3]];
+      search = [search[0] - wx, search[1] - wy, search[2], search[3]];
+      region = [region[0] + wx, region[1] + wy, win[2], win[3]];
+    }
+  }
   let result: CleanResult;
 
   if (flat) {
     let mask: Uint8Array;
     let tb: Box | null;
     let letterMask: Uint8Array;
+    let closedHoles: Uint8Array | null = null;
     if (closed) {
       // Everything enclosed by the bubble interior is lettering.
       const holes = enclosedHoles(flood!.mask, img.width, img.height, clampBox(expandBox(flood!.box, 1), img.width, img.height));
+      closedHoles = holes;
       mask = holes.slice();
-      const extra = textMask(img, clampBox(expandBox(local, 3), img.width, img.height), bg, 60);
-      const interior = dilate(flood!.mask, img.width, img.height, 1);
-      for (let i = 0; i < extra.length; i++) if (!interior[i] || holes[i]) extra[i] = 0;
+      const near = clampBox(expandBox(local, 3), img.width, img.height);
+      const extra = textMask(img, near, bg, 60);
+      const { width: iw, height: ih } = img;
+      const fm = flood!.mask;
+      // Within `r` px of a pixel that passes `test` (only looked up where needed).
+      const within = (p: number, r: number, test: (q: number) => boolean) => {
+        const x = p % iw;
+        const y = (p - x) / iw;
+        for (let yy = Math.max(0, y - r); yy <= Math.min(ih - 1, y + r); yy++) for (let xx = Math.max(0, x - r); xx <= Math.min(iw - 1, x + r); xx++) if (test(yy * iw + xx)) return true;
+        return false;
+      };
+      const interior = (p: number) => within(p, 1, (q) => fm[q] === 1);
+      for (let y = near[1]; y < near[1] + near[3]; y++) for (let i = y * iw + near[0], end = i + near[2]; i < end; i++) if (extra[i] && (holes[i] || !interior(i))) extra[i] = 0;
       // A box around the whole bubble takes in its outline (and the glow along it): marks that run
       // along the outside of the interior are the outline, letters lie inside it.
-      const out = new Uint8Array(extra.length);
-      for (let i = 0; i < out.length; i++) if (!flood!.mask[i] && !holes[i]) out[i] = 1;
-      const nearOut = dilate(out, img.width, img.height, 2);
-      for (const c of components(extra, img.width, clampBox(expandBox(local, 3), img.width, img.height))) {
+      const nearOut = (p: number) => within(p, 2, (q) => !fm[q] && !holes[q]);
+      for (const c of components(extra, iw, near)) {
         let n = 0;
-        for (const p of c.pixels) if (nearOut[p]) n++;
+        for (const p of c.pixels) if (nearOut(p)) n++;
         if (n > c.pixels.length * 0.3) continue;
         for (const p of c.pixels) mask[p] = 1;
       }
-      tb = maskBounds(mask, img.width, img.height);
+      tb = maskBounds(mask, iw, ih);
       letterMask = mask.slice();
-      mask = dilate(mask, img.width, img.height, 2);
+      mask = dilateIn(mask, iw, ih, 2, tb && expandBox(tb, 2));
       // Never paint outside the bubble interior (keeps the outline intact).
-      for (let i = 0; i < mask.length; i++) if (mask[i] && !interior[i] && !holes[i]) mask[i] = 0;
+      for (let i = 0; i < mask.length; i++) if (mask[i] && !holes[i] && !interior(i)) mask[i] = 0;
     } else {
       // Open flat space (white gutter, narration box): erase the letters around the box.
       // Letters sit in the bubble's white: keep only components lying (almost) entirely next to
@@ -1051,7 +1341,8 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       }
       tb = snap.box;
       letterMask = snap.mask;
-      mask = dilate(snap.mask, img.width, img.height, Math.max(1, (opts.expand ?? 3) - 1));
+      const grow = Math.max(1, (opts.expand ?? 3) - 1);
+      mask = dilateIn(snap.mask, img.width, img.height, grow, snap.box && expandBox(snap.box, Math.ceil(grow)));
     }
     const lettering = measureLettering(img, letterMask, closed ? flood!.box : search, bg);
     if (!opts.analyzeOnly) fillMask(img, mask, bg);
@@ -1089,9 +1380,8 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       // A bubble cut by the picture edge: keep the text inside the visible part.
       bubble = { box: bb, fill: toHex(bg), safeArea: clampBox(safe.map(Math.round) as Box, image.width, image.height), shape };
       // The real inside, row by row, so the translation follows any outline (spiky, cloud, wavy).
-      const holes = enclosedHoles(flood!.mask, img.width, img.height, clampBox(expandBox(flood!.box, 1), img.width, img.height));
       const cx = Math.round(tb ? tb[0] + tb[2] / 2 : local[0] + local[2] / 2);
-      bubble.rows = bubbleRows(flood!.mask, holes, img.width, flood!.box, cx, region);
+      bubble.rows = bubbleRows(flood!.mask, closedHoles!, img.width, flood!.box, cx, region);
     } else {
       const base = textBox ? unionBox(textBox, bbox) : bbox;
       bubble = { box: base, fill: toHex(bg), safeArea: clampBox(expandBox(base, Math.round(base[2] * 0.08), Math.round(base[3] * 0.08)).map(Math.round) as Box, image.width, image.height), shape: 'rect' };
@@ -1137,12 +1427,18 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     // No clear letters found: smear the box only if it is small. A big box (a sound effect drawn
     // into the art, an imprecise model box) would turn a large part of the picture into a blur.
     const small = inner[2] * inner[3] <= 45_000;
+    let maskBox = tb;
     if (countMask(mask) < inner[2] * inner[3] * 0.03) {
       mask = new Uint8Array(img.width * img.height);
-      if (small && !opts.sfx) for (let y = inner[1]; y < inner[1] + inner[3]; y++) for (let x = inner[0]; x < inner[0] + inner[2]; x++) mask[y * img.width + x] = 1;
+      maskBox = null;
+      if (small && !opts.sfx) {
+        for (let y = inner[1]; y < inner[1] + inner[3]; y++) for (let x = inner[0]; x < inner[0] + inner[2]; x++) mask[y * img.width + x] = 1;
+        maskBox = inner;
+      }
     }
     // Outlined lettering has a halo: take a little more around the strokes.
-    mask = dilate(mask, img.width, img.height, opts.expand ?? 3);
+    const halo = opts.expand ?? 3;
+    mask = dilateIn(mask, img.width, img.height, halo, maskBox && expandBox(maskBox, Math.ceil(Math.max(0, halo))));
     let method: CleanResult['method'] = opts.analyzeOnly ? 'none' : 'diffuse';
     const textArea = clampBox(expandBox(tb ? unionBox(tb, local) : local, 2), img.width, img.height);
     if (!opts.analyzeOnly) {
@@ -1264,10 +1560,11 @@ export interface LeftoverProbe {
  * whole second text in the same bubble that the model skipped. Looks for rows of letter-sized
  * marks on the bubble colour, away from every known block. Returns page-pixel boxes.
  */
-export function findLeftoverText(image: TiledImage, probes: LeftoverProbe[], known: Box[]): Box[] {
+export async function findLeftoverText(image: TiledImage, probes: LeftoverProbe[], known: Box[]): Promise<Box[]> {
   const found: Box[] = [];
   const queue = [...probes];
   for (let guard = 0; queue.length && guard < 40; guard++) {
+    await yieldIfBusy();
     const pr = queue.shift()!;
     const h = pr.letterHeight;
     if (h < 6) continue;
@@ -1275,9 +1572,20 @@ export function findLeftoverText(image: TiledImage, probes: LeftoverProbe[], kno
     if (region[2] * region[3] > 4_000_000) continue;
     const img = image.getRegion(...region);
     const all: Box = [0, 0, img.width, img.height];
+    // Pixels of the bubble colour, and marks standing out from it (one pass for both).
     const near = new Uint8Array(img.width * img.height);
-    for (let p = 0; p < near.length; p++) if (colorDist(img.data, p * 4, pr.fill) <= 42) near[p] = 1;
-    const cand = onBackground(textMask(img, all, pr.fill, 60), img.width, img.height, all, near, 4);
+    const marks = new Uint8Array(img.width * img.height);
+    {
+      const d = img.data;
+      const [r0, g0, b0] = pr.fill;
+      for (let p = 0; p < near.length; p++) {
+        const dr = d[p * 4] - r0, dg = d[p * 4 + 1] - g0, db = d[p * 4 + 2] - b0;
+        const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+        if (dist <= 42) near[p] = 1;
+        else if (dist > 60) marks[p] = 1;
+      }
+    }
+    const cand = onBackground(marks, img.width, img.height, all, near, 4);
     const knownLocal = known.map((k): Box => expandBox([k[0] - region[0], k[1] - region[1], k[2], k[3]], Math.round(h * 0.3)));
     const letters = components(cand, img.width, all).filter((c) => {
       const [x, y, w, ch] = c.box;
@@ -1324,11 +1632,12 @@ export function findLeftoverText(image: TiledImage, probes: LeftoverProbe[], kno
  * the white gutter — that enclose rows of letter-sized marks. Used to find text the model did not
  * report at all (an unusual bubble it skipped). Returns probes for findLeftoverText.
  */
-export function findTextRegions(image: TiledImage, opts: { band?: number; minLetters?: number } = {}): LeftoverProbe[] {
+export async function findTextRegions(image: TiledImage, opts: { band?: number; minLetters?: number } = {}): Promise<LeftoverProbe[]> {
   const bandH = opts.band ?? 2048;
   const minLetters = opts.minLetters ?? 6;
   const probes: LeftoverProbe[] = [];
   for (let top = 0; top < image.height; top += bandH - 200) {
+    await yieldIfBusy();
     const region = clampBox([0, top, image.width, Math.min(bandH, image.height - top)], image.width, image.height);
     const img = image.getRegion(...region);
     const { width: w, height: h, data } = img;
@@ -1362,6 +1671,7 @@ export function findTextRegions(image: TiledImage, opts: { band?: number; minLet
       comps.push({ box: [minX, minY, maxX - minX + 1, maxY - minY + 1], area });
     }
     for (const [id, c] of comps.entries()) {
+      await yieldIfBusy();
       if (c.area < 1500 || c.box[2] < 40 || c.box[3] < 24) continue;
       // Marks enclosed by this light area (not connected to its bounding box's edge).
       const [bx, by, bw, bh] = c.box;
