@@ -41,7 +41,7 @@ jobs:
         with:
           name: android-apk
           path: ai-translate-android-*.apk
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         # Attach to the release of this version (created by CI or by a pushed tag).
         if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
         with: { files: ai-translate-android-*.apk, tag_name: 'v${{ steps.v.outputs.version }}', target_commitish: '${{ github.sha }}', make_latest: true }
