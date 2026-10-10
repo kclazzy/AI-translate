@@ -1,7 +1,7 @@
 import { familyFor } from '../llm/catalog';
 import { AppError } from '../errors';
 import type { ImageBackend, PixelData } from '../image/backend';
-import { cleanBlock, findLeftoverText, findTextRegions, luminance, parseHex, type Lettering, type LeftoverProbe } from '../image/clean';
+import { cleanBlock, findLeftoverText, findLetterClusters, findTextRegions, luminance, parseHex, type LetterCluster, type Lettering, type LeftoverProbe } from '../image/clean';
 import { boxToPolygon, clampBox, expandBox, overlapRatio, TiledImage } from '../image/tiled';
 import { detectScript } from '../languages';
 import { assertPrivacy, isLocalProvider, isLocalUrl } from '../llm/privacy';
@@ -666,6 +666,17 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       b.bubble = r.bubble ? { ...r.bubble, shape: 'rect', safeArea: [...b.bbox] as Box } : null;
       return;
     }
+    if (erase && b.textType !== 'SFX' && !placeOnLettering(b)) {
+      // The model's box holds no letters and none stand nearby: keep the translation where the
+      // model put it, but never erase the art there and never shout over it in big light letters.
+      b.lowConfidence = true;
+      // Inside a light bubble (empty, or its letters too faint to find) the text may follow its outline.
+      const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: true });
+      b.bubble = r.closed && r.bubble && luminance(...parseHex(r.bubble.fill)) >= 190 ? r.bubble : null;
+      b.fontSizeEstimate = Math.min(b.fontSizeEstimate, Math.round(Math.max(12, original.width * 0.022)));
+      b.style = { color: '#111111', strokeColor: '#ffffff', strokeWidth: 3, ...matchLettering(b, undefined), ...(b.style ?? {}) };
+      return;
+    }
     const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, sfx: b.textType === 'SFX', expand: config.inpaintExpand });
     if (r.artMask) artMasks.push(r.artMask);
     b.bubble = r.bubble;
@@ -682,6 +693,25 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     }
     b.style = { ...matchLettering(b, r.lettering), ...(b.style ?? {}) };
     if (r.textGroups && b.textType !== 'SFX' && b.translate) groupsOf.set(b.id, { groups: r.textGroups, lettering: r.lettering });
+  };
+  /**
+   * Make sure the block's box holds the letters the model read. A box with no letters at all (put
+   * next to the bubble, over the art) is moved onto the lettering standing nearby that fits the
+   * text; false when there is none.
+   */
+  const placeOnLettering = (b: TextBlock): boolean => {
+    // On the original: another block in the same bubble may have erased these letters already.
+    if (findLetterClusters(original, expandBox(b.bbox, 12)).some((c) => intersects(c.box, b.bbox))) return true;
+    // Lettering the quick look does not know (coloured, outlined): the cleaner's own search.
+    if (cleanBlock(original, b.bbox, { analyzeOnly: true }).textBox) return true;
+    // Only lettering nobody has erased yet can be this block's.
+    const found = letteringNear(b, blocks, cleaned!);
+    if (!found) return false;
+    const pad = Math.round(found.letterHeight * 0.2);
+    b.bbox = clampBox(expandBox(found.box, pad), original.width, original.height);
+    b.polygon = boxToPolygon(b.bbox);
+    b.fontSizeEstimate = estimateFontSize(b.bbox, b.originalText);
+    return true;
   };
   const groupsOf = new Map<string, { groups: Box[]; lettering?: Lettering }>();
   for (const b of blocks) cleanOne(b);
@@ -788,6 +818,28 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     stage('done', 1);
     return { page, original, cleaned: cleaned ?? original.clone(), context, ...(req.context && !skipped ? { contextUpdate } : {}) };
   }
+}
+
+/**
+ * Lettering still standing near a block whose box holds none (up to 0.6 of the picture's width
+ * away in every direction), not inside another block's box, with about as many marks as the
+ * text has letters. The nearest such run, or null.
+ */
+export function letteringNear(b: TextBlock, blocks: TextBlock[], image: TiledImage): LetterCluster | null {
+  const reach = Math.round(image.width * 0.6);
+  const area = clampBox([b.bbox[0] - reach, b.bbox[1] - reach, b.bbox[2] + reach * 2, b.bbox[3] + reach * 2], image.width, image.height);
+  const chars = Math.max(1, [...b.originalText.replace(/\s+/g, '')].length);
+  const taken = blocks.filter((o) => o !== b).flatMap((o) => (o.textBox ? [o.bbox, o.textBox] : [o.bbox]));
+  const owned = (c: LetterCluster) =>
+    taken.some((t) => {
+      const cut = intersectBox(c.box, t);
+      return !!cut && cut[2] * cut[3] > c.box[2] * c.box[3] * 0.3;
+    });
+  const cx = b.bbox[0] + b.bbox[2] / 2;
+  const cy = b.bbox[1] + b.bbox[3] / 2;
+  const dist = (c: LetterCluster) => Math.hypot(c.box[0] + c.box[2] / 2 - cx, c.box[1] + c.box[3] / 2 - cy);
+  const fits = findLetterClusters(image, area).filter((c) => c.count >= Math.max(3, chars * 0.3) && c.count <= chars * 2.2 + 2 && !owned(c));
+  return fits.sort((p, q) => dist(p) - dist(q))[0] ?? null;
 }
 
 /** Remove duplicates from overlapping views; keep the copy read nearer its view's centre. */

@@ -317,6 +317,80 @@ export function floodBubble(img: PixelData, seed: Box, bg: RGB, tol: number, pas
   return { mask, area, box: maxX < 0 ? [0, 0, 0, 0] : [minX, minY, maxX - minX + 1, maxY - minY + 1], touchesEdge };
 }
 
+/**
+ * Cut a flood down to the round body around the seed: morphological opening (erode, keep what
+ * touches the seed, grow back inside the flood). Narrow light parts hanging on the body fall
+ * away: the glow running out through gaps in a broken or spiky outline, the page's light margin
+ * a bubble cut by the picture's edge touches. The picture's border counts as outside here.
+ * Returns null when nothing is left or the cut-off part is as big as the body (open space, not
+ * a bubble with a leaky outline).
+ */
+export function trimFlood(f: FloodResult, width: number, height: number, seed: Box, radius: number): FloodResult | null {
+  const r = Math.max(2, Math.round(radius));
+  // The letters inside count as body: dense lettering would otherwise eat the middle of the bubble.
+  const solid = enclosedHoles(f.mask, width, height, clampBox(expandBox(f.box, 1), width, height));
+  for (let p = 0; p < solid.length; p++) if (f.mask[p]) solid[p] = 1;
+  // Erode = complement of the dilated complement, with a frame of "outside" around the picture.
+  const pw = width + 2;
+  const ph = height + 2;
+  const comp = new Uint8Array(pw * ph);
+  for (let y = 0; y < ph; y++) {
+    for (let x = 0; x < pw; x++) {
+      const inner = x > 0 && y > 0 && x <= width && y <= height;
+      if (!inner || !solid[(y - 1) * width + x - 1]) comp[y * pw + x] = 1;
+    }
+  }
+  const grown = dilate(comp, pw, ph, r);
+  const core = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) if (!grown[(y + 1) * pw + x + 1]) core[y * width + x] = 1;
+  // Keep only the core parts that reach into the seed (where the letters are).
+  const [sx, sy, sw, sh] = clampBox(seed, width, height);
+  const keep = new Uint8Array(width * height);
+  const stack: number[] = [];
+  for (let y = sy; y < sy + sh; y++) {
+    for (let x = sx; x < sx + sw; x++) {
+      const p = y * width + x;
+      if (core[p] && !keep[p]) {
+        keep[p] = 1;
+        stack.push(p);
+      }
+    }
+  }
+  if (!stack.length) return null;
+  while (stack.length) {
+    const p = stack.pop()!;
+    const x = p % width;
+    const visit = (q: number) => {
+      if (core[q] && !keep[q]) {
+        keep[q] = 1;
+        stack.push(q);
+      }
+    };
+    if (x > 0) visit(p - 1);
+    if (x < width - 1) visit(p + 1);
+    if (p >= width) visit(p - width);
+    if (p < width * (height - 1)) visit(p + width);
+  }
+  const back = dilate(keep, width, height, r);
+  const mask = new Uint8Array(width * height);
+  let area = 0;
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let p = 0; p < mask.length; p++) {
+    if (!back[p] || !f.mask[p]) continue;
+    mask[p] = 1;
+    area++;
+    const x = p % width;
+    const y = (p - x) / width;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (!area || f.area - area > area) return null;
+  const touchesEdge = minX === 0 || minY === 0 || maxX === width - 1 || maxY === height - 1;
+  return { mask, area, box: [minX, minY, maxX - minX + 1, maxY - minY + 1], touchesEdge };
+}
+
 /** Pixels not in `region` that are fully enclosed by it (the glyphs inside a bubble). */
 export function enclosedHoles(region: Uint8Array, width: number, height: number, within: Box): Uint8Array {
   const [bx, by, bw, bh] = within;
@@ -793,7 +867,8 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
   const minDim = Math.max(8, Math.min(bbox[2], bbox[3]));
   // Bubbles are often much larger than their text: grow the analysed region until the
   // bubble closes (open page background never closes and ends as open lettering).
-  const pads = [Math.max(40, 0.9 * maxDim), Math.max(70, 1.8 * maxDim), Math.max(110, 3 * maxDim)].map(Math.round);
+  // The last one: a short remark in a big oval (an exclamation in a webtoon bubble).
+  const pads = [Math.max(40, 0.9 * maxDim), Math.max(70, 1.8 * maxDim), Math.max(110, 3 * maxDim), Math.max(240, 6 * maxDim)].map(Math.round);
   let region: Box = bbox;
   let img!: PixelData;
   let local: Box = bbox;
@@ -806,11 +881,22 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     img = image.getRegion(...region);
     local = [bbox[0] - region[0], bbox[1] - region[1], bbox[2], bbox[3]];
   };
-  const floodFrom = (colour: RGB) => {
+  const floodFrom = (colour: RGB, trim = false) => {
     for (let attempt = 0; attempt < pads.length; attempt++) {
       setRegion(pads[attempt]);
       const seedRect = clampBox(expandBox(local, 4), img.width, img.height);
-      flood = floodBubble(img, clampBox(expandBox(local, 2), img.width, img.height), colour, 42, letterLike(img, seedRect, colour, Math.min(12, Math.max(5, Math.round(minDim * 0.2)))));
+      const seed = clampBox(expandBox(local, 2), img.width, img.height);
+      flood = floodBubble(img, seed, colour, 42, letterLike(img, seedRect, colour, Math.min(12, Math.max(5, Math.round(minDim * 0.2)))));
+      if (trim) {
+        // A broken, glowing or spiky outline, or a bubble touching the page's light margin: the
+        // flood runs out through narrow gaps. Cut those off and keep the round body around the text.
+        const t = trimFlood(flood, img.width, img.height, seed, Math.min(24, Math.max(4, Math.min(flood.box[2], flood.box[3]) * 0.035)));
+        if (!t) {
+          leaked = true;
+          continue;
+        }
+        flood = t;
+      }
       // Touching the analysed region's border means the flood ran out into open space;
       // touching the picture's own border is fine (a bubble cut off by the edge of the strip).
       leaked = floodLeaks(flood, region, image.width, image.height);
@@ -823,7 +909,17 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
   const isClosed = (tentative: boolean): boolean => {
     if (!flood || leaked || opts.sfx) return false;
     const floodArea = boxArea(flood.box);
-    if (flood.area <= boxArea(local) * (tentative ? 0.25 : 0.5) || floodArea > Math.max(boxArea(local) * 30, 40_000)) return false;
+    if (flood.area <= boxArea(local) * (tentative ? 0.25 : 0.5)) return false;
+    if (floodArea > Math.max(boxArea(local) * 30, 40_000)) {
+      // Much bigger than its text: only an oval around it (a panel or the sky is a rectangle or
+      // has no shape at all) with the text in its middle.
+      const fill = flood.area / Math.max(1, floodArea);
+      const [fx, fy, fw, fh] = flood.box;
+      const tx = local[0] + local[2] / 2 - fx;
+      const ty = local[1] + local[3] / 2 - fy;
+      const oval = fill >= 0.62 && fill <= 0.88 && tx > fw * 0.25 && tx < fw * 0.75 && ty > fh * 0.25 && ty < fh * 0.75;
+      if (!oval || floodArea > Math.max(boxArea(local) * 150, 40_000)) return false;
+    }
     // A bubble's inside fills most of its box (light letters flooded by mistake do not).
     if (tentative && flood.area < floodArea * 0.5) return false;
     const share = floodArea / (image.width * image.height);
@@ -842,6 +938,13 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
   flat = dom.share >= 0.45;
   if (flat) floodFrom(bg);
   let closed = flat && isClosed(false);
+  if (flat && !closed && !opts.sfx) {
+    const keep = { flood, leaked, region, img, local };
+    floodFrom(bg, true);
+    // Trimmed: it must really look like a bubble (the stricter test of a light shape found late).
+    closed = isClosed(true);
+    if (!closed) ({ flood, leaked, region, img, local } = keep);
+  }
   if (!closed && !opts.sfx) {
     // The box reaches well into the art around a bubble (a loose model box, the bubble's own box
     // with the art in its corners, a bubble cut by the picture's edge): the bubble colour is not
@@ -851,14 +954,16 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     if (!flat && dom.share >= 0.2 && luminance(...bg) >= 190) tries.push(bg);
     if (inside.share >= 0.3 && luminance(...inside.color) >= 190 && Math.hypot(inside.color[0] - bg[0], inside.color[1] - bg[1], inside.color[2] - bg[2]) > 60) tries.push(inside.color);
     const keep = { flood, leaked, region, img, local };
-    for (const colour of tries) {
-      floodFrom(colour);
-      if (isClosed(true)) {
-        bg = colour;
-        flat = closed = true;
-        break;
+    tries: for (const colour of tries) {
+      for (const trim of [false, true]) {
+        floodFrom(colour, trim);
+        if (isClosed(true)) {
+          bg = colour;
+          flat = closed = true;
+          break tries;
+        }
+        ({ flood, leaked, region, img, local } = keep);
       }
-      ({ flood, leaked, region, img, local } = keep);
     }
   }
   if (!flat) {
@@ -880,7 +985,18 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       mask = holes.slice();
       const extra = textMask(img, clampBox(expandBox(local, 3), img.width, img.height), bg, 60);
       const interior = dilate(flood!.mask, img.width, img.height, 1);
-      for (let i = 0; i < mask.length; i++) if (extra[i] && interior[i]) mask[i] = 1;
+      for (let i = 0; i < extra.length; i++) if (!interior[i] || holes[i]) extra[i] = 0;
+      // A box around the whole bubble takes in its outline (and the glow along it): marks that run
+      // along the outside of the interior are the outline, letters lie inside it.
+      const out = new Uint8Array(extra.length);
+      for (let i = 0; i < out.length; i++) if (!flood!.mask[i] && !holes[i]) out[i] = 1;
+      const nearOut = dilate(out, img.width, img.height, 2);
+      for (const c of components(extra, img.width, clampBox(expandBox(local, 3), img.width, img.height))) {
+        let n = 0;
+        for (const p of c.pixels) if (nearOut[p]) n++;
+        if (n > c.pixels.length * 0.3) continue;
+        for (const p of c.pixels) mask[p] = 1;
+      }
       tb = maskBounds(mask, img.width, img.height);
       letterMask = mask.slice();
       mask = dilate(mask, img.width, img.height, 2);
@@ -1252,4 +1368,94 @@ export function findTextRegions(image: TiledImage, opts: { band?: number; minLet
     if (top + bandH >= image.height) break;
   }
   return probes;
+}
+
+/** A run of letter-sized marks: lettering still standing somewhere on the picture. */
+export interface LetterCluster {
+  /** Page pixels. */
+  box: Box;
+  /** Number of marks (about one per letter; touching letters count as one). */
+  count: number;
+  /** Median mark height, px. */
+  letterHeight: number;
+  /** Dark letters on a light ground (a bubble), or light letters on a dark one. */
+  ink: 'dark' | 'light';
+}
+
+/**
+ * Lettering inside `area` (page pixels): neutral dark marks closely surrounded by light (bubble
+ * text), or light marks surrounded by dark (white captions over dark art), of letter size,
+ * standing in rows. Used to tell whether a model box holds any letters at all and, when it does
+ * not, where the text it read really is.
+ */
+export function findLetterClusters(image: TiledImage, area: Box): LetterCluster[] {
+  const region = clampBox(area, image.width, image.height);
+  if (region[2] < 8 || region[3] < 8) return [];
+  const img = image.getRegion(...region);
+  const { width: w, height: h, data } = img;
+  const n = w * h;
+  const lum = new Float32Array(n);
+  const sat = new Uint8Array(n);
+  for (let p = 0; p < n; p++) {
+    const r = data[p * 4], g = data[p * 4 + 1], b = data[p * 4 + 2];
+    lum[p] = luminance(r, g, b);
+    sat[p] = Math.max(r, g, b) - Math.min(r, g, b);
+  }
+  type Mark = { box: Box; ink: 'dark' | 'light' };
+  const marks: Mark[] = [];
+  for (const ink of ['dark', 'light'] as const) {
+    const m = new Uint8Array(n);
+    for (let p = 0; p < n; p++) m[p] = ink === 'dark' ? +(lum[p] < 100 && sat[p] < 50) : +(lum[p] > 200 && sat[p] < 50);
+    for (const c of components(m, w, [0, 0, w, h])) {
+      const [bx, by, bw, bh] = c.box;
+      if (c.pixels.length < 12 || bh < 8 || bh > 160 || bw > bh * 8 || bx === 0 || by === 0 || bx + bw >= w || by + bh >= h) continue;
+      // Ink fills only part of its box (a solid blob is art).
+      if (c.pixels.length > bw * bh * 0.85) continue;
+      // The ground around the mark: a ring just outside its box.
+      let around = 0, total = 0;
+      for (let d = 2; d <= 3; d++) {
+        const x0 = bx - d, y0 = by - d, x1 = bx + bw - 1 + d, y1 = by + bh - 1 + d;
+        const take = (x: number, y: number) => {
+          if (x < 0 || y < 0 || x >= w || y >= h) return;
+          total++;
+          const l = lum[y * w + x];
+          if (ink === 'dark' ? l > 200 : l < 90) around++;
+        };
+        for (let x = x0; x <= x1; x++) take(x, y0), take(x, y1);
+        for (let y = y0 + 1; y < y1; y++) take(x0, y), take(x1, y);
+      }
+      if (around < total * 0.75) continue;
+      marks.push({ box: c.box, ink });
+    }
+  }
+  // Rows of marks of about the same height, close together.
+  const groups: { box: Box; hs: number[]; ink: 'dark' | 'light' }[] = [];
+  for (const mk of marks.sort((a, b) => a.box[1] - b.box[1] || a.box[0] - b.box[0])) {
+    const mh = mk.box[3];
+    let g = groups.find((x) => {
+      if (x.ink !== mk.ink) return false;
+      const med = median(x.hs);
+      return mh >= med * 0.45 && mh <= med * 2.2 && boxGap(x.box, mk.box) <= Math.max(med, mh) * 0.9;
+    });
+    if (!g) groups.push((g = { box: mk.box, hs: [], ink: mk.ink }));
+    g.box = unionBox(g.box, mk.box);
+    g.hs.push(mh);
+    for (let i = groups.length - 1; i >= 0; i--) {
+      const o = groups[i];
+      if (o === g || o.ink !== g.ink) continue;
+      const med = Math.max(median(o.hs), median(g.hs));
+      if (boxGap(o.box, g.box) <= med * 0.9) {
+        g.box = unionBox(g.box, o.box);
+        g.hs.push(...o.hs);
+        groups.splice(i, 1);
+      }
+    }
+  }
+  const out: LetterCluster[] = [];
+  for (const g of groups) {
+    const lh = median(g.hs);
+    if (g.hs.length < 3 || g.box[2] < lh * 2) continue;
+    out.push({ box: [g.box[0] + region[0], g.box[1] + region[1], g.box[2], g.box[3]], count: g.hs.length, letterHeight: lh, ink: g.ink });
+  }
+  return out;
 }

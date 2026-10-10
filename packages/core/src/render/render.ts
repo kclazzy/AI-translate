@@ -33,7 +33,7 @@ export function displayText(block: TextBlock, d: StyleDefaults = DEFAULT_STYLE_D
 }
 
 export function layoutBlock(measurer: Measurer, block: TextBlock, d: StyleDefaults = DEFAULT_STYLE_DEFAULTS, page?: { width: number; height: number }): LayoutResult {
-  const l = layoutBlockRaw(measurer, block, d);
+  const l = layoutBlockRaw(measurer, block, d, page ? minReadableSize(page.width) : 0);
   return page ? keepInsidePage(l, l.box ?? targetBox(block, d), page) : l;
 }
 
@@ -58,15 +58,40 @@ export function keepInsidePage(l: LayoutResult, box: Box, page: { width: number;
   return { ...l, lines: l.lines.map((x) => ({ ...x, x: x.x + dx, y: x.y + dy })) };
 }
 
-function layoutBlockRaw(measurer: Measurer, block: TextBlock, d: StyleDefaults): LayoutResult {
-  const first = layoutBlockIn(measurer, block, d, targetBox(block, d), block.textBox ? 'rect' : block.bubble?.shape ?? 'rect');
-  if (!first.overflow || block.textBox || !block.bubble || block.style?.fontSize) return first;
-  // Does not fit the safe area: use the whole bubble (as a box, a little inside its edge) and
-  // smaller letters, rather than letting the text run out of the bubble.
-  const bb = block.bubble.box;
-  const inner: Box = [bb[0] + bb[2] * 0.12, bb[1] + bb[3] * 0.1, bb[2] * 0.76, bb[3] * 0.8];
-  const second = layoutBlockIn(measurer, block, d, inner, 'rect', 6);
-  return second.overflow ? first : { ...second, box: inner };
+/**
+ * The smallest text a reader takes in without zooming: 1.6 % of the picture's width, at least
+ * 12 px (and no more than 26 px on very wide spreads).
+ */
+export function minReadableSize(pageWidth: number): number {
+  return Math.round(Math.max(12, Math.min(26, pageWidth * 0.016)));
+}
+
+function layoutBlockRaw(measurer: Measurer, block: TextBlock, d: StyleDefaults, minReadable = 0): LayoutResult {
+  const fixed = !!block.style?.fontSize;
+  const scale = Math.max(0.5, Math.min(2, d.fontScale ?? 1));
+  // A size the user set, sound effects and vertical text keep their own rules.
+  const min = fixed || block.textType === 'SFX' || resolveStyle(block, d).vertical ? 0 : minReadable * Math.min(1, scale);
+  let best = layoutBlockIn(measurer, block, d, targetBox(block, d), block.textBox ? 'rect' : block.bubble?.shape ?? 'rect', undefined, min);
+  if (best.overflow && !block.textBox && block.bubble && !fixed) {
+    // Does not fit the safe area: use the whole bubble (as a box, a little inside its edge) and
+    // smaller letters, rather than letting the text run out of the bubble.
+    const bb = block.bubble.box;
+    const inner: Box = [bb[0] + bb[2] * 0.12, bb[1] + bb[3] * 0.1, bb[2] * 0.76, bb[3] * 0.8];
+    const second = layoutBlockIn(measurer, block, d, inner, 'rect', 6, min);
+    if (!second.overflow) best = { ...second, box: inner };
+  }
+  if (!min || best.fontSize >= min) return best;
+  // Too small to read: a bubble whose real inside is known lends the text all of it (more lines,
+  // following the outline) instead of the tight box around the original letters.
+  const bubble = block.bubble;
+  if (bubble && (bubble.rows || bubble.shape === 'ellipse')) {
+    const bb = bubble.box;
+    const inner: Box = [bb[0] + bb[2] * 0.04, bb[1] + bb[3] * 0.04, bb[2] * 0.92, bb[3] * 0.92];
+    const grown = layoutBlockIn(measurer, { ...block, textBox: undefined }, d, inner, bubble.shape, undefined, min);
+    if (!grown.overflow && grown.fontSize > best.fontSize) best = { ...grown, box: inner };
+  }
+  // Still smaller than readable: the place truly cannot hold the text — flag it for the editor.
+  return best.fontSize < min ? { ...best, overflow: true } : best;
 }
 
 /** Free span of a bubble's real outline for a band of rows of `box`, a little inside its edge. */
@@ -97,14 +122,15 @@ function spaced(m: Measurer, spacing: number | undefined): Measurer {
   };
 }
 
-function layoutBlockIn(measurer: Measurer, block: TextBlock, d: StyleDefaults, box: Box, shape: 'rect' | 'ellipse', minSize?: number): LayoutResult {
+function layoutBlockIn(measurer: Measurer, block: TextBlock, d: StyleDefaults, box: Box, shape: 'rect' | 'ellipse', minSize?: number, readable = 0): LayoutResult {
   const style = resolveStyle(block, d);
   measurer = spaced(measurer, style.letterSpacing);
   const rows = !block.textBox && block.bubble?.rows && !style.vertical ? block.bubble.rows : undefined;
   const pad = Math.max(3, (block.bubble?.box[2] ?? 0) * 0.06);
   // «Размер шрифта перевода» in the settings: all automatic sizes scaled (a size set by hand stays).
   const scale = Math.max(0.5, Math.min(2, d.fontScale ?? 1));
-  const cap = block.fontSizeEstimate > 0 ? Math.max(14, block.fontSizeEstimate * 1.3) * Math.max(1, scale) : undefined;
+  // Never capped below the readable size: small original lettering is no reason for tiny text.
+  const cap = block.fontSizeEstimate > 0 ? Math.max(14, readable, block.fontSizeEstimate * 1.3) * Math.max(1, scale) : undefined;
   const input = {
     text: displayText(block, d),
     minSize,
