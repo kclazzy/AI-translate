@@ -25,6 +25,8 @@ jobs:
       - run: pnpm -r run typecheck
       - name: Interface dictionaries are complete
         run: node packages/core/scripts/i18n-extract.mjs --check
+      - name: Fonts for the test pictures (Japanese text and Latin)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk fonts-dejavu-core >/dev/null
       - name: Unit and pipeline tests (core)
         run: pnpm --filter @ait/core test
       - run: pnpm --filter @ait/extension build

@@ -1,7 +1,12 @@
+import { existsSync } from 'node:fs';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createCanvas, GlobalFonts, loadImage } from '@napi-rs/canvas';
 import type { ImageBackend } from '../src/image/backend';
 
+// The test pictures need real glyphs (the text check skips pictures without letters).
+for (const f of ['/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf']) {
+  if (!existsSync(f)) throw new Error(`Test font missing: ${f} (apt install fonts-noto-cjk fonts-dejavu-core)`);
+}
 GlobalFonts.registerFromPath('/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc', 'TestCJK');
 GlobalFonts.registerFromPath('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 'TestSans');
 
