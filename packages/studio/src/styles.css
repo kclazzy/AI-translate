@@ -394,3 +394,14 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 /* Unsaved edits on a page of the page list. */
 .ait-unsaved { color: var(--magenta); font-weight: 700; margin-left: 2px; }
 .ait-stack-skipped { font-size: 12px; padding: 2px 8px; }
+/* «Разговорник»: the list of expressions and the editor's «Запомнить ваш вариант» offer. */
+.ait-pb-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.ait-pb-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--rule); }
+.ait-pb-row > input[type='checkbox'] { margin-top: 4px; flex: none; }
+.ait-pb-body { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.ait-pb-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 8px; vertical-align: middle; }
+.ait-pb-variants { margin: 4px 0 2px; padding-left: 18px; font-size: 14px; }
+.ait-pb-form { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.ait-pb-tabs { margin-bottom: 16px; }
+.ait-learn { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; margin: 8px 0; border: 1px solid var(--rule); border-radius: var(--r-panel); background: var(--sheet); font-size: 14px; }
+.ait-learn input { flex: 1 1 200px; min-width: 0; }

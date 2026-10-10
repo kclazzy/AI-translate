@@ -5,7 +5,7 @@ import type { TextType, Usage } from '../types';
 import { withRetry } from '../util/retry';
 import { applyForbiddenFixes, findGlossaryHits, findViolations, type GlossaryHit } from './glossary';
 import { isDegenerate, parseTranslationAnswer, tameRuns } from './parse';
-import { buildSystemPrompt, contextData, repairInstruction, textTranslateInstruction, type BlockForTranslation, type PromptInput } from './prompt';
+import { buildSystemPrompt, contextData, phrasebookData, repairInstruction, textTranslateInstruction, type BlockForTranslation, type PromptInput } from './prompt';
 
 export interface TranslateBlocksResult {
   /** lowConfidence: the translation came from an answer that was cut off or had to be mended. */
@@ -41,7 +41,7 @@ export async function translateBlocks(
   for (const [id, hits] of hitsByBlock) hintStrings[id] = hits.map((h) => `${h.entry.source} → ${h.entry.target}`);
 
   const system = buildSystemPrompt(input, [...allHits.values()]);
-  const user = textTranslateInstruction(blocks, hintStrings, contextData(input));
+  const user = textTranslateInstruction(blocks, hintStrings, contextData(input), phrasebookData(input, blocks));
   const usage: Usage[] = [];
 
   const retries = opts.retries ?? 2;

@@ -59,6 +59,7 @@ jobs:
           xvfb-run -a node e2e/power.e2e.mjs 2>&1 | tee .test-output/e2e-power.log
           xvfb-run -a node e2e/strip.e2e.mjs 2>&1 | tee .test-output/e2e-strip.log
           xvfb-run -a node e2e/lama.e2e.mjs 2>&1 | tee .test-output/e2e-lama.log
+          xvfb-run -a node e2e/phrasebook.e2e.mjs 2>&1 | tee .test-output/e2e-phrasebook.log
           pnpm --filter @ait/studio test
       - name: Package release files
         run: node scripts/package-release.mjs

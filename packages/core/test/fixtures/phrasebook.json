@@ -1,0 +1,67 @@
+{
+  "books": [
+    {
+      "source": "ja",
+      "target": "ru",
+      "title": "test ja",
+      "entries": [
+        { "id": "ja:naruhodo", "src": ["なるほど", "成程"], "cat": "interjection", "standalone": true, "variants": [{ "text": "Вот оно что", "when": "догадка" }, { "text": "Понятно", "when": "нейтрально" }], "note": "не «действительно»" },
+        { "id": "ja:yabai", "src": ["やばい", "ヤバい"], "cat": "slang", "speaker": true, "variants": [{ "text": "Блин", "when": "плохо" }, { "text": "Офигеть", "when": "восторг" }] },
+        { "id": "ja:yabasugi", "src": ["やばすぎ"], "cat": "slang", "variants": [{ "text": "Это уже слишком", "when": "перебор" }] },
+        { "id": "ja:uso", "src": ["うそ"], "cat": "interjection", "standalone": true, "variants": [{ "text": "Да ладно!", "when": "удивление" }] },
+        { "id": "ja:senpai", "src": ["先輩", "せんぱい"], "cat": "address", "variants": [{ "text": "сэмпай", "when": "как в оригинале", "policy": "keep" }, { "text": "старший", "when": "по-русски", "policy": "adapt" }, { "text": "наставник", "when": "на работе" }] },
+        { "id": "ja:otsukare", "src": ["お疲れ様", "おつかれさま"], "cat": "situational", "variants": [{ "text": "Спасибо за работу", "when": "после работы" }] },
+        { "id": "ja:itadakimasu", "src": ["いただきます"], "cat": "situational", "variants": [{ "text": "Приятного аппетита", "when": "перед едой" }] },
+        { "id": "ja:arigatou", "src": ["ありがとう"], "cat": "situational", "variants": [{ "text": "Спасибо", "when": "" }] },
+        { "id": "ja:sumimasen", "src": ["すみません"], "cat": "situational", "variants": [{ "text": "Извините", "when": "" }] },
+        { "id": "ja:gomen", "src": ["ごめん"], "cat": "situational", "variants": [{ "text": "Прости", "when": "" }] },
+        { "id": "ja:yoroshiku", "src": ["よろしく"], "cat": "situational", "variants": [{ "text": "Рассчитываю на тебя", "when": "" }] },
+        { "id": "ja:ganbatte", "src": ["頑張って"], "cat": "situational", "variants": [{ "text": "Удачи!", "when": "" }] },
+        { "id": "ja:ittekimasu", "src": ["行ってきます"], "cat": "situational", "variants": [{ "text": "Я пошёл", "when": "" }] },
+        { "id": "ja:tadaima", "src": ["ただいま"], "cat": "situational", "variants": [{ "text": "Я дома", "when": "" }] }
+      ]
+    },
+    {
+      "source": "ko",
+      "target": "ru",
+      "title": "test ko",
+      "entries": [
+        { "id": "ko:daebak", "src": ["대박", "대박이다", "대박이야"], "cat": "slang", "variants": [{ "text": "Офигеть", "when": "восторг" }, { "text": "Круто", "when": "одобрение" }] },
+        { "id": "ko:aigo", "src": ["아이고"], "cat": "interjection", "standalone": true, "variants": [{ "text": "Ох ты ж", "when": "досада" }] }
+      ]
+    },
+    {
+      "source": "zh",
+      "target": "ru",
+      "title": "test zh",
+      "entries": [
+        { "id": "zh:aiya", "src": ["哎呀"], "cat": "interjection", "standalone": true, "variants": [{ "text": "Ой!", "when": "испуг" }] },
+        { "id": "zh:shixiong", "src": ["师兄"], "cat": "address", "variants": [{ "text": "старший брат", "when": "по школе" }] }
+      ]
+    },
+    {
+      "source": "zh",
+      "target": "ru",
+      "genre": "cultivation",
+      "title": "test zh cultivation",
+      "entries": [
+        { "id": "zh:xiulian", "src": ["修炼"], "cat": "term", "variants": [{ "text": "совершенствование", "when": "общее" }] }
+      ]
+    },
+    {
+      "source": "en",
+      "target": "ru",
+      "title": "test en",
+      "entries": [
+        { "id": "en:no-way", "src": ["no way"], "cat": "slang", "variants": [{ "text": "Да ну!", "when": "недоверие" }, { "text": "Ни за что!", "when": "отказ" }] },
+        { "id": "en:tsk", "src": ["tsk", "tch"], "cat": "interjection", "standalone": true, "variants": [{ "text": "Тц!", "when": "досада" }] },
+        { "id": "en:man", "src": ["man"], "cat": "interjection", "variants": [{ "text": "Блин", "when": "досада" }] }
+      ]
+    }
+  ],
+  "authoring": [
+    { "id": "ja:sensei", "source": ["先生"], "kind": "address", "whole": false, "keep": "сэнсэй", "variants": [{ "text": "учитель", "when": "в школе" }] },
+    { "id": "zh:jindan", "source": ["金丹"], "kind": "term", "genre": "cultivation", "variants": [{ "text": "золотое ядро", "when": "ступень" }] },
+    { "id": "bad", "source": [], "kind": "term", "variants": [] }
+  ]
+}

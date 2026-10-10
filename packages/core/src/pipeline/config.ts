@@ -8,6 +8,7 @@ import type { GlossaryEntry } from '../translate/glossary';
 import type { PromptProfile, SfxStyle } from '../translate/profiles';
 import { sha256Hex } from '../util/bytes';
 import type { QaMode } from '../translate/qa';
+import type { PhrasebookSettings } from '../translate/phrasebook/match';
 
 /** Everything that changes the output of a page; also the cache key ingredient. */
 export interface PipelineConfig {
@@ -40,6 +41,8 @@ export interface PipelineConfig {
   lamaEngine?: boolean;
   /** Where LaMa runs: the local engine, or the browser (needs `inpaint` in the pipeline deps). */
   lama?: 'engine' | 'browser';
+  /** Разговорник: hints for recurring expressions (see translate/phrasebook). */
+  phrasebook?: PhrasebookSettings;
 }
 
 function withKeepAlive(p: ProviderConfig | undefined, s: AppSettings): ProviderConfig | null {
@@ -79,6 +82,7 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     bubblesOnly: s.bubblesOnly || undefined,
     onlySourceLang: (s.onlySourceLang && s.sourceLang !== 'auto') || undefined,
     inpaintExpand: s.inpaintExpand,
+    phrasebook: s.phrasebook,
     lama: (s.lamaMode ?? (s.lamaEngine ? 'engine' : 'off')) === 'off' ? undefined : (s.lamaMode ?? 'engine') as 'engine' | 'browser',
   };
 }
@@ -106,6 +110,14 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     osl: c.onlySourceLang ? 1 : undefined,
     ie: c.inpaintExpand,
     lama: c.lama ?? (c.lamaEngine ? 'engine' : undefined),
+    pb: c.phrasebook ? await phrasebookHash(c.phrasebook) : undefined,
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);
+}
+
+/** Short hash of the phrasebook settings: another result only when they change. */
+async function phrasebookHash(p: PhrasebookSettings): Promise<string> {
+  if (!p.enabled) return 'off';
+  const payload = [[...p.genres].sort(), [...p.disabled].sort(), p.user.map((u) => [u.source, u.src, u.variants.map((v) => [v.text, v.when]), u.note ?? ''])];
+  return (await sha256Hex(JSON.stringify(payload))).slice(0, 8);
 }

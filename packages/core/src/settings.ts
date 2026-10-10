@@ -4,7 +4,9 @@ import type { ModelCheck } from './llm/selftest';
 import type { PrivacyMode } from './llm/privacy';
 import type { ProviderConfig } from './llm/types';
 import { configFromPreset } from './llm/presets';
-import type { GlossaryEntry } from './translate/glossary';import { DEFAULT_PROFILES, type PromptProfile, type SfxStyle } from './translate/profiles';
+import type { GlossaryEntry } from './translate/glossary';
+import { DEFAULT_PHRASEBOOK, type PhrasebookSettings, type UserPhrase } from './translate/phrasebook/match';
+import { DEFAULT_PROFILES, type PromptProfile, type SfxStyle } from './translate/profiles';
 
 export type PipelineMode = 'standalone' | 'engine';
 export type Quality = 'fast' | 'balanced' | 'best';
@@ -144,6 +146,8 @@ export interface AppSettings {
   modelCatalogCheckedAt?: string;
   /** Interface language: "auto" (default) follows the browser / Windows language. */
   interfaceLang?: string;
+  /** Разговорник: hints for recurring expressions, entries switched off, genre sets, the user's own. */
+  phrasebook?: PhrasebookSettings;
 }
 
 export function defaultSettings(): AppSettings {
@@ -176,6 +180,7 @@ export function defaultSettings(): AppSettings {
     debug: false,
     fonts: { dialogue: '', narration: '', sfx: '' },
     cacheDays: 14,
+    phrasebook: { ...DEFAULT_PHRASEBOOK, disabled: [], genres: [], user: [] },
   };
 }
 
@@ -264,6 +269,30 @@ function cleanPreset(v: unknown): ModelPreset | null {
   return out as unknown as ModelPreset;
 }
 
+function cleanUserPhrase(v: unknown, i: number): UserPhrase | null {
+  if (!isObj(v) || typeof v.source !== 'string' || !v.source) return null;
+  const src = strings(v.src).map((x) => x.trim()).filter(Boolean).slice(0, 20);
+  const variants = (Array.isArray(v.variants) ? v.variants : [])
+    .filter(isObj)
+    .map((x) => ({ text: strOr(x.text, '').trim(), when: strOr(x.when, '').trim() }))
+    .filter((x) => x.text)
+    .slice(0, 8);
+  if (!src.length || !variants.length) return null;
+  const out: UserPhrase = { id: typeof v.id === 'string' && v.id ? v.id : `user:${i}`, source: v.source.slice(0, 8), src, variants };
+  if (typeof v.note === 'string' && v.note.trim()) out.note = v.note.trim();
+  return out;
+}
+
+function cleanPhrasebook(v: unknown): PhrasebookSettings {
+  const p = isObj(v) ? v : {};
+  return {
+    enabled: p.enabled !== false,
+    disabled: [...new Set(strings(p.disabled))],
+    genres: [...new Set(strings(p.genres))],
+    user: Array.isArray(p.user) ? p.user.map(cleanUserPhrase).filter((x): x is UserPhrase => !!x) : [],
+  };
+}
+
 const ENGINE_DETECTORS = ['auto', 'classic', 'ctd', 'vision'] as const;
 const ENGINE_OCR = ['auto', 'vision', 'manga-ocr', 'paddle'] as const;
 const ENGINE_INPAINTERS = ['auto', 'fill', 'telea', 'lama'] as const;
@@ -313,6 +342,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     debug: r.debug === true,
     fonts: { dialogue: strOr(fonts.dialogue, ''), narration: strOr(fonts.narration, ''), sfx: strOr(fonts.sfx, ''), ...(isNum(fonts.scale) ? { scale: fonts.scale } : {}) },
     cacheDays: isNum(r.cacheDays) ? r.cacheDays : d.cacheDays,
+    phrasebook: cleanPhrasebook(r.phrasebook),
     version: 1,
   };
   pickTyped(r, out, {

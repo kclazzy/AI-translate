@@ -4,6 +4,8 @@ import type { TranslationContext } from './context';
 import type { GlossaryEntry, GlossaryHit } from './glossary';
 import type { PromptProfile } from './profiles';
 import { joinLines, jsonData, sanitizeLine } from './parse';
+import type { LoadedBook } from './phrasebook/books';
+import { findPhrases, PHRASEBOOK_HEADER, PHRASEBOOK_HEADER_EARLIER, phrasebookSection, type PhrasebookSettings } from './phrasebook/match';
 
 export interface PromptInput {
   sourceLang: string;
@@ -12,6 +14,8 @@ export interface PromptInput {
   glossary: GlossaryEntry[];
   context?: TranslationContext;
   translateSfx: boolean;
+  /** Разговорник (hints for recurring expressions); none when absent. `books` replaces the built-in ones (tests). */
+  phrasebook?: PhrasebookSettings & { books?: LoadedBook[] };
 }
 
 const HONORIFICS: Record<PromptProfile['honorifics'], string> = {
@@ -82,6 +86,23 @@ export function contextData(input: PromptInput): string {
     ...(ctx.recentLines.length ? { previousLines: ctx.recentLines.map((l) => ({ src: sanitizeLine(l.src, 300), dst: sanitizeLine(l.dst, 300) })) } : {}),
   };
   return `<context>\n${jsonData(data)}\n</context>`;
+}
+
+/**
+ * Разговорник hints for the expressions found in these texts ('' when none). `earlier`: the texts are
+ * the previous lines of the series (single-call vision mode reads the page and translates it at once,
+ * so the page's own text is not known before the request).
+ */
+export function phrasebookData(input: PromptInput, texts: { id: string; text: string }[], earlier = false): string {
+  const pb = input.phrasebook;
+  if (!pb?.enabled || !texts.length) return '';
+  const matches = findPhrases(texts, { sourceLang: input.sourceLang, targetLang: input.targetLang, honorifics: input.profile.honorifics, settings: pb, glossary: input.glossary, books: pb.books });
+  return phrasebookSection(matches, earlier ? PHRASEBOOK_HEADER_EARLIER : PHRASEBOOK_HEADER);
+}
+
+/** Phrasebook hints for single-call vision mode, from the lines of the previous pages. */
+export function visionPhrasebook(input: PromptInput): string {
+  return phrasebookData(input, (input.context?.recentLines ?? []).map((l, i) => ({ id: `r${i}`, text: l.src })), true);
 }
 
 export function buildSystemPrompt(input: PromptInput, hits?: GlossaryHit[]): string {
@@ -167,7 +188,7 @@ export interface BlockForTranslation {
 }
 
 /** Text-only translation of already recognised blocks. */
-export function textTranslateInstruction(blocks: BlockForTranslation[], hintsByBlock: Record<string, string[]>, context = ''): string {
+export function textTranslateInstruction(blocks: BlockForTranslation[], hintsByBlock: Record<string, string[]>, context = '', phrasebook = ''): string {
   const data = blocks.map((b) => ({
     id: b.id,
     type: b.type,
@@ -178,6 +199,7 @@ export function textTranslateInstruction(blocks: BlockForTranslation[], hintsByB
   }));
   return [
     ...(context ? [context, ''] : []),
+    ...(phrasebook ? [phrasebook, ''] : []),
     'Translate the blocks below. They are listed in reading order and belong to one page: read them all first, as one scene, then translate each so the conversation stays coherent (a sentence may continue in the next bubble).',
     'Return JSON: {"translations":[{"id":"b1","text":"translation","type":"DIALOGUE"}],"entities":[],"summary":""} with exactly one entry per input id.',
     'You may correct "type" if it is clearly wrong. ' + TEXT_TYPE_HELP,

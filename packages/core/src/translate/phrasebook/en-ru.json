@@ -1,0 +1,5617 @@
+{
+  "source": "en",
+  "target": "ru",
+  "title": "Английский → русский",
+  "entries": [
+    {
+      "id": "en:tsk",
+      "src": [
+        "Tsk",
+        "Tch",
+        "Tsk tsk",
+        "Tck",
+        "Tchh"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Тц!",
+          "when": "досада, раздражение"
+        },
+        {
+          "text": "Цк.",
+          "when": "презрительно цокает языком"
+        },
+        {
+          "text": "Ну-ну…",
+          "when": "«tsk tsk» — укоризненно"
+        }
+      ],
+      "note": "звук языком, не слово; не писать «Тск»/«Тч»"
+    },
+    {
+      "id": "en:huh",
+      "src": [
+        "Huh",
+        "Huhh",
+        "Huuh"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "А?",
+          "when": "не расслышал, переспрашивает"
+        },
+        {
+          "text": "Что?!",
+          "when": "резкое удивление"
+        },
+        {
+          "text": "Хм?",
+          "when": "озадаченно"
+        }
+      ]
+    },
+    {
+      "id": "en:hmm",
+      "src": [
+        "Hmm",
+        "Hmmm",
+        "Hmmmm",
+        "Hrm"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Хм…",
+          "when": "задумался"
+        },
+        {
+          "text": "Хм?",
+          "when": "с сомнением, вопросительно"
+        }
+      ]
+    },
+    {
+      "id": "en:hmph",
+      "src": [
+        "Hmph",
+        "Humph",
+        "Hmpf",
+        "Hmf"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Хмф!",
+          "when": "обиженно, высокомерно"
+        },
+        {
+          "text": "Хм!",
+          "when": "фыркает и отворачивается"
+        }
+      ]
+    },
+    {
+      "id": "en:ugh",
+      "src": [
+        "Ugh",
+        "Ughh",
+        "Urgh",
+        "Uggh"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Тьфу!",
+          "when": "досада, раздражение"
+        },
+        {
+          "text": "Ох…",
+          "when": "усталость, боль"
+        },
+        {
+          "text": "Фу!",
+          "when": "отвращение"
+        }
+      ]
+    },
+    {
+      "id": "en:argh",
+      "src": [
+        "Argh",
+        "Arrgh",
+        "Aargh",
+        "Gah",
+        "Grr",
+        "Grrr"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Агрх!",
+          "when": "ярость, бессилие"
+        },
+        {
+          "text": "Р-р-р!",
+          "when": "рычит от злости"
+        },
+        {
+          "text": "А-а-а!",
+          "when": "отчаяние, хватается за голову"
+        }
+      ]
+    },
+    {
+      "id": "en:geez",
+      "src": [
+        "Geez",
+        "Jeez",
+        "Sheesh",
+        "Gee",
+        "Jeez Louise"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Блин…",
+          "when": "досада, раздражение"
+        },
+        {
+          "text": "Ну и ну…",
+          "when": "удивление, неодобрение"
+        },
+        {
+          "text": "Господи…",
+          "when": "устало, закатывая глаза"
+        }
+      ]
+    },
+    {
+      "id": "en:whoa",
+      "src": [
+        "Whoa",
+        "Woah",
+        "Whoah",
+        "Woahh"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ого!",
+          "when": "удивление, восхищение"
+        },
+        {
+          "text": "Ух ты!",
+          "when": "восторг"
+        },
+        {
+          "text": "Эй, тише!",
+          "when": "просит остановиться, успокоиться"
+        }
+      ]
+    },
+    {
+      "id": "en:wow",
+      "src": [
+        "Wow",
+        "Woww",
+        "Woow",
+        "Wooow"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ух ты!",
+          "when": "искреннее восхищение"
+        },
+        {
+          "text": "Ничего себе!",
+          "when": "удивление"
+        },
+        {
+          "text": "Ну надо же…",
+          "when": "сарказм"
+        }
+      ]
+    },
+    {
+      "id": "en:yikes",
+      "src": [
+        "Yikes",
+        "Eek",
+        "Eep",
+        "Yeesh"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ой-ой!",
+          "when": "испуг, неловкость"
+        },
+        {
+          "text": "Жуть!",
+          "when": "неприятно, страшно"
+        },
+        {
+          "text": "Ай!",
+          "when": "внезапный испуг"
+        }
+      ]
+    },
+    {
+      "id": "en:damn-it",
+      "src": [
+        "Damn it",
+        "Dammit",
+        "Damnit",
+        "Damn",
+        "Darn it",
+        "Darn",
+        "Dang it",
+        "Dang"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Чёрт!",
+          "when": "досада, неудача"
+        },
+        {
+          "text": "Чёрт возьми!",
+          "when": "сильная злость"
+        },
+        {
+          "text": "Проклятье!",
+          "when": "фэнтези/исторический сеттинг"
+        },
+        {
+          "text": "Ничего себе…",
+          "when": "«Damn…» с восхищением"
+        }
+      ]
+    },
+    {
+      "id": "en:shoot",
+      "src": [
+        "Shoot",
+        "Shoot shoot",
+        "Oh shoot"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Блин!",
+          "when": "досада, вспомнил о промахе"
+        },
+        {
+          "text": "Чёрт!",
+          "when": "резче, неудача"
+        }
+      ],
+      "note": "как междометие — не «стреляй»"
+    },
+    {
+      "id": "en:crap",
+      "src": [
+        "Crap",
+        "Oh crap",
+        "Aw crap",
+        "Crap crap"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Чёрт!",
+          "when": "неудача, испуг"
+        },
+        {
+          "text": "Блин!",
+          "when": "мягче"
+        },
+        {
+          "text": "Вот дерьмо!",
+          "when": "грубо, совсем плохо"
+        }
+      ]
+    },
+    {
+      "id": "en:omg",
+      "src": [
+        "Oh my god",
+        "Oh my gosh",
+        "Omg",
+        "Oh god",
+        "My god",
+        "Oh gosh",
+        "Good god",
+        "Oh my lord"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Боже мой!",
+          "when": "сильное удивление, ужас"
+        },
+        {
+          "text": "О господи!",
+          "when": "досада, раздражение"
+        },
+        {
+          "text": "Обалдеть!",
+          "when": "восторг, молодёжно"
+        }
+      ]
+    },
+    {
+      "id": "en:oh-my",
+      "src": [
+        "Oh my",
+        "My goodness",
+        "Goodness",
+        "Goodness gracious",
+        "Good heavens",
+        "Heavens",
+        "Oh dear",
+        "Dear me"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Батюшки!",
+          "when": "пожилые, старомодно"
+        },
+        {
+          "text": "Ой, надо же!",
+          "when": "вежливое удивление"
+        },
+        {
+          "text": "Боже правый!",
+          "when": "аристократично, испуг"
+        },
+        {
+          "text": "Ах вот как…",
+          "when": "«Oh my» — кокетливо, многозначительно"
+        }
+      ]
+    },
+    {
+      "id": "en:no-way",
+      "src": [
+        "No way",
+        "No wayyy",
+        "Nooo way",
+        "No freaking way"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Не может быть!",
+          "when": "не верит, шок"
+        },
+        {
+          "text": "Да ладно!",
+          "when": "удивлён, радостно"
+        },
+        {
+          "text": "Ни за что!",
+          "when": "отказ"
+        }
+      ]
+    },
+    {
+      "id": "en:kidding",
+      "src": [
+        "You've got to be kidding me",
+        "You gotta be kidding me",
+        "You've got to be kidding",
+        "You must be kidding",
+        "You're kidding me",
+        "You're kidding",
+        "Are you kidding me",
+        "Are you kidding",
+        "You're joking"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ты издеваешься?!",
+          "when": "возмущение"
+        },
+        {
+          "text": "Да вы шутите!",
+          "when": "не верит, вежливее"
+        },
+        {
+          "text": "Быть не может!",
+          "when": "потрясение"
+        }
+      ],
+      "note": "не «ты, должно быть, шутишь» дословно"
+    },
+    {
+      "id": "en:what-the-hell",
+      "src": [
+        "What the hell",
+        "What the heck",
+        "What the fuck",
+        "What the",
+        "Wtf",
+        "What in the world",
+        "What on earth",
+        "The hell"
+      ],
+      "cat": "interjection",
+      "variants": [
+        {
+          "text": "Какого чёрта?!",
+          "when": "возмущение, шок"
+        },
+        {
+          "text": "Что за хрень?!",
+          "when": "грубо, разговорно"
+        },
+        {
+          "text": "Что за…",
+          "when": "оборвал фразу («What the…»)"
+        },
+        {
+          "text": "Что вообще…",
+          "when": "внутри фразы: «what on earth are you doing» → «что ты вообще делаешь»"
+        }
+      ],
+      "note": "не «что за ад»"
+    },
+    {
+      "id": "en:what",
+      "src": [
+        "What",
+        "Whaat",
+        "Whaaat",
+        "Wha"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Что?!",
+          "when": "шок, возмущение"
+        },
+        {
+          "text": "Чего?!",
+          "when": "грубее, разговорно"
+        },
+        {
+          "text": "А?",
+          "when": "переспрашивает"
+        }
+      ]
+    },
+    {
+      "id": "en:hey",
+      "src": [
+        "Hey",
+        "Heyy",
+        "Heyyy",
+        "Oii",
+        "Hey hey"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Эй!",
+          "when": "окликает, возмущается"
+        },
+        {
+          "text": "Слушай…",
+          "when": "мягко, начинает разговор"
+        },
+        {
+          "text": "Привет!",
+          "when": "приветствие"
+        }
+      ]
+    },
+    {
+      "id": "en:come-on",
+      "src": [
+        "Come on",
+        "C'mon",
+        "Cmon",
+        "Come onnn"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Да ладно!",
+          "when": "не верит, возражает"
+        },
+        {
+          "text": "Ну же!",
+          "when": "торопит, подбадривает"
+        },
+        {
+          "text": "Давай!",
+          "when": "зовёт за собой, «Come on, let's go»"
+        },
+        {
+          "text": "Хватит уже!",
+          "when": "раздражение"
+        }
+      ]
+    },
+    {
+      "id": "en:phew",
+      "src": [
+        "Phew",
+        "Whew",
+        "Pheww",
+        "Fuu",
+        "Fuuu"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Фух…",
+          "when": "облегчение"
+        },
+        {
+          "text": "Уф!",
+          "when": "устал, выдохнул"
+        }
+      ]
+    },
+    {
+      "id": "en:ahem",
+      "src": [
+        "Ahem",
+        "Ehem",
+        "Ahemm",
+        "Cough cough",
+        "Ahem ahem"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Кхм.",
+          "when": "привлекает внимание, неловкость"
+        },
+        {
+          "text": "Кхе-кхе",
+          "when": "покашливает"
+        }
+      ]
+    },
+    {
+      "id": "en:ouch",
+      "src": [
+        "Ouch",
+        "Oww",
+        "Owww",
+        "Ouchie"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ай!",
+          "when": "резкая боль"
+        },
+        {
+          "text": "Ой!",
+          "when": "лёгкая боль, ушибся"
+        },
+        {
+          "text": "Больно же!",
+          "when": "жалуется"
+        }
+      ]
+    },
+    {
+      "id": "en:oops",
+      "src": [
+        "Oops",
+        "Whoops",
+        "Oopsie",
+        "Oopsies"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ой!",
+          "when": "мелкая оплошность"
+        },
+        {
+          "text": "Упс…",
+          "when": "игриво, неловко"
+        },
+        {
+          "text": "Опа…",
+          "when": "что-то уронил, разговорно"
+        }
+      ]
+    },
+    {
+      "id": "en:uh-oh",
+      "src": [
+        "Uh-oh",
+        "Uh oh",
+        "Uh ohh"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ой-ой…",
+          "when": "предчувствие беды"
+        },
+        {
+          "text": "Ну всё…",
+          "when": "понял, что влип"
+        }
+      ]
+    },
+    {
+      "id": "en:eh",
+      "src": [
+        "Ehh",
+        "Ehhh",
+        "Eeh",
+        "Eeeh"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Э-э?",
+          "when": "удивлённо переспрашивает"
+        },
+        {
+          "text": "Чего?!",
+          "when": "возмущённо"
+        },
+        {
+          "text": "Ну-у…",
+          "when": "неохотно, сомневается"
+        }
+      ]
+    },
+    {
+      "id": "en:aww",
+      "src": [
+        "Aww",
+        "Awww",
+        "Awwww"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ой, какая прелесть!",
+          "when": "умиление"
+        },
+        {
+          "text": "Ну вот…",
+          "when": "разочарование"
+        }
+      ]
+    },
+    {
+      "id": "en:man",
+      "src": [
+        "Aw man",
+        "Aww man",
+        "Oh man",
+        "Ah man",
+        "Man",
+        "Maan"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ну вот…",
+          "when": "разочарование"
+        },
+        {
+          "text": "Блин…",
+          "when": "досада"
+        },
+        {
+          "text": "Эх…",
+          "when": "сожаление"
+        }
+      ],
+      "note": "не «мужик»"
+    },
+    {
+      "id": "en:hehe",
+      "src": [
+        "Hehe",
+        "Heh",
+        "Hehehe",
+        "Heheh",
+        "Hihi",
+        "Teehee"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Хе-хе",
+          "when": "довольный, хитро"
+        },
+        {
+          "text": "Хех",
+          "when": "усмешка"
+        },
+        {
+          "text": "Хи-хи",
+          "when": "хихиканье (teehee, hihi)"
+        }
+      ]
+    },
+    {
+      "id": "en:haha",
+      "src": [
+        "Haha",
+        "Hahaha",
+        "Ahaha",
+        "Hah",
+        "Ha ha",
+        "Bwahaha",
+        "Mwahaha"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ха-ха!",
+          "when": "смех"
+        },
+        {
+          "text": "Ха!",
+          "when": "насмешка"
+        },
+        {
+          "text": "Муа-ха-ха!",
+          "when": "злодейский смех (mwahaha, bwahaha)"
+        }
+      ]
+    },
+    {
+      "id": "en:fufu",
+      "src": [
+        "Fufu",
+        "Fufufu",
+        "Ufufu",
+        "Ohoho",
+        "Ohohoho"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Хи-хи",
+          "when": "кокетливо"
+        },
+        {
+          "text": "Хм-хм",
+          "when": "загадочно улыбается"
+        },
+        {
+          "text": "О-хо-хо!",
+          "when": "надменный смех аристократки (ohoho)"
+        }
+      ],
+      "note": "японский смешок, не «Фуфу»"
+    },
+    {
+      "id": "en:kukuku",
+      "src": [
+        "Kukuku",
+        "Kuku",
+        "Kukukuku",
+        "Kehehe",
+        "Kekeke"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Хе-хе-хе",
+          "when": "злорадно, коварно"
+        },
+        {
+          "text": "Кхе-хе",
+          "when": "ехидная усмешка"
+        }
+      ]
+    },
+    {
+      "id": "en:kyaa",
+      "src": [
+        "Kyaa",
+        "Kyaaa",
+        "Kya",
+        "Kyah",
+        "Kyaah"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ай!",
+          "when": "испуганный вскрик"
+        },
+        {
+          "text": "А-а-ах!",
+          "when": "восторженный визг"
+        }
+      ]
+    },
+    {
+      "id": "en:gasp",
+      "src": [
+        "Gasp",
+        "Gasps"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ах!",
+          "when": "ахает от испуга, удивления"
+        },
+        {
+          "text": "*ахает*",
+          "when": "звуковое обозначение действия"
+        }
+      ]
+    },
+    {
+      "id": "en:sigh",
+      "src": [
+        "Sigh",
+        "Sighs",
+        "Haah",
+        "Haaah"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Эх…",
+          "when": "вздыхает устало"
+        },
+        {
+          "text": "Ха-а…",
+          "when": "тяжёлый выдох"
+        },
+        {
+          "text": "*вздох*",
+          "when": "звуковое обозначение действия"
+        }
+      ]
+    },
+    {
+      "id": "en:sob",
+      "src": [
+        "Sob",
+        "Sobs",
+        "Sniff",
+        "Sniffle",
+        "Sniff sniff",
+        "Waaah",
+        "Waah"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Хнык…",
+          "when": "плачет, всхлипывает"
+        },
+        {
+          "text": "*всхлип*",
+          "when": "звуковое обозначение"
+        },
+        {
+          "text": "У-а-а!",
+          "when": "ревёт (waaah)"
+        }
+      ]
+    },
+    {
+      "id": "en:pfft",
+      "src": [
+        "Pfft",
+        "Pff",
+        "Psh",
+        "Pshh",
+        "Pfff"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Пф!",
+          "when": "насмешка, пренебрежение"
+        },
+        {
+          "text": "Пфф…",
+          "when": "сдерживает смех"
+        }
+      ]
+    },
+    {
+      "id": "en:bah",
+      "src": [
+        "Bah",
+        "Meh",
+        "Nah"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ба!",
+          "when": "пренебрежение"
+        },
+        {
+          "text": "Да ну…",
+          "when": "отмахивается, «nah»"
+        },
+        {
+          "text": "Ну такое…",
+          "when": "равнодушно, «meh»"
+        }
+      ]
+    },
+    {
+      "id": "en:oh-no",
+      "src": [
+        "Oh no",
+        "Oh nooo",
+        "Oh noo",
+        "Oh noes"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "О нет!",
+          "when": "испуг, беда"
+        },
+        {
+          "text": "Ну вот…",
+          "when": "досада"
+        },
+        {
+          "text": "Только не это!",
+          "when": "отчаяние"
+        }
+      ]
+    },
+    {
+      "id": "en:thank-god",
+      "src": [
+        "Thank god",
+        "Thank goodness",
+        "Thank heavens",
+        "Thank the heavens",
+        "Thank the gods"
+      ],
+      "cat": "interjection",
+      "variants": [
+        {
+          "text": "Слава богу!",
+          "when": "облегчение, бытовой сеттинг"
+        },
+        {
+          "text": "Хвала небесам!",
+          "when": "фэнтези, уся"
+        },
+        {
+          "text": "Слава богам!",
+          "when": "политеистический мир"
+        }
+      ]
+    },
+    {
+      "id": "en:yay",
+      "src": [
+        "Yay",
+        "Yaay",
+        "Hooray",
+        "Hurray",
+        "Hurrah",
+        "Yahoo",
+        "Woohoo",
+        "Yippee"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ура!",
+          "when": "радость"
+        },
+        {
+          "text": "Йес!",
+          "when": "молодёжно"
+        }
+      ]
+    },
+    {
+      "id": "en:umm",
+      "src": [
+        "Umm",
+        "Ummm",
+        "Uhh",
+        "Uhhh",
+        "Erm",
+        "Errr",
+        "Uhm",
+        "Uhmm"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Э-э…",
+          "when": "замешательство"
+        },
+        {
+          "text": "Ну…",
+          "when": "подбирает слова"
+        },
+        {
+          "text": "Это…",
+          "when": "неловко начинает фразу"
+        }
+      ]
+    },
+    {
+      "id": "en:shh",
+      "src": [
+        "Shh",
+        "Shhh",
+        "Ssh",
+        "Hush",
+        "Psst",
+        "Pssst"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Тсс!",
+          "when": "просит тишины"
+        },
+        {
+          "text": "Тише!",
+          "when": "строже"
+        },
+        {
+          "text": "Пс-с!",
+          "when": "подзывает шёпотом (psst)"
+        }
+      ]
+    },
+    {
+      "id": "en:before-meal",
+      "src": [
+        "Itadakimasu",
+        "Thank you for the food",
+        "Thanks for the food",
+        "Let's dig in",
+        "I'll dig in"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Приятного аппетита!",
+          "when": "перед едой, всем за столом"
+        },
+        {
+          "text": "Спасибо за угощение!",
+          "when": "тому, кто готовил или угощает"
+        },
+        {
+          "text": "Ну, налетаем!",
+          "when": "дружеская компания"
+        }
+      ],
+      "note": "перед едой — не «спасибо за еду» дословно"
+    },
+    {
+      "id": "en:after-meal",
+      "src": [
+        "Gochisousama",
+        "Gochisousama deshita",
+        "Thanks for the meal",
+        "Thank you for the meal",
+        "That was a great meal"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Спасибо, было очень вкусно!",
+          "when": "после еды, хозяину/повару"
+        },
+        {
+          "text": "Спасибо за угощение!",
+          "when": "если угощали"
+        },
+        {
+          "text": "Наелся!",
+          "when": "по-домашнему"
+        }
+      ]
+    },
+    {
+      "id": "en:lets-eat",
+      "src": [
+        "Let's eat",
+        "Time to eat",
+        "Bon appetit",
+        "Bon appétit",
+        "Dinner's ready",
+        "Food's ready"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Давайте есть!",
+          "when": "зовёт к столу"
+        },
+        {
+          "text": "Приятного аппетита!",
+          "when": "пожелание"
+        },
+        {
+          "text": "Кушать подано!",
+          "when": "шутливо, торжественно"
+        }
+      ]
+    },
+    {
+      "id": "en:welcome-back",
+      "src": [
+        "Welcome back",
+        "Welcome home",
+        "Okaeri",
+        "Okaerinasai"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "С возвращением!",
+          "when": "общий случай"
+        },
+        {
+          "text": "Ты вернулся? / Ты вернулась?",
+          "when": "по-домашнему, встречает дома"
+        },
+        {
+          "text": "Наконец-то ты дома!",
+          "when": "ждали"
+        }
+      ],
+      "note": "дома не обязательно «добро пожаловать домой»"
+    },
+    {
+      "id": "en:im-home",
+      "src": [
+        "I'm home",
+        "I am home",
+        "I'm back",
+        "Tadaima",
+        "I'm back home"
+      ],
+      "cat": "situational",
+      "speaker": true,
+      "variants": [
+        {
+          "text": "Я дома!",
+          "when": "входит домой"
+        },
+        {
+          "text": "Я вернулся! / Я вернулась!",
+          "when": "по полу говорящего"
+        }
+      ]
+    },
+    {
+      "id": "en:im-off",
+      "src": [
+        "I'm off",
+        "I'm heading out",
+        "I'll be going now",
+        "I'll be off",
+        "Ittekimasu",
+        "I'm leaving now",
+        "I'm going now"
+      ],
+      "cat": "situational",
+      "speaker": true,
+      "variants": [
+        {
+          "text": "Я пошёл! / Я пошла!",
+          "when": "уходит из дома, по полу"
+        },
+        {
+          "text": "Я ушёл! / Я ушла!",
+          "when": "уже в дверях"
+        },
+        {
+          "text": "Ну, я побежал(а)!",
+          "when": "торопится"
+        }
+      ]
+    },
+    {
+      "id": "en:take-care",
+      "src": [
+        "Take care",
+        "Take care of yourself",
+        "Have a safe trip",
+        "Itterasshai",
+        "Be careful out there",
+        "Safe travels"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Береги себя!",
+          "when": "общее прощание"
+        },
+        {
+          "text": "Счастливого пути!",
+          "when": "в дорогу"
+        },
+        {
+          "text": "Удачи, возвращайся скорей!",
+          "when": "провожает из дома"
+        }
+      ]
+    },
+    {
+      "id": "en:good-work-today",
+      "src": [
+        "Good work today",
+        "Good work",
+        "Great work today",
+        "Good job today",
+        "Thanks for your hard work",
+        "Thank you for your hard work",
+        "Thank you for your hard work today",
+        "You've worked hard",
+        "Otsukaresama",
+        "Otsukare",
+        "Otsukaresama deshita"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Спасибо за работу!",
+          "when": "коллегам в конце дня"
+        },
+        {
+          "text": "Все молодцы, отлично поработали!",
+          "when": "начальник команде"
+        },
+        {
+          "text": "Отдыхай, ты сегодня потрудился.",
+          "when": "близкому, по-дружески"
+        }
+      ],
+      "note": "не «хорошая работа сегодня» дословно"
+    },
+    {
+      "id": "en:good-job",
+      "src": [
+        "Good job",
+        "Well done",
+        "Nice job",
+        "Nice work",
+        "Great job",
+        "Way to go"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Молодец!",
+          "when": "похвала одному"
+        },
+        {
+          "text": "Отлично!",
+          "when": "нейтрально"
+        },
+        {
+          "text": "Так держать!",
+          "when": "подбадривает"
+        },
+        {
+          "text": "Ну ты даёшь… / Молодец, ничего не скажешь.",
+          "when": "сарказм после провала"
+        }
+      ]
+    },
+    {
+      "id": "en:nice-to-meet-you",
+      "src": [
+        "Nice to meet you",
+        "Pleased to meet you",
+        "It's a pleasure to meet you",
+        "Glad to meet you",
+        "Hajimemashite",
+        "Nice meeting you"
+      ],
+      "cat": "situational",
+      "speaker": true,
+      "variants": [
+        {
+          "text": "Приятно познакомиться!",
+          "when": "нейтрально"
+        },
+        {
+          "text": "Рад знакомству. / Рада знакомству.",
+          "when": "по полу говорящего"
+        },
+        {
+          "text": "Очень приятно.",
+          "when": "кратко, вежливо"
+        }
+      ]
+    },
+    {
+      "id": "en:look-forward",
+      "src": [
+        "I look forward to working with you",
+        "Please take care of me",
+        "Please take good care of me",
+        "Yoroshiku",
+        "Yoroshiku onegaishimasu",
+        "I look forward to your guidance",
+        "Please treat me well",
+        "I'll be in your care",
+        "I'm in your care"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Буду рад(а) работать с вами.",
+          "when": "новичок на работе"
+        },
+        {
+          "text": "Прошу любить и жаловать.",
+          "when": "представляется коллективу"
+        },
+        {
+          "text": "Надеюсь на вашу поддержку.",
+          "when": "к старшим, наставнику"
+        },
+        {
+          "text": "Будем знакомы!",
+          "when": "неформально"
+        }
+      ],
+      "note": "не «позаботьтесь обо мне» дословно"
+    },
+    {
+      "id": "en:pardon-intrusion",
+      "src": [
+        "Excuse me for intruding",
+        "Pardon the intrusion",
+        "Sorry for intruding",
+        "Sorry to intrude",
+        "Ojamashimasu",
+        "Pardon me for intruding",
+        "Sorry to bother you"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Можно войти?",
+          "when": "входит в чужой дом/кабинет"
+        },
+        {
+          "text": "Извините за беспокойство.",
+          "when": "вежливо"
+        },
+        {
+          "text": "Простите, что без приглашения.",
+          "when": "пришёл незваным"
+        }
+      ]
+    },
+    {
+      "id": "en:leaving-first",
+      "src": [
+        "Excuse me for leaving first",
+        "Sorry for leaving first",
+        "Osakini shitsureishimasu",
+        "I'll be leaving first",
+        "I'll take my leave",
+        "I'll take my leave now",
+        "Allow me to take my leave"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Я пойду, всего доброго!",
+          "when": "уходит с работы раньше других"
+        },
+        {
+          "text": "Позвольте откланяться.",
+          "when": "формально, исторический сеттинг"
+        },
+        {
+          "text": "Разрешите идти?",
+          "when": "подчинённый — начальнику"
+        }
+      ]
+    },
+    {
+      "id": "en:excuse-me",
+      "src": [
+        "Excuse me",
+        "Pardon me",
+        "Sumimasen",
+        "Sorry to interrupt"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Простите…",
+          "when": "обращается к незнакомцу"
+        },
+        {
+          "text": "Извините, можно?",
+          "when": "просит слова, внимания"
+        },
+        {
+          "text": "Разрешите пройти.",
+          "when": "протискивается"
+        },
+        {
+          "text": "Прошу прощения?!",
+          "when": "возмущённо: «Excuse me?!»"
+        }
+      ]
+    },
+    {
+      "id": "en:hang-in-there",
+      "src": [
+        "Hang in there",
+        "Stay strong",
+        "Hold out a little longer",
+        "Bear with it",
+        "Hold on a little longer"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Держись!",
+          "when": "поддержка в трудности"
+        },
+        {
+          "text": "Потерпи ещё немного.",
+          "when": "раненому, уставшему"
+        }
+      ]
+    },
+    {
+      "id": "en:fighting",
+      "src": [
+        "Fighting",
+        "Hwaiting",
+        "Paiting",
+        "Aja aja fighting",
+        "Aja aja",
+        "Aja"
+      ],
+      "cat": "situational",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Вперёд!",
+          "when": "боевой клич, подбадривание команды"
+        },
+        {
+          "text": "Удачи, ты справишься!",
+          "when": "поддержка одного человека"
+        },
+        {
+          "text": "Держись!",
+          "when": "в трудной ситуации"
+        }
+      ],
+      "note": "корейское 화이팅 — не «Файтинг!»/«Сражайся!»"
+    },
+    {
+      "id": "en:do-your-best",
+      "src": [
+        "Do your best",
+        "Ganbatte",
+        "Ganbare",
+        "Good luck",
+        "You can do it",
+        "Go for it",
+        "Break a leg"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Удачи!",
+          "when": "перед испытанием"
+        },
+        {
+          "text": "Постарайся!",
+          "when": "напутствие"
+        },
+        {
+          "text": "Ты справишься!",
+          "when": "уверенность в человеке"
+        },
+        {
+          "text": "Ни пуха ни пера!",
+          "when": "перед экзаменом, выступлением"
+        }
+      ]
+    },
+    {
+      "id": "en:cheers",
+      "src": [
+        "Cheers",
+        "Bottoms up",
+        "Kanpai",
+        "Geonbae",
+        "Ganbei",
+        "Gan bei"
+      ],
+      "cat": "situational",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "За нас!",
+          "when": "тост в компании"
+        },
+        {
+          "text": "Будем!",
+          "when": "неформально"
+        },
+        {
+          "text": "Ваше здоровье!",
+          "when": "вежливо"
+        },
+        {
+          "text": "Спасибо! / Пока!",
+          "when": "британское «Cheers» без выпивки"
+        }
+      ]
+    },
+    {
+      "id": "en:bless-you",
+      "src": [
+        "Bless you",
+        "God bless you",
+        "Gesundheit"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Будь здоров!",
+          "when": "после чихания"
+        },
+        {
+          "text": "Храни тебя бог.",
+          "when": "благословение, благодарность"
+        }
+      ]
+    },
+    {
+      "id": "en:get-well",
+      "src": [
+        "Get well soon",
+        "Get better soon",
+        "Feel better soon",
+        "I hope you feel better",
+        "Hope you feel better"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Выздоравливай!",
+          "when": "близкому"
+        },
+        {
+          "text": "Поправляйтесь скорее!",
+          "when": "вежливо"
+        }
+      ]
+    },
+    {
+      "id": "en:shop-welcome",
+      "src": [
+        "Welcome",
+        "Irasshaimase",
+        "Welcome welcome",
+        "Welcome to our store",
+        "Eoseo osipsio"
+      ],
+      "cat": "situational",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Добро пожаловать!",
+          "when": "в магазине, заведении"
+        },
+        {
+          "text": "Здравствуйте, проходите!",
+          "when": "продавец встречает"
+        },
+        {
+          "text": "Рады вас видеть!",
+          "when": "радушный хозяин"
+        }
+      ]
+    },
+    {
+      "id": "en:sorry-wait",
+      "src": [
+        "Sorry to keep you waiting",
+        "Sorry for the wait",
+        "Thank you for waiting",
+        "Sorry for making you wait",
+        "Thanks for waiting"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Простите, что заставил(а) ждать.",
+          "when": "опоздал на встречу"
+        },
+        {
+          "text": "Извините за ожидание.",
+          "when": "официант, служащий"
+        },
+        {
+          "text": "Спасибо, что подождали.",
+          "when": "вежливо"
+        }
+      ]
+    },
+    {
+      "id": "en:long-time",
+      "src": [
+        "Long time no see",
+        "It's been a while",
+        "Been a while",
+        "It's been so long"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Давно не виделись!",
+          "when": "встреча"
+        },
+        {
+          "text": "Сколько лет, сколько зим!",
+          "when": "радушно, по-дружески"
+        }
+      ]
+    },
+    {
+      "id": "en:see-you",
+      "src": [
+        "See you later",
+        "See you tomorrow",
+        "See ya",
+        "See you",
+        "Later",
+        "Catch you later",
+        "Bye bye",
+        "Byebye",
+        "Laters"
+      ],
+      "cat": "situational",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Пока!",
+          "when": "неформально"
+        },
+        {
+          "text": "До завтра!",
+          "when": "«see you tomorrow»"
+        },
+        {
+          "text": "Увидимся!",
+          "when": "договорились встретиться"
+        }
+      ]
+    },
+    {
+      "id": "en:condolences",
+      "src": [
+        "I'm sorry for your loss",
+        "My condolences",
+        "Condolences",
+        "I'm so sorry for your loss"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Соболезную.",
+          "when": "кратко"
+        },
+        {
+          "text": "Примите мои соболезнования.",
+          "when": "официально"
+        }
+      ],
+      "note": "не «извини за потерю»"
+    },
+    {
+      "id": "en:after-you",
+      "src": [
+        "After you",
+        "Ladies first",
+        "Go ahead",
+        "You first"
+      ],
+      "cat": "situational",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Только после вас.",
+          "when": "вежливо уступает"
+        },
+        {
+          "text": "Прошу, проходите.",
+          "when": "пропускает вперёд"
+        },
+        {
+          "text": "Давай ты первый.",
+          "when": "неформально, уступает очередь"
+        }
+      ]
+    },
+    {
+      "id": "en:youre-welcome",
+      "src": [
+        "You're welcome",
+        "Don't mention it",
+        "No problem",
+        "No worries",
+        "Anytime",
+        "My pleasure",
+        "It's nothing",
+        "Not at all"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Не за что!",
+          "when": "в ответ на благодарность"
+        },
+        {
+          "text": "Пожалуйста.",
+          "when": "нейтрально"
+        },
+        {
+          "text": "Да пустяки!",
+          "when": "скромничает"
+        },
+        {
+          "text": "Без проблем.",
+          "when": "согласие помочь"
+        }
+      ]
+    },
+    {
+      "id": "en:long-live",
+      "src": [
+        "Long live the Emperor",
+        "Long live the King",
+        "Long live His Majesty",
+        "Long live the Empire",
+        "Glory to the Empire",
+        "Ten thousand years"
+      ],
+      "cat": "situational",
+      "variants": [
+        {
+          "text": "Да здравствует император!",
+          "when": "европейский сеттинг"
+        },
+        {
+          "text": "Слава Империи!",
+          "when": "клич"
+        },
+        {
+          "text": "Десять тысяч лет императору!",
+          "when": "китайский сеттинг (万岁)"
+        }
+      ]
+    },
+    {
+      "id": "en:seriously",
+      "src": [
+        "Seriously",
+        "For real",
+        "Fr fr",
+        "Srsly",
+        "For reals",
+        "Are you serious",
+        "You serious"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Серьёзно?!",
+          "when": "не верит"
+        },
+        {
+          "text": "Ты серьёзно?",
+          "when": "раздражение, упрёк"
+        },
+        {
+          "text": "Реально!",
+          "when": "утвердительно, «for real»"
+        },
+        {
+          "text": "Честно.",
+          "when": "«fr fr» — ручается"
+        }
+      ]
+    },
+    {
+      "id": "en:dude",
+      "src": [
+        "Dude",
+        "Duuude",
+        "Dudes"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Чувак",
+          "when": "дружеское обращение"
+        },
+        {
+          "text": "Слушай…",
+          "when": "в начале фразы"
+        },
+        {
+          "text": "Ну ты даёшь!",
+          "when": "«Dude!» — удивление, упрёк"
+        }
+      ]
+    },
+    {
+      "id": "en:bro",
+      "src": [
+        "Bro",
+        "Brah",
+        "Bros",
+        "Bro bro"
+      ],
+      "cat": "slang",
+      "speaker": true,
+      "variants": [
+        {
+          "text": "Бро",
+          "when": "молодёжно, современный сеттинг"
+        },
+        {
+          "text": "Братан",
+          "when": "панибратски, гопники"
+        },
+        {
+          "text": "Брат",
+          "when": "друг, в т.ч. корейское хён в скане"
+        }
+      ]
+    },
+    {
+      "id": "en:bruh",
+      "src": [
+        "Bruh",
+        "Bruhh",
+        "Bruuh"
+      ],
+      "cat": "slang",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Серьёзно?..",
+          "when": "разочарование, недоумение"
+        },
+        {
+          "text": "Ну ты…",
+          "when": "упрёк другу"
+        },
+        {
+          "text": "Капец.",
+          "when": "реакция на глупость"
+        }
+      ]
+    },
+    {
+      "id": "en:sus",
+      "src": [
+        "Sus",
+        "Sussy",
+        "Kinda sus",
+        "So sus"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Подозрительно.",
+          "when": "о ситуации"
+        },
+        {
+          "text": "Мутный тип",
+          "when": "о человеке"
+        },
+        {
+          "text": "Стрёмно",
+          "when": "вызывает сомнения"
+        }
+      ]
+    },
+    {
+      "id": "en:lit",
+      "src": [
+        "Lit",
+        "It's lit",
+        "So lit",
+        "Lit af"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Огонь!",
+          "when": "о вечеринке, событии"
+        },
+        {
+          "text": "Круто!",
+          "when": "восторг"
+        },
+        {
+          "text": "Пьяный в хлам",
+          "when": "«he's lit» — о человеке"
+        },
+        {
+          "text": "зажёг / освещённый",
+          "when": "буквально: «lit the candle», «lit room» — не сленг"
+        }
+      ]
+    },
+    {
+      "id": "en:cringe",
+      "src": [
+        "Cringe",
+        "Cringy",
+        "Cringey",
+        "Cringeworthy",
+        "So cringe",
+        "Cringing"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Кринж",
+          "when": "молодёжно"
+        },
+        {
+          "text": "Стыдоба",
+          "when": "нейтрально"
+        },
+        {
+          "text": "Испанский стыд",
+          "when": "стыдно за другого"
+        },
+        {
+          "text": "съёжиться, поморщиться",
+          "when": "глагол: «he cringed»"
+        }
+      ]
+    },
+    {
+      "id": "en:creep",
+      "src": [
+        "Creep",
+        "Creeper",
+        "Creeps",
+        "Total creep"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Извращенец",
+          "when": "пристаёт, подглядывает"
+        },
+        {
+          "text": "Мерзкий тип",
+          "when": "неприятный человек"
+        },
+        {
+          "text": "Подкрадываться",
+          "when": "глагол «creep up»"
+        }
+      ]
+    },
+    {
+      "id": "en:creepy",
+      "src": [
+        "Creepy",
+        "Creeped out",
+        "Gives me the creeps",
+        "Creeps me out",
+        "Creepy af"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Жуть",
+          "when": "страшно, мурашки"
+        },
+        {
+          "text": "Стрёмно",
+          "when": "неприятно, тревожно"
+        },
+        {
+          "text": "Мурашки по коже",
+          "when": "«gives me the creeps»"
+        }
+      ]
+    },
+    {
+      "id": "en:simp",
+      "src": [
+        "Simp",
+        "Simping",
+        "Simps",
+        "Simped"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Подкаблучник",
+          "when": "унижается ради девушки"
+        },
+        {
+          "text": "Тряпка",
+          "when": "грубо"
+        },
+        {
+          "text": "Пускает слюни",
+          "when": "обожает кого-то, «simping over»"
+        }
+      ]
+    },
+    {
+      "id": "en:badass",
+      "src": [
+        "Badass",
+        "Bad-ass",
+        "Bad ass",
+        "Total badass"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Крутой / крутая",
+          "when": "восхищение человеком"
+        },
+        {
+          "text": "Мощно!",
+          "when": "о поступке, приёме"
+        },
+        {
+          "text": "Отчаянный",
+          "when": "о смелости на грани"
+        }
+      ]
+    },
+    {
+      "id": "en:screw-this",
+      "src": [
+        "Screw this",
+        "Screw it",
+        "Screw that",
+        "Screw this shit"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Да ну его!",
+          "when": "сдаётся, бросает"
+        },
+        {
+          "text": "К чёрту всё!",
+          "when": "злость"
+        },
+        {
+          "text": "Плевать!",
+          "when": "решился, «screw it, let's go»"
+        }
+      ]
+    },
+    {
+      "id": "en:screw-you",
+      "src": [
+        "Screw you",
+        "Screw off",
+        "Up yours",
+        "Go to hell"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Да пошёл ты!",
+          "when": "грубо"
+        },
+        {
+          "text": "Катись к чёрту!",
+          "when": "злость"
+        },
+        {
+          "text": "Иди к чёрту!",
+          "when": "мягче"
+        }
+      ]
+    },
+    {
+      "id": "en:forget-it",
+      "src": [
+        "Forget it",
+        "Never mind",
+        "Nevermind",
+        "Nvm",
+        "Forget I said anything",
+        "Forget I asked"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Забудь.",
+          "when": "отказывается от сказанного"
+        },
+        {
+          "text": "Проехали.",
+          "when": "разговорно"
+        },
+        {
+          "text": "Неважно.",
+          "when": "нейтрально"
+        }
+      ]
+    },
+    {
+      "id": "en:pissed-off",
+      "src": [
+        "Pissed off",
+        "Pissed",
+        "Pisses me off",
+        "Pissing me off",
+        "Ticked off",
+        "Ticks me off"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Бесит!",
+          "when": "«pisses me off»"
+        },
+        {
+          "text": "Взбешён / взбешена",
+          "when": "состояние"
+        },
+        {
+          "text": "Злой как чёрт",
+          "when": "сильно"
+        },
+        {
+          "text": "Пьяный",
+          "when": "британское «pissed»"
+        }
+      ]
+    },
+    {
+      "id": "en:freaking-out",
+      "src": [
+        "Freaking out",
+        "Freak out",
+        "Freaked out",
+        "Freaks me out",
+        "Don't freak out",
+        "Freakin' out",
+        "Flipping out"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Паниковать",
+          "when": "испуг"
+        },
+        {
+          "text": "Психовать",
+          "when": "злость, истерика"
+        },
+        {
+          "text": "В шоке",
+          "when": "сильное удивление"
+        },
+        {
+          "text": "Не паникуй!",
+          "when": "«don't freak out»"
+        }
+      ]
+    },
+    {
+      "id": "en:freaking",
+      "src": [
+        "Freaking",
+        "Freakin",
+        "Frickin",
+        "Fricking",
+        "Effing",
+        "Friggin",
+        "Frigging"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "грёбаный",
+          "when": "усиление перед существительным"
+        },
+        {
+          "text": "чёртов",
+          "when": "мягче"
+        },
+        {
+          "text": "офигенно / жутко",
+          "when": "усиление прилагательного: «freaking awesome»"
+        }
+      ],
+      "note": "усилитель, не «уродский»"
+    },
+    {
+      "id": "en:hot",
+      "src": [
+        "Hot",
+        "So hot",
+        "Hottie",
+        "Hot stuff",
+        "Smoking hot"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Красавчик / красотка",
+          "when": "о привлекательном человеке"
+        },
+        {
+          "text": "Горячая штучка",
+          "when": "игриво"
+        },
+        {
+          "text": "Жарко / горячо",
+          "when": "буквально: погода, еда, температура"
+        },
+        {
+          "text": "Острый",
+          "when": "о еде со специями"
+        }
+      ]
+    },
+    {
+      "id": "en:sick",
+      "src": [
+        "Sick",
+        "So sick",
+        "That's sick",
+        "Sick move",
+        "Sick of it",
+        "Sick and tired"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Круто!",
+          "when": "восторг, «that's sick»"
+        },
+        {
+          "text": "Больной",
+          "when": "буквально, нездоров"
+        },
+        {
+          "text": "Достало!",
+          "when": "«sick of it», «sick and tired»"
+        },
+        {
+          "text": "Тошнит",
+          "when": "«I feel sick»"
+        }
+      ]
+    },
+    {
+      "id": "en:kill-it",
+      "src": [
+        "Kill it",
+        "Killed it",
+        "Killing it",
+        "Nailed it",
+        "Crushed it",
+        "Slay",
+        "Slayed",
+        "Slaying"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Порвать всех",
+          "when": "выступление, соревнование"
+        },
+        {
+          "text": "Блестяще справиться",
+          "when": "«nailed it»"
+        },
+        {
+          "text": "Убей его!",
+          "when": "буквально, приказ в бою"
+        }
+      ],
+      "note": "в фэнтези «kill it» часто буквальный приказ"
+    },
+    {
+      "id": "en:cool",
+      "src": [
+        "Cool",
+        "So cool",
+        "Way cool",
+        "Too cool",
+        "Cool it",
+        "Cool down",
+        "Cool off",
+        "Cool-headed"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Круто!",
+          "when": "восторг"
+        },
+        {
+          "text": "Классный / крутой",
+          "when": "о человеке, вещи"
+        },
+        {
+          "text": "Остынь / Спокойно",
+          "when": "«cool it», «cool down»"
+        },
+        {
+          "text": "Прохладно / хладнокровный",
+          "when": "буквально: погода; спокойный характер"
+        }
+      ]
+    },
+    {
+      "id": "en:whatever",
+      "src": [
+        "Whatever",
+        "Whatevs",
+        "Whatever you say",
+        "Whatever you want"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Да как хочешь.",
+          "when": "раздражение, безразличие"
+        },
+        {
+          "text": "Плевать.",
+          "when": "грубее"
+        },
+        {
+          "text": "Ну-ну.",
+          "when": "«whatever you say» — не верит"
+        },
+        {
+          "text": "Что угодно",
+          "when": "буквально внутри фразы"
+        }
+      ]
+    },
+    {
+      "id": "en:my-bad",
+      "src": [
+        "My bad",
+        "My mistake",
+        "That's on me",
+        "My fault",
+        "My b"
+      ],
+      "cat": "slang",
+      "speaker": true,
+      "variants": [
+        {
+          "text": "Виноват / виновата",
+          "when": "по полу говорящего"
+        },
+        {
+          "text": "Мой косяк.",
+          "when": "разговорно"
+        },
+        {
+          "text": "Сорян.",
+          "when": "молодёжно"
+        }
+      ]
+    },
+    {
+      "id": "en:no-big-deal",
+      "src": [
+        "No big deal",
+        "Not a big deal",
+        "It's no big deal",
+        "No biggie",
+        "Big deal"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Пустяки.",
+          "when": "успокаивает"
+        },
+        {
+          "text": "Ничего страшного.",
+          "when": "вежливо"
+        },
+        {
+          "text": "Подумаешь!",
+          "when": "саркастичное «Big deal»"
+        }
+      ]
+    },
+    {
+      "id": "en:gross",
+      "src": [
+        "Gross",
+        "So gross",
+        "Eww",
+        "Ewww",
+        "Yuck",
+        "Ick",
+        "Yuk"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Фу!",
+          "when": "отвращение"
+        },
+        {
+          "text": "Мерзость!",
+          "when": "сильнее"
+        },
+        {
+          "text": "Гадость",
+          "when": "о еде, вещи"
+        }
+      ]
+    },
+    {
+      "id": "en:lame",
+      "src": [
+        "Lame",
+        "So lame",
+        "Lame-o",
+        "That's lame"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Отстой",
+          "when": "скучно, плохо"
+        },
+        {
+          "text": "Жалкий",
+          "when": "о человеке, отговорке"
+        },
+        {
+          "text": "Хромой",
+          "when": "буквально"
+        }
+      ]
+    },
+    {
+      "id": "en:dumbass",
+      "src": [
+        "Dumbass",
+        "Dumb-ass",
+        "Dumbasses",
+        "Dummy",
+        "Moron",
+        "Dimwit",
+        "Numbskull",
+        "Blockhead",
+        "Airhead"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Придурок",
+          "when": "грубо"
+        },
+        {
+          "text": "Тупица",
+          "when": "презрительно"
+        },
+        {
+          "text": "Дурёха / дурачок",
+          "when": "ласково-укоризненно, «dummy»"
+        }
+      ]
+    },
+    {
+      "id": "en:idiot",
+      "src": [
+        "Idiot",
+        "Idiots",
+        "You idiot",
+        "Stupid",
+        "Stupid idiot",
+        "Baka"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Идиот!",
+          "when": "злость"
+        },
+        {
+          "text": "Дурак!",
+          "when": "обида, особенно девушка парню"
+        },
+        {
+          "text": "Дурачок",
+          "when": "ласково"
+        }
+      ],
+      "note": "«Baka» не оставлять транслитом"
+    },
+    {
+      "id": "en:jerk",
+      "src": [
+        "Jerk",
+        "Jerks",
+        "Jerkface",
+        "What a jerk"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Козёл",
+          "when": "грубовато"
+        },
+        {
+          "text": "Придурок",
+          "when": "нейтрально-грубо"
+        },
+        {
+          "text": "Гад",
+          "when": "мягче, обиженно"
+        }
+      ]
+    },
+    {
+      "id": "en:bastard",
+      "src": [
+        "Bastard",
+        "Bastards",
+        "You bastard",
+        "Little bastard"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Ублюдок",
+          "when": "сильное оскорбление"
+        },
+        {
+          "text": "Сволочь / мерзавец",
+          "when": "мягче, исторический сеттинг"
+        },
+        {
+          "text": "Бастард / внебрачный сын",
+          "when": "буквально о происхождении"
+        }
+      ],
+      "note": "в исторических сюжетах часто буквально — бастард"
+    },
+    {
+      "id": "en:son-of-a",
+      "src": [
+        "Son of a",
+        "Son of a bitch",
+        "Sonuva",
+        "Son of a gun",
+        "Sonofabitch"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Сукин сын!",
+          "when": "грубо"
+        },
+        {
+          "text": "Вот же гад…",
+          "when": "мягче, оборванная фраза"
+        },
+        {
+          "text": "Ну ты и шельмец!",
+          "when": "добродушно, «son of a gun»"
+        }
+      ]
+    },
+    {
+      "id": "en:holy-crap",
+      "src": [
+        "Holy crap",
+        "Holy shit",
+        "Holy cow",
+        "Holy moly",
+        "Holy smokes",
+        "Holy hell"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Охренеть!",
+          "when": "грубо, шок"
+        },
+        {
+          "text": "Ничего себе!",
+          "when": "нейтрально"
+        },
+        {
+          "text": "Ёлки-палки!",
+          "when": "мягко, «holy cow»"
+        }
+      ],
+      "note": "не «святое …»"
+    },
+    {
+      "id": "en:shit",
+      "src": [
+        "Shit",
+        "Oh shit",
+        "Aw shit",
+        "Shit shit"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Чёрт!",
+          "when": "досада"
+        },
+        {
+          "text": "Вот дерьмо!",
+          "when": "грубо"
+        },
+        {
+          "text": "Блин!",
+          "when": "мягко"
+        },
+        {
+          "text": "хрень",
+          "when": "внутри фразы: «this shit»"
+        }
+      ]
+    },
+    {
+      "id": "en:fuck",
+      "src": [
+        "Fuck",
+        "Fuck it",
+        "Fucking",
+        "Fuck off",
+        "Fuck you",
+        "Fuck this",
+        "Fucker"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Чёрт! / Твою ж мать!",
+          "when": "междометие"
+        },
+        {
+          "text": "грёбаный",
+          "when": "усиление"
+        },
+        {
+          "text": "Отвали! / Пошёл ты!",
+          "when": "«fuck off», «fuck you»"
+        }
+      ],
+      "note": "степень грубости по профилю серии"
+    },
+    {
+      "id": "en:bitch",
+      "src": [
+        "Bitch",
+        "Bitches",
+        "Bitchy",
+        "You bitch"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Сука",
+          "when": "грубо"
+        },
+        {
+          "text": "Стерва",
+          "when": "о вредной женщине"
+        },
+        {
+          "text": "Тварь",
+          "when": "к мужчине"
+        },
+        {
+          "text": "Ныть",
+          "when": "глагол «stop bitching»"
+        }
+      ]
+    },
+    {
+      "id": "en:asshole",
+      "src": [
+        "Asshole",
+        "Assholes",
+        "Arsehole",
+        "Prick",
+        "Douche",
+        "Douchebag"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Мудак",
+          "when": "грубо"
+        },
+        {
+          "text": "Козёл",
+          "when": "мягче"
+        },
+        {
+          "text": "Урод",
+          "when": "презрение"
+        }
+      ]
+    },
+    {
+      "id": "en:loser",
+      "src": [
+        "Loser",
+        "Losers",
+        "Total loser"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Неудачник",
+          "when": "нейтрально"
+        },
+        {
+          "text": "Лузер",
+          "when": "молодёжно"
+        },
+        {
+          "text": "Слабак",
+          "when": "в бою, соревновании"
+        }
+      ]
+    },
+    {
+      "id": "en:chill",
+      "src": [
+        "Chill",
+        "Chill out",
+        "Chillax",
+        "So chill",
+        "Chilling"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Расслабься",
+          "when": "успокаивает"
+        },
+        {
+          "text": "Остынь!",
+          "when": "резче"
+        },
+        {
+          "text": "Спокойный",
+          "when": "о человеке, «he's chill»"
+        },
+        {
+          "text": "Отдыхать, тусить",
+          "when": "«just chilling»"
+        }
+      ]
+    },
+    {
+      "id": "en:duh",
+      "src": [
+        "Duh",
+        "Well duh",
+        "Obviously",
+        "No duh"
+      ],
+      "cat": "slang",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ну ясное дело.",
+          "when": "очевидно"
+        },
+        {
+          "text": "Естественно!",
+          "when": "нейтрально"
+        },
+        {
+          "text": "Да ну, правда?",
+          "when": "сарказм"
+        }
+      ]
+    },
+    {
+      "id": "en:yeah-right",
+      "src": [
+        "Yeah right",
+        "Yeah, right",
+        "Sure sure",
+        "Sure, sure",
+        "As if"
+      ],
+      "cat": "slang",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ага, конечно.",
+          "when": "не верит"
+        },
+        {
+          "text": "Ну-ну.",
+          "when": "скепсис"
+        },
+        {
+          "text": "Размечтался!",
+          "when": "«as if»"
+        }
+      ]
+    },
+    {
+      "id": "en:shut-up",
+      "src": [
+        "Shut up",
+        "Shut it",
+        "Shaddap",
+        "Zip it",
+        "Shut your mouth",
+        "Shut your trap"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Заткнись!",
+          "when": "грубо"
+        },
+        {
+          "text": "Помолчи!",
+          "when": "мягче"
+        },
+        {
+          "text": "Да ладно?! / Не может быть!",
+          "when": "восторженное недоверие"
+        }
+      ]
+    },
+    {
+      "id": "en:get-lost",
+      "src": [
+        "Get lost",
+        "Beat it",
+        "Scram",
+        "Buzz off",
+        "Get out of here",
+        "Get outta here",
+        "Piss off",
+        "Shoo"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Проваливай!",
+          "when": "гонит"
+        },
+        {
+          "text": "Убирайся!",
+          "when": "злость"
+        },
+        {
+          "text": "Да ладно!",
+          "when": "«get outta here» — не верит"
+        }
+      ]
+    },
+    {
+      "id": "en:hell-yeah",
+      "src": [
+        "Hell yeah",
+        "Hell yes",
+        "Heck yeah",
+        "Fuck yeah",
+        "Heck yes"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Ещё бы!",
+          "when": "энтузиазм"
+        },
+        {
+          "text": "Да, чёрт возьми!",
+          "when": "сильно"
+        },
+        {
+          "text": "Конечно!",
+          "when": "мягче"
+        }
+      ]
+    },
+    {
+      "id": "en:hell-no",
+      "src": [
+        "Hell no",
+        "Heck no",
+        "Fuck no",
+        "Hell nah"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Ни за что!",
+          "when": "отказ"
+        },
+        {
+          "text": "Чёрта с два!",
+          "when": "грубо"
+        },
+        {
+          "text": "Да ни в жизнь!",
+          "when": "разговорно"
+        }
+      ]
+    },
+    {
+      "id": "en:got-it",
+      "src": [
+        "Got it",
+        "Roger",
+        "Roger that",
+        "Copy that",
+        "Understood",
+        "Gotcha covered"
+      ],
+      "cat": "slang",
+      "speaker": true,
+      "variants": [
+        {
+          "text": "Понял! / Поняла!",
+          "when": "по полу говорящего"
+        },
+        {
+          "text": "Принято.",
+          "when": "по рации, военные"
+        },
+        {
+          "text": "Ясно.",
+          "when": "нейтрально"
+        }
+      ]
+    },
+    {
+      "id": "en:busted",
+      "src": [
+        "Busted",
+        "Gotcha",
+        "Caught red-handed",
+        "Got you now"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Попался!",
+          "when": "поймал кого-то"
+        },
+        {
+          "text": "Спалился!",
+          "when": "молодёжно"
+        },
+        {
+          "text": "Попался с поличным.",
+          "when": "«caught red-handed»"
+        }
+      ]
+    },
+    {
+      "id": "en:savage",
+      "src": [
+        "Savage",
+        "So savage",
+        "Brutal"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Жёстко!",
+          "when": "о резком ответе, шутке"
+        },
+        {
+          "text": "Беспощадно",
+          "when": "о расправе"
+        },
+        {
+          "text": "Дикарь / дикий",
+          "when": "буквально"
+        }
+      ]
+    },
+    {
+      "id": "en:shady",
+      "src": [
+        "Shady",
+        "Sketchy",
+        "Fishy",
+        "Smells fishy"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Мутный",
+          "when": "о человеке, деле"
+        },
+        {
+          "text": "Подозрительно",
+          "when": "о ситуации"
+        },
+        {
+          "text": "Тёмное дело",
+          "when": "«something fishy»"
+        }
+      ]
+    },
+    {
+      "id": "en:crush",
+      "src": [
+        "Crush",
+        "Have a crush",
+        "Crushing on",
+        "First crush",
+        "Puppy love"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Влюблённость",
+          "when": "существительное"
+        },
+        {
+          "text": "Нравится",
+          "when": "«I have a crush on him» — он мне нравится"
+        },
+        {
+          "text": "Первая любовь",
+          "when": "«first crush»"
+        },
+        {
+          "text": "Раздавить",
+          "when": "буквально, глагол"
+        }
+      ]
+    },
+    {
+      "id": "en:brat",
+      "src": [
+        "Brat",
+        "Little brat",
+        "Punk",
+        "Little punk",
+        "Snot-nosed brat",
+        "Brats",
+        "Rascal",
+        "Little rascal"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Сопляк",
+          "when": "презрительно к младшему"
+        },
+        {
+          "text": "Мелкий паршивец",
+          "when": "раздражение"
+        },
+        {
+          "text": "Щенок",
+          "when": "свысока, угроза"
+        },
+        {
+          "text": "Сорванец",
+          "when": "по-доброму, «rascal»"
+        }
+      ],
+      "note": "«punk» — не «панк», а «сопляк, шпана»"
+    },
+    {
+      "id": "en:old-man",
+      "src": [
+        "Old man",
+        "Oldman",
+        "Old fart",
+        "Old geezer",
+        "Geezer",
+        "Gramps",
+        "Old coot"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Старик",
+          "when": "нейтрально-грубо"
+        },
+        {
+          "text": "Батя / отец",
+          "when": "о своём отце"
+        },
+        {
+          "text": "Дед",
+          "when": "фамильярно"
+        },
+        {
+          "text": "Старый хрыч",
+          "when": "грубо"
+        }
+      ]
+    },
+    {
+      "id": "en:old-hag",
+      "src": [
+        "Old hag",
+        "Hag",
+        "Old lady",
+        "Old woman",
+        "Granny",
+        "Old crone"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Старуха / карга",
+          "when": "грубо"
+        },
+        {
+          "text": "Бабуля",
+          "when": "ласково, фамильярно"
+        },
+        {
+          "text": "Мамаша / мать",
+          "when": "о своей матери, грубовато"
+        }
+      ]
+    },
+    {
+      "id": "en:trash",
+      "src": [
+        "Trash",
+        "Scum",
+        "Scumbag",
+        "Piece of trash",
+        "Piece of shit",
+        "Garbage",
+        "Lowlife"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Мразь",
+          "when": "сильное презрение"
+        },
+        {
+          "text": "Отброс",
+          "when": "о человеке"
+        },
+        {
+          "text": "Подонок",
+          "when": "грубо"
+        },
+        {
+          "text": "Мусор",
+          "when": "буквально / о бесполезной вещи"
+        }
+      ]
+    },
+    {
+      "id": "en:psycho",
+      "src": [
+        "Psycho",
+        "Psychopath",
+        "Lunatic",
+        "Maniac",
+        "Madman",
+        "Crazy bastard"
+      ],
+      "cat": "slang",
+      "variants": [
+        {
+          "text": "Псих",
+          "when": "грубо"
+        },
+        {
+          "text": "Чокнутый",
+          "when": "разговорно"
+        },
+        {
+          "text": "Безумец",
+          "when": "книжно, фэнтези"
+        }
+      ]
+    },
+    {
+      "id": "en:senpai",
+      "src": [
+        "Senpai",
+        "Sempai"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "семпай",
+          "when": "сохранять японский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "по имени / старшая",
+          "when": "старший по школе, клубу, работе",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:sensei",
+      "src": [
+        "Sensei"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "сенсей",
+          "when": "сохранять японский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "учитель / доктор",
+          "when": "к учителю; к врачу, писателю, мангаке",
+          "policy": "adapt"
+        }
+      ],
+      "note": "сенсей — также врач, писатель, политик"
+    },
+    {
+      "id": "en:hyung",
+      "src": [
+        "Hyung",
+        "Hyeong",
+        "Hyungie"
+      ],
+      "cat": "address",
+      "speaker": true,
+      "variants": [
+        {
+          "text": "хён",
+          "when": "сохранять корейский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "брат / по имени",
+          "when": "младший парень к старшему парню",
+          "policy": "adapt"
+        }
+      ],
+      "note": "говорит только мужчина"
+    },
+    {
+      "id": "en:hyungnim",
+      "src": [
+        "Hyungnim",
+        "Hyung-nim",
+        "Hyeongnim",
+        "Hyeong-nim"
+      ],
+      "cat": "address",
+      "speaker": true,
+      "variants": [
+        {
+          "text": "хённим",
+          "when": "сохранять корейский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "старший брат / босс",
+          "when": "уважительно; в банде — к главарю",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:noona",
+      "src": [
+        "Noona",
+        "Nuna",
+        "Noonim",
+        "Noona-nim"
+      ],
+      "cat": "address",
+      "speaker": true,
+      "variants": [
+        {
+          "text": "нуна",
+          "when": "сохранять корейский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "сестрёнка / по имени",
+          "when": "парень к старшей девушке",
+          "policy": "adapt"
+        }
+      ],
+      "note": "говорит только мужчина"
+    },
+    {
+      "id": "en:oppa",
+      "src": [
+        "Oppa",
+        "Oppaa",
+        "Orabeoni",
+        "Oraboni",
+        "Orabeonim",
+        "Orabonim"
+      ],
+      "cat": "address",
+      "speaker": true,
+      "variants": [
+        {
+          "text": "оппа",
+          "when": "сохранять корейский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "братик / милый / по имени",
+          "when": "девушка к старшему брату или парню",
+          "policy": "adapt"
+        }
+      ],
+      "note": "говорит только женщина; orabeoni — старинная форма"
+    },
+    {
+      "id": "en:unnie",
+      "src": [
+        "Unnie",
+        "Eonni",
+        "Onni",
+        "Unni",
+        "Eonnie"
+      ],
+      "cat": "address",
+      "speaker": true,
+      "variants": [
+        {
+          "text": "онни",
+          "when": "сохранять корейский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "сестрёнка / по имени",
+          "when": "девушка к старшей девушке",
+          "policy": "adapt"
+        }
+      ],
+      "note": "говорит только женщина"
+    },
+    {
+      "id": "en:sunbae",
+      "src": [
+        "Sunbae",
+        "Sunbaenim",
+        "Sunbae-nim",
+        "Seonbae",
+        "Seonbaenim",
+        "Seonbae-nim"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "сонбэ / сонбэним",
+          "when": "сохранять корейский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "старший / по имени-отчеству",
+          "when": "старший коллега, старшекурсник",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:ahjussi",
+      "src": [
+        "Ahjussi",
+        "Ajussi",
+        "Ajeossi",
+        "Ahjeossi"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "аджосси",
+          "when": "сохранять корейский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "дядя / мужчина",
+          "when": "к мужчине средних лет",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:ahjumma",
+      "src": [
+        "Ahjumma",
+        "Ajumma",
+        "Ajumeoni",
+        "Ahjumeoni"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "аджумма",
+          "when": "сохранять корейский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "тётя / женщина",
+          "when": "к женщине средних лет",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:sajangnim",
+      "src": [
+        "Sajangnim",
+        "Sajang-nim",
+        "Daepyonim",
+        "Daepyo-nim",
+        "Hoejangnim",
+        "Hoejang-nim",
+        "Bujangnim",
+        "Timjangnim"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "саджанним",
+          "when": "сохранять корейский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "директор / председатель / начальник отдела",
+          "when": "по должности: sajang — директор, hoejang — председатель, bujang — начальник отдела, timjang — руководитель группы",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:onii",
+      "src": [
+        "Onii-chan",
+        "Onii-san",
+        "Oniichan",
+        "Oniisan",
+        "Nii-san",
+        "Nii-chan",
+        "Niisan",
+        "Onii-sama",
+        "Aniki",
+        "Nii-sama"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "онии-чан / нии-сан",
+          "when": "сохранять японский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "братик / братец / старший брат",
+          "when": "к старшему брату",
+          "policy": "adapt"
+        },
+        {
+          "text": "братан",
+          "when": "«aniki» в банде — к старшему",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:onee",
+      "src": [
+        "Onee-chan",
+        "Onee-san",
+        "Oneechan",
+        "Oneesan",
+        "Nee-san",
+        "Nee-chan",
+        "Neesan",
+        "Onee-sama",
+        "Aneki",
+        "Anego",
+        "Nee-sama"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "онээ-сан / нээ-чан",
+          "when": "сохранять японский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "сестрёнка / сестрица",
+          "when": "к старшей сестре",
+          "policy": "adapt"
+        },
+        {
+          "text": "старшая / сестра",
+          "when": "«onee-sama» — обожаемая старшая ученица",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:ojousama",
+      "src": [
+        "Ojou-sama",
+        "Ojousama",
+        "Ojou-chan",
+        "Ojousan",
+        "Ojou"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "одзё-сама",
+          "when": "сохранять японский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "юная госпожа / барышня",
+          "when": "дочь знатного или богатого дома",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:bocchan",
+      "src": [
+        "Bocchan",
+        "Botchan",
+        "Bo-chan"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "боттян",
+          "when": "сохранять японский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "молодой господин / барчук",
+          "when": "сын богатого дома",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:shixiong",
+      "src": [
+        "Shixiong",
+        "Shi-xiong",
+        "Shi xiong",
+        "Senior Brother",
+        "Senior Martial Brother",
+        "Martial Brother",
+        "Sahyung",
+        "Sahyeong"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "шисюн",
+          "when": "сохранять китайский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "старший брат (по школе)",
+          "when": "старший соученик в секте",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:shijie",
+      "src": [
+        "Shijie",
+        "Shi-jie",
+        "Senior Sister",
+        "Senior Martial Sister",
+        "Martial Sister",
+        "Sajeo"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "шицзе",
+          "when": "сохранять китайский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "старшая сестра (по школе)",
+          "when": "старшая соученица в секте",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:shidi",
+      "src": [
+        "Shidi",
+        "Shi-di",
+        "Junior Brother",
+        "Junior Martial Brother",
+        "Sajae"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "шиди",
+          "when": "сохранять китайский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "младший брат (по школе)",
+          "when": "младший соученик",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:shimei",
+      "src": [
+        "Shimei",
+        "Shi-mei",
+        "Junior Sister",
+        "Junior Martial Sister",
+        "Samae"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "шимэй",
+          "when": "сохранять китайский колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "младшая сестра (по школе)",
+          "when": "младшая соученица",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:shizun",
+      "src": [
+        "Shizun",
+        "Shi zun",
+        "Shifu",
+        "Shi fu",
+        "Sabu",
+        "Sabunim",
+        "Seuseung"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "шицзунь / шифу",
+          "when": "сохранять колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "учитель / наставник",
+          "when": "к своему наставнику",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:young-master",
+      "src": [
+        "Young Master",
+        "Young Lord",
+        "Gongzi",
+        "Shaoye",
+        "Little Master",
+        "Doryeonnim",
+        "Doryeon-nim"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "молодой господин",
+          "when": "слуга или чужой к сыну знатного дома",
+          "policy": "adapt"
+        },
+        {
+          "text": "господин + фамилия",
+          "when": "вежливо к молодому человеку",
+          "policy": "adapt"
+        },
+        {
+          "text": "барчук",
+          "when": "иронично, свысока",
+          "policy": "adapt"
+        }
+      ],
+      "note": "не «юный мастер»"
+    },
+    {
+      "id": "en:young-lady",
+      "src": [
+        "Young Lady",
+        "Young Miss",
+        "Little Miss",
+        "Xiaojie"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "юная госпожа",
+          "when": "дочь знатного дома",
+          "policy": "adapt"
+        },
+        {
+          "text": "барышня",
+          "when": "к девушке, разговорно",
+          "policy": "adapt"
+        },
+        {
+          "text": "юная леди",
+          "when": "взрослый строго отчитывает девочку",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:your-highness",
+      "src": [
+        "Your Highness",
+        "His Highness",
+        "Her Highness",
+        "Their Highnesses",
+        "Jeoha",
+        "Dianxia"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "Ваше Высочество",
+          "when": "к принцу, принцессе, кронпринцу",
+          "policy": "adapt"
+        },
+        {
+          "text": "Его / Её Высочество",
+          "when": "о нём/ней в третьем лице",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:your-majesty",
+      "src": [
+        "Your Majesty",
+        "His Majesty",
+        "Her Majesty",
+        "Jeonha",
+        "Bixia",
+        "Pyeha",
+        "Heika"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "Ваше Величество",
+          "when": "к монарху",
+          "policy": "adapt"
+        },
+        {
+          "text": "Его / Её Величество",
+          "when": "в третьем лице",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:your-grace",
+      "src": [
+        "Your Grace",
+        "His Grace",
+        "Her Grace"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "Ваша Светлость",
+          "when": "к герцогу/герцогине",
+          "policy": "adapt"
+        },
+        {
+          "text": "Ваше Преосвященство",
+          "when": "к епископу",
+          "policy": "adapt"
+        }
+      ],
+      "note": "не «Ваша Милость» для герцога"
+    },
+    {
+      "id": "en:your-excellency",
+      "src": [
+        "Your Excellency",
+        "His Excellency",
+        "Her Excellency",
+        "Your Lordship",
+        "Your Ladyship"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "Ваше Сиятельство",
+          "when": "к графу, князю; «Lordship»",
+          "policy": "adapt"
+        },
+        {
+          "text": "Ваше Превосходительство",
+          "when": "к министру, послу, генералу",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:my-lord",
+      "src": [
+        "My Lord",
+        "Milord",
+        "My liege",
+        "My lords"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "милорд",
+          "when": "западный сеттинг",
+          "policy": "keep"
+        },
+        {
+          "text": "господин / мой господин",
+          "when": "вассал к сюзерену",
+          "policy": "adapt"
+        },
+        {
+          "text": "повелитель",
+          "when": "к королю, тёмному властелину",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:my-lady",
+      "src": [
+        "My Lady",
+        "Milady",
+        "M'lady",
+        "My ladies"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "миледи",
+          "when": "западный сеттинг",
+          "policy": "keep"
+        },
+        {
+          "text": "госпожа",
+          "when": "служанка, рыцарь к знатной даме",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:sect-leader",
+      "src": [
+        "Sect Leader",
+        "Sect Master",
+        "Clan Leader",
+        "Clan Head",
+        "Clan Master",
+        "Family Head",
+        "Patriarch",
+        "Zongzhu",
+        "Jangmun",
+        "Gaju"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "Глава секты",
+          "when": "секта, школа",
+          "policy": "adapt"
+        },
+        {
+          "text": "Глава клана / глава семьи",
+          "when": "клан, семья (gaju)",
+          "policy": "adapt"
+        },
+        {
+          "text": "Патриарх",
+          "when": "основатель, старейший предок",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:elder",
+      "src": [
+        "Elder",
+        "Grand Elder",
+        "Great Elder",
+        "Supreme Elder",
+        "First Elder",
+        "Elders",
+        "Zhanglao",
+        "Jangro"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "старейшина",
+          "when": "должность в секте, клане, племени",
+          "policy": "adapt"
+        },
+        {
+          "text": "Великий старейшина",
+          "when": "«Grand/Great Elder»",
+          "policy": "adapt"
+        },
+        {
+          "text": "старший (брат, сестра)",
+          "when": "«elder brother/sister» — не должность",
+          "policy": "adapt"
+        }
+      ],
+      "note": "не «старший» для должности"
+    },
+    {
+      "id": "en:master",
+      "src": [
+        "Master",
+        "Masters",
+        "Master-nim"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "учитель / мастер",
+          "when": "ученик к наставнику",
+          "policy": "adapt"
+        },
+        {
+          "text": "хозяин",
+          "when": "раб, фамильяр, питомец, дух-призыв к владельцу",
+          "policy": "adapt"
+        },
+        {
+          "text": "господин",
+          "when": "слуга, дворецкий к главе дома",
+          "policy": "adapt"
+        },
+        {
+          "text": "Мастер",
+          "when": "титул: мастер гильдии, мастер меча",
+          "policy": "adapt"
+        }
+      ],
+      "note": "Master: учитель / хозяин / господин — смотреть, кто говорит"
+    },
+    {
+      "id": "en:senior",
+      "src": [
+        "Senior",
+        "Qianbei",
+        "Respected Senior"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "Старший",
+          "when": "культивация, мурим: к более сильному незнакомцу",
+          "policy": "adapt"
+        },
+        {
+          "text": "Почтенный",
+          "when": "очень уважительно",
+          "policy": "adapt"
+        },
+        {
+          "text": "старшеклассник / старшекурсник",
+          "when": "школьный сеттинг",
+          "policy": "adapt"
+        }
+      ],
+      "note": "в уся/мурим не «старшеклассник»"
+    },
+    {
+      "id": "en:this-junior",
+      "src": [
+        "This junior",
+        "Junior",
+        "Wanbei",
+        "This humble one",
+        "This humble disciple"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "Этот младший / я",
+          "when": "самоуничижительно к старшему",
+          "policy": "adapt"
+        },
+        {
+          "text": "Ваш покорный ученик",
+          "when": "ученик к учителю",
+          "policy": "adapt"
+        },
+        {
+          "text": "младший",
+          "when": "«junior» как обращение к младшему",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:this-lord",
+      "src": [
+        "This lord",
+        "This king",
+        "This emperor",
+        "This venerable one",
+        "This old man",
+        "This prince",
+        "This seat",
+        "This one",
+        "This young master",
+        "This old master"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "Я / Сей владыка",
+          "when": "высокомерное «я» правителя, мастера",
+          "policy": "adapt"
+        },
+        {
+          "text": "Этот старик",
+          "when": "скромно-ворчливое «я» пожилого",
+          "policy": "adapt"
+        },
+        {
+          "text": "Мы",
+          "when": "монаршее «мы» императора",
+          "policy": "adapt"
+        }
+      ],
+      "note": "самоназвание = «я»; не повторять «этот лорд» в каждой реплике"
+    },
+    {
+      "id": "en:daoist",
+      "src": [
+        "Fellow Daoist",
+        "Fellow Taoist",
+        "Daoist friend",
+        "Daoyou",
+        "Dao Friend",
+        "Fellow cultivator"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "собрат-даос",
+          "when": "сохранять колорит",
+          "policy": "keep"
+        },
+        {
+          "text": "собрат / друг",
+          "when": "практик к практику того же уровня",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:boss",
+      "src": [
+        "Boss",
+        "Big Boss",
+        "Boss man",
+        "Boss lady",
+        "Chief",
+        "Laoban",
+        "Daejang"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "босс / шеф",
+          "when": "к начальнику, главарю",
+          "policy": "adapt"
+        },
+        {
+          "text": "начальник",
+          "when": "нейтрально, по работе",
+          "policy": "adapt"
+        },
+        {
+          "text": "главарь / вожак",
+          "when": "банда, «daejang»",
+          "policy": "adapt"
+        },
+        {
+          "text": "вождь / командир",
+          "when": "«Chief» — племя, отряд",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:big-bro",
+      "src": [
+        "Big Bro",
+        "Big Brother",
+        "Elder Brother",
+        "Older Brother",
+        "Gege",
+        "Dage",
+        "Da-ge",
+        "Brother-in-law"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "старший брат / братец",
+          "when": "родной или названый брат",
+          "policy": "adapt"
+        },
+        {
+          "text": "братан",
+          "when": "в банде, к главарю",
+          "policy": "adapt"
+        },
+        {
+          "text": "гэгэ",
+          "when": "китайский колорит",
+          "policy": "keep"
+        }
+      ]
+    },
+    {
+      "id": "en:big-sis",
+      "src": [
+        "Big Sis",
+        "Big Sister",
+        "Elder Sister",
+        "Older Sister",
+        "Jiejie",
+        "Sis",
+        "Sissy"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "старшая сестра / сестрица",
+          "when": "родная или названая",
+          "policy": "adapt"
+        },
+        {
+          "text": "сестрёнка",
+          "when": "ласково",
+          "policy": "adapt"
+        },
+        {
+          "text": "цзецзе",
+          "when": "китайский колорит",
+          "policy": "keep"
+        }
+      ]
+    },
+    {
+      "id": "en:little-bro",
+      "src": [
+        "Little Bro",
+        "Little Brother",
+        "Younger Brother",
+        "Lil bro",
+        "Didi"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "братишка",
+          "when": "ласково",
+          "policy": "adapt"
+        },
+        {
+          "text": "младший брат",
+          "when": "нейтрально",
+          "policy": "adapt"
+        },
+        {
+          "text": "малой",
+          "when": "панибратски",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:little-sis",
+      "src": [
+        "Little Sis",
+        "Little Sister",
+        "Younger Sister",
+        "Lil sis",
+        "Meimei"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "сестрёнка",
+          "when": "ласково",
+          "policy": "adapt"
+        },
+        {
+          "text": "младшая сестра",
+          "when": "нейтрально",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:miss",
+      "src": [
+        "Miss",
+        "Missy",
+        "Little Lady"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "девушка / барышня",
+          "when": "к незнакомой молодой женщине",
+          "policy": "adapt"
+        },
+        {
+          "text": "госпожа + фамилия",
+          "when": "вежливо",
+          "policy": "adapt"
+        },
+        {
+          "text": "мисс",
+          "when": "западный сеттинг",
+          "policy": "keep"
+        },
+        {
+          "text": "скучать / промахнуться",
+          "when": "глагол — не обращение",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:sir",
+      "src": [
+        "Sir",
+        "Sirs",
+        "Good sir",
+        "Yes sir",
+        "Sir Knight"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "господин",
+          "when": "к мужчине, вежливо",
+          "policy": "adapt"
+        },
+        {
+          "text": "сэр",
+          "when": "рыцарь, западный сеттинг",
+          "policy": "keep"
+        },
+        {
+          "text": "Так точно! / Есть!",
+          "when": "«Yes sir» — военные, подчинённые",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:maam",
+      "src": [
+        "Ma'am",
+        "Maam",
+        "Madam",
+        "Madame",
+        "Mam"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "госпожа / сударыня",
+          "when": "вежливо к женщине",
+          "policy": "adapt"
+        },
+        {
+          "text": "мэм / мадам",
+          "when": "западный сеттинг",
+          "policy": "keep"
+        },
+        {
+          "text": "Так точно, мэм!",
+          "when": "военные",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:duke",
+      "src": [
+        "Duke",
+        "Grand Duke",
+        "Archduke",
+        "Duchess",
+        "Grand Duchess",
+        "Archduchess",
+        "Dukedom",
+        "Duchy",
+        "Ducal"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "герцог / герцогиня",
+          "when": "титул",
+          "policy": "adapt"
+        },
+        {
+          "text": "великий герцог",
+          "when": "«Grand Duke» (romance fantasy)",
+          "policy": "adapt"
+        },
+        {
+          "text": "эрцгерцог",
+          "when": "«Archduke»",
+          "policy": "adapt"
+        }
+      ],
+      "note": "в обращении — «Ваша Светлость»"
+    },
+    {
+      "id": "en:nobles",
+      "src": [
+        "Marquis",
+        "Marquess",
+        "Marchioness",
+        "Countess",
+        "Earl",
+        "Viscount",
+        "Viscountess",
+        "Baron",
+        "Baroness"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "маркиз / маркиза",
+          "when": "Marquis, Marchioness",
+          "policy": "adapt"
+        },
+        {
+          "text": "граф / графиня",
+          "when": "Count, Earl, Countess",
+          "policy": "adapt"
+        },
+        {
+          "text": "виконт / виконтесса",
+          "when": "Viscount",
+          "policy": "adapt"
+        },
+        {
+          "text": "барон / баронесса",
+          "when": "Baron",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:crown-prince",
+      "src": [
+        "Crown Prince",
+        "Crown Princess",
+        "Heir Apparent",
+        "Taizi",
+        "Seja",
+        "Dongung"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "кронпринц / наследный принц",
+          "when": "европейский / китайский сеттинг",
+          "policy": "adapt"
+        },
+        {
+          "text": "кронпринцесса",
+          "when": "супруга кронпринца или наследница",
+          "policy": "adapt"
+        },
+        {
+          "text": "Ваше Высочество",
+          "when": "в прямом обращении",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:prince",
+      "src": [
+        "Prince",
+        "Imperial Prince",
+        "First Prince",
+        "Second Prince",
+        "Third Prince",
+        "Wangye",
+        "Wang-ye",
+        "Daegun"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "принц",
+          "when": "европейский сеттинг",
+          "policy": "adapt"
+        },
+        {
+          "text": "Второй принц",
+          "when": "порядковые принцы",
+          "policy": "adapt"
+        },
+        {
+          "text": "князь / ван",
+          "when": "китайский сеттинг: «Wangye», «Prince Rui»",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:princess",
+      "src": [
+        "Princess",
+        "Imperial Princess",
+        "Royal Princess",
+        "Gongzhu",
+        "Gongju"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "принцесса",
+          "when": "титул",
+          "policy": "adapt"
+        },
+        {
+          "text": "Ваше Высочество",
+          "when": "в прямом обращении",
+          "policy": "adapt"
+        },
+        {
+          "text": "Принцесса",
+          "when": "ласково-иронично к девушке",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:emperor",
+      "src": [
+        "Emperor",
+        "Empress",
+        "Empress Dowager",
+        "Queen Mother",
+        "Grand Empress Dowager",
+        "Huangshang",
+        "Huangdi"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "император / императрица",
+          "when": "титул",
+          "policy": "adapt"
+        },
+        {
+          "text": "вдовствующая императрица",
+          "when": "«Empress Dowager»",
+          "policy": "adapt"
+        },
+        {
+          "text": "королева-мать",
+          "when": "«Queen Mother»",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:sun-of-empire",
+      "src": [
+        "Sun of the Empire",
+        "Little Sun of the Empire",
+        "Small Sun of the Empire",
+        "Moon of the Empire",
+        "Star of the Empire",
+        "Great Sun of the Empire"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "Солнце Империи",
+          "when": "император",
+          "policy": "adapt"
+        },
+        {
+          "text": "Малое Солнце Империи",
+          "when": "кронпринц",
+          "policy": "adapt"
+        },
+        {
+          "text": "Луна Империи",
+          "when": "императрица",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:endearment",
+      "src": [
+        "Babe",
+        "Baby",
+        "Honey",
+        "Sweetie",
+        "Darling",
+        "Sweetheart",
+        "Honey bun",
+        "Hubby",
+        "Wifey"
+      ],
+      "cat": "address",
+      "speaker": true,
+      "variants": [
+        {
+          "text": "милый / милая",
+          "when": "к партнёру",
+          "policy": "adapt"
+        },
+        {
+          "text": "дорогой / дорогая",
+          "when": "супруги, старшие",
+          "policy": "adapt"
+        },
+        {
+          "text": "детка / зайка",
+          "when": "игриво",
+          "policy": "adapt"
+        },
+        {
+          "text": "малыш",
+          "when": "буквально о младенце",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:kid",
+      "src": [
+        "Kid",
+        "Kiddo",
+        "Youngster",
+        "Young man",
+        "Laddie",
+        "Sonny"
+      ],
+      "cat": "address",
+      "variants": [
+        {
+          "text": "малыш / малой",
+          "when": "к ребёнку",
+          "policy": "adapt"
+        },
+        {
+          "text": "парень / пацан",
+          "when": "к подростку",
+          "policy": "adapt"
+        },
+        {
+          "text": "молодой человек",
+          "when": "вежливо или строго",
+          "policy": "adapt"
+        },
+        {
+          "text": "сынок",
+          "when": "пожилой к молодому",
+          "policy": "adapt"
+        }
+      ]
+    },
+    {
+      "id": "en:hunter",
+      "src": [
+        "Hunter",
+        "Hunters",
+        "Hunter Association",
+        "Hunter's Association",
+        "Hunters Association"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "охотник",
+          "when": "профессия в мире врат и подземелий; «Ассоциация охотников»"
+        }
+      ]
+    },
+    {
+      "id": "en:gate",
+      "src": [
+        "Gate",
+        "Gates",
+        "Red Gate",
+        "Double Gate"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "врата",
+          "when": "портал в подземелье"
+        }
+      ],
+      "note": "не «ворота»"
+    },
+    {
+      "id": "en:dungeon",
+      "src": [
+        "Dungeon",
+        "Dungeons",
+        "Instance Dungeon",
+        "Hidden Dungeon"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "подземелье",
+          "when": "основной вариант"
+        },
+        {
+          "text": "данж",
+          "when": "геймерский стиль серии"
+        }
+      ]
+    },
+    {
+      "id": "en:dungeon-break",
+      "src": [
+        "Dungeon Break",
+        "Gate Break",
+        "Dungeon break-out"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "прорыв подземелья",
+          "when": "монстры вышли наружу"
+        }
+      ]
+    },
+    {
+      "id": "en:awakened",
+      "src": [
+        "Awakened",
+        "Awakener",
+        "Awakeners",
+        "Awakened One",
+        "Awakening",
+        "Reawakening"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "пробуждённый",
+          "when": "человек со способностями; «Пробуждение» — событие"
+        }
+      ]
+    },
+    {
+      "id": "en:status-window",
+      "src": [
+        "Status Window",
+        "Status screen",
+        "Stat window",
+        "Stats window",
+        "Character info"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "окно статуса",
+          "when": "интерфейс характеристик"
+        }
+      ]
+    },
+    {
+      "id": "en:system",
+      "src": [
+        "System message",
+        "System notification",
+        "System alert",
+        "System window",
+        "The System"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Система / системное сообщение",
+          "when": "голос и окна Системы"
+        }
+      ]
+    },
+    {
+      "id": "en:quest",
+      "src": [
+        "Quest",
+        "Main quest",
+        "Sudden quest",
+        "Daily quest",
+        "Emergency quest",
+        "Side quest",
+        "Quests"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "квест",
+          "when": "основной вариант"
+        },
+        {
+          "text": "задание",
+          "when": "если серия избегает геймерской лексики"
+        }
+      ]
+    },
+    {
+      "id": "en:skill",
+      "src": [
+        "Skill",
+        "Skills",
+        "Passive skill",
+        "Active skill",
+        "Unique skill",
+        "Skill activated"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "навык",
+          "when": "основной вариант"
+        },
+        {
+          "text": "скилл",
+          "when": "геймерский стиль"
+        }
+      ]
+    },
+    {
+      "id": "en:regression",
+      "src": [
+        "Regression",
+        "Regressed",
+        "Regress",
+        "Return to the past"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "регрессия",
+          "when": "возврат во времени в прошлое"
+        }
+      ]
+    },
+    {
+      "id": "en:regressor",
+      "src": [
+        "Regressor",
+        "Regressors",
+        "Returner",
+        "Returnee"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "регрессор",
+          "when": "вернувшийся в прошлое"
+        },
+        {
+          "text": "вернувшийся",
+          "when": "вернувшийся из другого мира (returner)"
+        }
+      ]
+    },
+    {
+      "id": "en:possession",
+      "src": [
+        "Possession",
+        "Possessed",
+        "Transmigration",
+        "Transmigrated",
+        "Transmigrator",
+        "Body possession",
+        "Book possession"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "вселение",
+          "when": "попал в тело персонажа"
+        },
+        {
+          "text": "переселение (души)",
+          "when": "китайские новеллы, transmigration"
+        }
+      ]
+    },
+    {
+      "id": "en:reincarnation",
+      "src": [
+        "Reincarnation",
+        "Reincarnated",
+        "Reincarnator",
+        "Reborn",
+        "Rebirth"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "перерождение",
+          "when": "основной вариант"
+        },
+        {
+          "text": "реинкарнация",
+          "when": "в названиях жанра"
+        }
+      ]
+    },
+    {
+      "id": "en:isekai",
+      "src": [
+        "Isekai",
+        "Another world",
+        "Other world",
+        "Otherworld",
+        "Different world"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "исекай / другой мир",
+          "when": "жанр / иной мир"
+        }
+      ]
+    },
+    {
+      "id": "en:cultivation",
+      "src": [
+        "Cultivation",
+        "Cultivator",
+        "Cultivators",
+        "Cultivating",
+        "Immortal cultivator",
+        "Cultivation base"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "совершенствование / культивация",
+          "when": "путь к бессмертию; практик — cultivator"
+        }
+      ],
+      "note": "не «выращивание»"
+    },
+    {
+      "id": "en:qi",
+      "src": [
+        "Qi energy",
+        "Inner qi",
+        "True qi",
+        "Spiritual qi",
+        "Spiritual energy",
+        "Ki energy",
+        "Chi energy",
+        "Gi energy"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "ци",
+          "when": "энергия в уся/сянься/мурим"
+        }
+      ]
+    },
+    {
+      "id": "en:dantian",
+      "src": [
+        "Dantian",
+        "Dan tian",
+        "Lower dantian",
+        "Danjeon",
+        "Tanden"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "даньтянь",
+          "when": "центр энергии в теле"
+        }
+      ]
+    },
+    {
+      "id": "en:meridians",
+      "src": [
+        "Meridians",
+        "Meridian",
+        "Acupoints",
+        "Acupoint",
+        "Pressure points"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "меридианы / акупунктурные точки",
+          "when": "каналы ци"
+        }
+      ]
+    },
+    {
+      "id": "en:realms",
+      "src": [
+        "Qi Condensation",
+        "Qi Refining",
+        "Foundation Establishment",
+        "Core Formation",
+        "Golden Core",
+        "Nascent Soul",
+        "Soul Formation",
+        "Body Tempering"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Конденсация Ци",
+          "when": "Qi Condensation / Qi Refining"
+        },
+        {
+          "text": "Создание Основания",
+          "when": "Foundation Establishment"
+        },
+        {
+          "text": "Золотое Ядро / Формирование Ядра",
+          "when": "Golden Core / Core Formation"
+        },
+        {
+          "text": "Зарождающаяся Душа",
+          "when": "Nascent Soul"
+        }
+      ]
+    },
+    {
+      "id": "en:murim",
+      "src": [
+        "Murim",
+        "Wulin",
+        "Martial world",
+        "Jianghu",
+        "Gangho",
+        "Martial Arts World"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Мурим",
+          "when": "корейский сеттинг"
+        },
+        {
+          "text": "мир боевых искусств (улинь, цзянху)",
+          "when": "китайский сеттинг"
+        }
+      ]
+    },
+    {
+      "id": "en:sect",
+      "src": [
+        "Sect",
+        "Sects",
+        "Orthodox sect",
+        "Righteous sect",
+        "Righteous Faction",
+        "Orthodox Faction"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "секта",
+          "when": "школа боевых искусств или бессмертных; «праведные секты»"
+        }
+      ]
+    },
+    {
+      "id": "en:demonic-cult",
+      "src": [
+        "Demonic Cult",
+        "Demon Cult",
+        "Demonic sect",
+        "Heavenly Demon Cult",
+        "Unorthodox faction",
+        "Unorthodox sect"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Демонический культ",
+          "when": "основной вариант; неортодоксальная фракция — unorthodox"
+        }
+      ]
+    },
+    {
+      "id": "en:heavenly-demon",
+      "src": [
+        "Heavenly Demon",
+        "Cheonma",
+        "Tianmo"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Небесный Демон",
+          "when": "глава Демонического культа"
+        }
+      ]
+    },
+    {
+      "id": "en:guild",
+      "src": [
+        "Guild",
+        "Guilds",
+        "Guild Master",
+        "Guildmaster",
+        "Guild leader"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "гильдия / глава гильдии",
+          "when": "организация охотников, авантюристов"
+        }
+      ]
+    },
+    {
+      "id": "en:rank",
+      "src": [
+        "S-rank",
+        "S rank",
+        "SS-rank",
+        "SSS-rank",
+        "A-rank",
+        "B-rank",
+        "C-rank",
+        "D-rank",
+        "E-rank",
+        "F-rank",
+        "S-class",
+        "S class"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "ранга S / S-ранга",
+          "when": "латинскую букву сохранять"
+        }
+      ]
+    },
+    {
+      "id": "en:mana",
+      "src": [
+        "Mana",
+        "Magic power",
+        "Mana core",
+        "Mana circuit"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "мана",
+          "when": "магическая энергия; «ядро маны»"
+        }
+      ]
+    },
+    {
+      "id": "en:mana-stone",
+      "src": [
+        "Mana stone",
+        "Mana stones",
+        "Magic stone",
+        "Magic stones",
+        "Monster core",
+        "Mana crystal"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "камень маны",
+          "when": "добыча из монстров"
+        }
+      ]
+    },
+    {
+      "id": "en:aura",
+      "src": [
+        "Aura",
+        "Sword aura",
+        "Aura blade",
+        "Aura user",
+        "Aura Master",
+        "Aura Expert"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "аура",
+          "when": "энергия мечника; «Мастер ауры»"
+        }
+      ]
+    },
+    {
+      "id": "en:sword-qi",
+      "src": [
+        "Sword qi",
+        "Sword energy",
+        "Sword Intent",
+        "Sword light",
+        "Blade qi"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "ци меча",
+          "when": "Sword qi / energy"
+        },
+        {
+          "text": "намерение меча",
+          "when": "Sword Intent"
+        }
+      ]
+    },
+    {
+      "id": "en:sword-saint",
+      "src": [
+        "Sword Saint",
+        "Sword Master",
+        "Swordmaster",
+        "Sword God",
+        "Sword Emperor",
+        "Sword Sovereign",
+        "Sword Demon"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Святой Меча",
+          "when": "Sword Saint"
+        },
+        {
+          "text": "Мастер Меча",
+          "when": "Sword Master; аналогично Бог Меча, Император Меча"
+        }
+      ]
+    },
+    {
+      "id": "en:demon-king",
+      "src": [
+        "Demon King",
+        "Demon Lord",
+        "Devil King",
+        "Maou",
+        "Overlord"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Король демонов",
+          "when": "основной вариант"
+        },
+        {
+          "text": "Повелитель демонов",
+          "when": "«Demon Lord», «Overlord»"
+        }
+      ]
+    },
+    {
+      "id": "en:hero",
+      "src": [
+        "Hero",
+        "Heroes",
+        "The Hero",
+        "Yuusha",
+        "Hero party",
+        "Hero's party"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Герой",
+          "when": "избранный, призванный герой"
+        }
+      ]
+    },
+    {
+      "id": "en:saintess",
+      "src": [
+        "Saintess",
+        "Holy Maiden",
+        "Seijo",
+        "Saint",
+        "Holy Saint"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Святая / Святая дева",
+          "when": "избранница храма"
+        }
+      ]
+    },
+    {
+      "id": "en:villainess",
+      "src": [
+        "Villainess",
+        "Villainous lady",
+        "Akuyaku",
+        "Akuyaku reijou"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "злодейка",
+          "when": "антагонистка романа"
+        }
+      ]
+    },
+    {
+      "id": "en:female-lead",
+      "src": [
+        "Female lead",
+        "Original female lead",
+        "Heroine",
+        "Main heroine",
+        "Original heroine"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "главная героиня",
+          "when": "«оригинальная героиня» — героиня книги внутри сюжета"
+        }
+      ]
+    },
+    {
+      "id": "en:male-lead",
+      "src": [
+        "Male lead",
+        "Original male lead",
+        "Second male lead",
+        "Second lead",
+        "Sub male lead"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "главный герой",
+          "when": "«второй главный герой» — second male lead"
+        }
+      ]
+    },
+    {
+      "id": "en:side-character",
+      "src": [
+        "Side character",
+        "Mob character",
+        "Background character",
+        "Supporting character",
+        "NPC",
+        "Extra character"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "второстепенный персонаж / массовка",
+          "when": "персонаж без роли в сюжете"
+        }
+      ]
+    },
+    {
+      "id": "en:original-novel",
+      "src": [
+        "Original novel",
+        "Original story",
+        "Original work",
+        "Original plot"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "оригинальный роман / сюжет оригинала",
+          "when": "книга, в которую попал герой"
+        }
+      ]
+    },
+    {
+      "id": "en:contract-marriage",
+      "src": [
+        "Contract marriage",
+        "Contractual marriage",
+        "Marriage contract",
+        "Marriage of convenience"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "брак по контракту",
+          "when": "romance fantasy"
+        }
+      ]
+    },
+    {
+      "id": "en:magic-tower",
+      "src": [
+        "Magic Tower",
+        "Mage Tower",
+        "Tower Master",
+        "Tower Lord",
+        "Tower of Magic"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Магическая башня",
+          "when": "«Хозяин Башни» — Tower Master"
+        }
+      ]
+    },
+    {
+      "id": "en:circle",
+      "src": [
+        "Circle mage",
+        "1st circle",
+        "2nd circle",
+        "3rd circle",
+        "4th circle",
+        "5th circle",
+        "6th circle",
+        "7th circle",
+        "8th circle",
+        "9th circle"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "круг",
+          "when": "«маг 5-го круга»"
+        }
+      ],
+      "note": "не «кольцо»"
+    },
+    {
+      "id": "en:tribulation",
+      "src": [
+        "Tribulation",
+        "Heavenly Tribulation",
+        "Lightning Tribulation",
+        "Heavenly Lightning",
+        "Tribulation lightning"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "небесная скорбь",
+          "when": "основной вариант"
+        },
+        {
+          "text": "небесное испытание",
+          "when": "если серия так закрепила"
+        }
+      ]
+    },
+    {
+      "id": "en:spirit-stone",
+      "src": [
+        "Spirit stone",
+        "Spirit stones",
+        "Spirit pill",
+        "Elixir",
+        "Pill",
+        "Pills",
+        "Spirit herb"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "духовный камень / пилюля / эликсир",
+          "when": "ресурсы культивации"
+        }
+      ]
+    },
+    {
+      "id": "en:qi-deviation",
+      "src": [
+        "Qi deviation",
+        "Qi Deviation Madness",
+        "Inner demon",
+        "Inner demons",
+        "Heart demon",
+        "Heart devil",
+        "Walking into fire"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "искажение ци / внутренний демон",
+          "when": "срыв при совершенствовании"
+        }
+      ]
+    },
+    {
+      "id": "en:immortal",
+      "src": [
+        "Immortal",
+        "Immortals",
+        "True Immortal",
+        "Celestial",
+        "Celestials",
+        "Immortal realm"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "бессмертный / небожитель",
+          "when": "Immortal / Celestial"
+        }
+      ]
+    },
+    {
+      "id": "en:martial-art",
+      "src": [
+        "Martial art",
+        "Martial arts",
+        "Sword art",
+        "Sword technique",
+        "Movement technique",
+        "Footwork technique",
+        "Secret art",
+        "Martial manual",
+        "Sword manual"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "боевое искусство / техника / манускрипт",
+          "when": "приём, стиль, книга техник (manual)"
+        }
+      ]
+    },
+    {
+      "id": "en:inventory",
+      "src": [
+        "Inventory",
+        "Subspace",
+        "Spatial ring",
+        "Storage ring",
+        "Interspatial ring",
+        "Space ring"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "инвентарь / пространственное кольцо",
+          "when": "игровой инвентарь / уся-артефакт"
+        }
+      ]
+    }
+  ]
+}

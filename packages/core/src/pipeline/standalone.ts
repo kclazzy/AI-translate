@@ -10,7 +10,7 @@ import type { FetchLike, LlmProvider } from '../llm/types';
 import { mergeContext, type ContextUpdate, type TranslationContext } from '../translate/context';
 import { applyForbiddenFixes, findGlossaryHits, findViolations } from '../translate/glossary';
 import { isDegenerate, parseVisionAnswer, tameRuns, type VisionAnswer } from '../translate/parse';
-import { buildSystemPrompt, contextData, visionFullInstruction, visionOcrInstruction, type PromptInput } from '../translate/prompt';
+import { buildSystemPrompt, contextData, visionFullInstruction, visionOcrInstruction, visionPhrasebook, type PromptInput } from '../translate/prompt';
 import { translateBlocks, usageFrom } from '../translate/translator';
 import type { Box, BubbleInfo, PageResult, StageEvent, TextBlock, TextStyle, Usage } from '../types';
 import { bytesToBase64, sha256Hex } from '../util/bytes';
@@ -68,7 +68,7 @@ export function planViews(width: number, height: number): View[] {
 }
 
 function promptInput(config: PipelineConfig, context?: TranslationContext): PromptInput {
-  return { sourceLang: config.sourceLang, targetLang: config.targetLang, profile: config.profile, glossary: config.glossary, context, translateSfx: config.translateSfx };
+  return { sourceLang: config.sourceLang, targetLang: config.targetLang, profile: config.profile, glossary: config.glossary, context, translateSfx: config.translateSfx, ...(config.phrasebook?.enabled ? { phrasebook: config.phrasebook } : {}) };
 }
 
 interface Located {
@@ -97,7 +97,8 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
   const jpeg = await deps.backend.encode(canvas, 'image/jpeg', 0.92);
   const system = buildSystemPrompt(promptInput(config, context));
   const instruction = withTranslation ? visionFullInstruction(dw, dh) : visionOcrInstruction(dw, dh);
-  const data = contextData(promptInput(config, context));
+  // Single call: the page's text is not known yet, so the hints come from the previous pages' lines.
+  const data = [contextData(promptInput(config, context)), withTranslation ? visionPhrasebook(promptInput(config, context)) : ''].filter(Boolean).join('\n\n');
   let room = 6000;
   return withRetry(
     async (attempt) => {

@@ -35,6 +35,7 @@ import { exportPsd, psdTooBig } from '../psd';
 import { usePlatform, useUpdateSettings } from '../platform';
 import { LamaGetButton, lamaModeOf, useLamaDownloaded } from '../lama';
 import { ErrorBox, Field, Switch, toast, useAction } from '../ui';
+import { learnSuggestions, markAsked, rememberPhrase, type LearnSuggestion } from '../phrasebook';
 import { tr } from '@ait/core/i18n';
 
 type Tool = 'select' | 'brush' | 'eraser' | 'inpaint' | 'ocr' | 'picker' | 'crop';
@@ -865,10 +866,12 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     setSaveError(null);
     const p = (async () => {
       try {
-        await onSave({ ...page, blocks: blocksRef.current }, cleaned, px);
+        const savedBlocks = blocksRef.current;
+        await onSave({ ...page, blocks: savedBlocks }, cleaned, px);
         // Edits made while saving stay «unsaved».
         if (editSeq.current === seq) setDirty(false);
         toast(tr('Сохранено'));
+        offerToLearn(savedBlocks);
         return true;
       } catch (e) {
         if (px) pixelsChanged.current = true;
@@ -882,6 +885,43 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     savePromise.current = p;
     return p;
   };
+  // ---- «Запомнить ваш вариант»: the user rewrote a line holding a phrasebook expression ------------
+  /** Blocks as last saved: what the user's changes are measured against. */
+  const lastSaved = useRef<TextBlock[]>(page.blocks);
+  const [learn, setLearnState] = useState<LearnSuggestion[]>([]);
+  const learnRef = useRef<LearnSuggestion[]>([]);
+  const [learnText, setLearnText] = useState('');
+  const setLearn = (next: LearnSuggestion[]) => {
+    if (next[0] !== learnRef.current[0]) setLearnText(next[0]?.text ?? '');
+    learnRef.current = next;
+    setLearnState(next);
+  };
+  const offerToLearn = (saved: TextBlock[]) => {
+    const before = lastSaved.current;
+    lastSaved.current = saved;
+    if (!updateSettings) return;
+    try {
+      const found = learnSuggestions(before, saved, { sourceLang: page.source?.lang || settings.sourceLang, targetLang: page.targetLang, phrasebook: settings.phrasebook, glossary: settings.glossary });
+      // Asked once per spelling in a session, whatever the answer.
+      for (const f of found) markAsked(f);
+      const cur = learnRef.current;
+      const add = found.filter((f) => !cur.some((c) => c.source === f.source && c.src === f.src));
+      if (add.length) setLearn([...cur, ...add]);
+    } catch {
+      // A hint, never a reason for a save to fail.
+    }
+  };
+  const nextLearn = () => setLearn(learnRef.current.slice(1));
+  const acceptLearn = () => {
+    const s = learn[0];
+    const text = (s?.whole ? s.text : learnText).trim();
+    if (s && text && updateSettings && settings.phrasebook) {
+      updateSettings({ phrasebook: rememberPhrase(settings.phrasebook, { source: s.source, src: s.src, text }, 'мой вариант') });
+      toast(tr('Запомнено в разговорнике: «{0}» → «{1}»', s.src, text));
+    }
+    nextLearn();
+  };
+
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const saveRef = useRef(saveNow);
@@ -990,6 +1030,18 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
         </button>
       </div>
       <ErrorBox error={saveError || ocr.error || psd.error} />
+      {learn.length ? (
+        <div className="ait-learn" role="status" data-testid="learn-phrase">
+          <span>{tr('Запомнить ваш вариант для «{0}»?', learn[0].src)}</span>
+          {learn[0].whole ? (
+            <strong>«{learn[0].text}»</strong>
+          ) : (
+            <input className="ait-input" value={learnText} onChange={(e) => setLearnText(e.target.value)} aria-label={tr('Ваш перевод выражения «{0}»', learn[0].src)} title={tr('Оставьте только перевод самого выражения')} />
+          )}
+          <button className="ait-btn small" onClick={acceptLearn} disabled={!learn[0].whole && !learnText.trim()}>{tr('Запомнить')}</button>
+          <button className="ait-btn small ghost" onClick={nextLearn}>{tr('Нет')}</button>
+        </div>
+      ) : null}
       <div className="ait-editor">
         <div className="ait-stage-wrap" ref={wrapRef}>
         {/* The tools live on the page itself, always in reach while scrolling. */}

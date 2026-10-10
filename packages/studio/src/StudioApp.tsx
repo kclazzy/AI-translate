@@ -6,12 +6,13 @@ import { loadBundledFonts } from './fonts';
 import { PlatformContext, UpdateSettingsContext, usePlatform, withSafeFileNames, type StudioPlatform } from './platform';
 import { confirmLeave } from './editor/guard';
 import { ContextEditor, GlossaryEditor } from './panels/GlossaryPanel';
+import { PhrasebookPanel } from './panels/PhrasebookPanel';
 import { HistoryPanel, PrivacyPanel } from './panels/InfoPanels';
 import { ProjectPanel } from './panels/ProjectPanel';
 import { QuickPanel } from './panels/QuickPanel';
 import { SettingsPanel } from './panels/SettingsPanel';
 import { SetupWizard } from './panels/SetupWizard';
-import { Icon, ToastHost } from './ui';
+import { Icon, Segmented, ToastHost } from './ui';
 import { applyUiLangFromSettings, tr } from '@ait/core/i18n';
 
 export type View = 'quick' | 'projects' | 'glossary' | 'settings' | 'privacy' | 'history' | 'editor' | 'welcome';
@@ -79,6 +80,7 @@ export function StudioApp({ platform: hostPlatform, initialView, resultKey, chap
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [view, setView] = useState<View>(initialView ?? (resultKey ? 'editor' : 'quick'));
   const [editKey, setEditKey] = useState<string | undefined>(resultKey);
+  const [glossaryTab, setGlossaryTab] = useState<'glossary' | 'phrasebook'>(() => (new URLSearchParams(location.search).get('tab') === 'phrasebook' ? 'phrasebook' : 'glossary'));
   const saveChain = useRef<Promise<void>>(Promise.resolve());
   // Files shared into the app are handled once: coming back to the tab must not translate them again.
   const [shared, setShared] = useState(sharedFiles);
@@ -187,8 +189,22 @@ export function StudioApp({ platform: hostPlatform, initialView, resultKey, chap
             {view === 'projects' ? <ProjectPanel settings={settings} initialFiles={shared && shared.length > 1 ? shared : undefined} onInitialUsed={() => setShared(undefined)} /> : null}
             {view === 'glossary' ? (
               <>
-                <GlossaryEditor title={tr('Общий глоссарий')} entries={settings.glossary} onChange={(glossary) => update({ glossary })} />
-                <SeriesContexts />
+                <div className="ait-pb-tabs" data-testid="glossary-tabs">
+                  <Segmented
+                    value={glossaryTab}
+                    options={[{ value: 'glossary', label: tr('Глоссарий и контекст') }, { value: 'phrasebook', label: tr('Разговорник') }]}
+                    onChange={setGlossaryTab}
+                    label={tr('Раздел')}
+                  />
+                </div>
+                {glossaryTab === 'glossary' ? (
+                  <>
+                    <GlossaryEditor title={tr('Общий глоссарий')} entries={settings.glossary} onChange={(glossary) => update({ glossary })} />
+                    <SeriesContexts />
+                  </>
+                ) : (
+                  <PhrasebookPanel settings={settings} update={update} />
+                )}
               </>
             ) : null}
             {view === 'welcome' ? (
