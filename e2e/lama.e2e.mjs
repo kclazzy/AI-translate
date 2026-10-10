@@ -1,9 +1,10 @@
 // LaMa in the browser: with «Дорисовка фона — в браузере» and the model in the cache, text written
 // over artwork is redrawn by the model (here a tiny stand-in model that paints the hole grey).
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import puppeteer from 'puppeteer-core';
 
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -16,6 +17,29 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ` — ${detail}` : ''}`);
   if (!ok && process.env.GITHUB_ACTIONS) console.log(`::error title=e2e lama: ${name}::${String(detail).slice(0, 500)}`);
 };
+
+// The ONNX Runtime .wasm is downloaded on demand, not shipped: no big .wasm in the build.
+const bigWasm = (dir) => {
+  const out = [];
+  const walk = (d) => {
+    for (const f of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, f.name);
+      if (f.isDirectory()) walk(p);
+      else if (f.name.endsWith('.wasm') && statSync(p).size > 1_000_000) out.push(p);
+    }
+  };
+  walk(dir);
+  return out;
+};
+for (const d of ['dist', 'dist-firefox']) {
+  const dir = join(ROOT, 'apps/extension', d);
+  if (existsSync(dir)) check(`${d} has no .wasm over 1 MB`, !bigWasm(dir).length, bigWasm(dir).join(', '));
+}
+// The runtime the extension fetches from jsDelivr: served from node_modules (offline).
+const ortDir = dirname(createRequire(join(ROOT, 'apps/extension/package.json')).resolve('onnxruntime-web'));
+const ORT_VERSION = JSON.parse(readFileSync(join(ortDir, '../package.json'), 'utf8')).version;
+const ORT_WASM_URL = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/ort-wasm-simd-threaded.jsep.wasm`;
+const wasmBytes = readFileSync(join(ortDir, 'ort-wasm-simd-threaded.jsep.wasm'));
 
 const ext = join(tmpdir(), 'ait-ext-lama');
 if (existsSync(ext)) rmSync(ext, { recursive: true });
@@ -103,9 +127,10 @@ try {
   const studio = await browser.newPage();
   await studio.goto(`chrome-extension://${extId}/studio.html?view=history`);
   const model = readFileSync(new URL('./fixtures/fake-lama.onnx', import.meta.url)).toString('base64');
-  await studio.evaluate(async (m) => {
+  await studio.evaluate(async (m, w, wUrl) => {
     const bytes = Uint8Array.from(atob(m), (c) => c.charCodeAt(0));
     await (await caches.open('ait-models')).put('https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx', new Response(bytes));
+    await (await caches.open('ait-models')).put(wUrl, new Response(Uint8Array.from(atob(w), (c) => c.charCodeAt(0))));
     const db = await new Promise((res) => {
       const r = indexedDB.open('ai-translate', 1);
       r.onsuccess = () => res(r.result);
@@ -126,7 +151,7 @@ try {
     s.lamaMode = 'browser';
     store.put(s, 'settings');
     await new Promise((r) => (tx.oncomplete = r));
-  }, model);
+  }, model, wasmBytes.toString('base64'), ORT_WASM_URL);
 
   const tab = await browser.newPage();
   await tab.goto('http://127.0.0.1:18151/');
@@ -195,8 +220,8 @@ try {
       store.put(s, 'settings');
       await new Promise((r) => (tx.oncomplete = r));
     }, patch);
-  const modelCached = () => studio.evaluate(async (u) => !!(await (await caches.open('ait-models')).match(u)), LAMA);
-  const dropModel = () => studio.evaluate(async (u) => (await caches.open('ait-models')).delete(u), LAMA);
+  const modelCached = () => studio.evaluate(async (urls) => (await Promise.all(urls.map(async (u) => !!(await (await caches.open('ait-models')).match(u))))).every(Boolean), [LAMA, ORT_WASM_URL]);
+  const dropModel = () => studio.evaluate(async (urls) => Promise.all(urls.map(async (u) => (await caches.open('ait-models')).delete(u))), [LAMA, ORT_WASM_URL]);
   /** Texts and labels on a page, closed shadow roots included (our page UI lives there). */
   const pageTexts = async (p) => {
     const c = await p.target().createCDPSession();
@@ -231,11 +256,14 @@ try {
     await c.detach();
     return !!found;
   };
-  /** The model download is answered with the stand-in model. */
+  /** The model download is answered with the stand-in model, the runtime with the real .wasm. */
+  const fetched = new Set();
   const serveModel = async (p) => {
     await p.setRequestInterception(true);
     p.on('request', (r) => {
-      if (r.url().startsWith('https://huggingface.co/')) void r.respond({ status: 200, headers: { 'access-control-allow-origin': '*', 'content-length': String(modelBytes.length) }, contentType: 'application/octet-stream', body: modelBytes });
+      const body = r.url() === ORT_WASM_URL ? wasmBytes : r.url().startsWith('https://huggingface.co/') ? modelBytes : null;
+      if (body) fetched.add(r.url() === ORT_WASM_URL ? 'wasm' : 'model');
+      if (body) void r.respond({ status: 200, headers: { 'access-control-allow-origin': '*', 'content-length': String(body.length) }, contentType: 'application/octet-stream', body });
       else void r.continue();
     });
   };
@@ -307,6 +335,7 @@ try {
   const ready = await sp.waitForSelector('[data-testid=lama-ready]', { timeout: 30000 }).catch(() => null);
   const s1 = await readSettings();
   check('«Скачать и включить» downloads the model and sets LaMa to the browser', !!ready && s1.lamaMode === 'browser' && (await modelCached()), `mode ${s1.lamaMode}`);
+  check('the ONNX Runtime .wasm is downloaded with the model', fetched.has('wasm') && fetched.has('model'), [...fetched].join(', '));
   await sp.close();
 
   // Welcome: the optional step downloads LaMa too.

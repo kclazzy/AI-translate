@@ -145,6 +145,8 @@ function main() {
     const qa = result.page.blocks.flatMap((b) => (b.qa?.issues ?? []).map((q) => `• ${q.code ? tr(q.code, ...(q.args ?? [])) : q.note}${b.qa?.before !== undefined ? tr(' (исправлено)') : ''}`));
     it.overlay.setQa(qa.length, qa.slice(0, 8).join('\n'));
     it.overlay.setInfo(pageInfo(result));
+    // No lettering found, the model was not asked: say so (⟳ translates it anyway).
+    if (result.page.skippedNoText) it.overlay.setSkipped(tr('Текста не найдено'));
     it.overlay.position();
     if (artPlain(result)) void offerLama();
   }
@@ -202,10 +204,11 @@ function main() {
 
   /** The whole chapter (or page): pictures, model time, tokens and cost — shown when it is done. */
   function chapterStats(list: Item[]): string {
-    let ms = 0, tokens = 0, cost = 0, cached = 0;
+    let ms = 0, tokens = 0, cost = 0, cached = 0, skipped = 0;
     for (const it of list) {
       const r = it.result;
       if (!r) continue;
+      if (r.page.skippedNoText) skipped++;
       if (r.cached) cached++;
       else ms += r.page.timings.totalMs ?? 0;
       for (const u of r.page.usage) {
@@ -217,6 +220,7 @@ function main() {
     const time = min >= 1 ? tr('{0} мин', fmtNumber(min, { maximumFractionDigits: 1 })) : tr('{0} с', fmtNumber(ms / 1000, { maximumFractionDigits: 0 }));
     const parts = [tr('время модели {0}', time), tr('токенов {0}', fmtNumber(tokens)), fmtUsd(cost)];
     if (cached) parts.push(tr('из кэша {0}', cached));
+    if (skipped) parts.push(tr('без текста {0}', skipped));
     return parts.join(' · ');
   }
 
@@ -226,15 +230,18 @@ function main() {
     const tokIn = u.reduce((a, x) => a + x.inputTokens, 0);
     const tokOut = u.reduce((a, x) => a + x.outputTokens, 0);
     const cost = u.reduce((a, x) => a + x.costUsd, 0);
+    const fromCache = u.reduce((a, x) => a + (x.cachedTokens ?? 0), 0);
     const models = [...new Set(u.map((x) => x.model))].join(', ');
     const sec = r.page.timings.totalMs ? fmtNumber(r.page.timings.totalMs / 1000, { maximumFractionDigits: 1 }) : '—';
     const lines = [
       tr('Время: {0} с', sec),
       tr('Токены: {0} на входе, {1} на выходе', fmtNumber(tokIn), fmtNumber(tokOut)),
+      fromCache ? tr('Из кэша провайдера: {0} токенов', fmtNumber(fromCache)) : '',
       tr('Стоимость: {0}', fmtUsd(cost, 4)),
       models ? tr('Модель: {0}', models) : '',
       tr('Текстов на картинке: {0}', r.page.blocks.length),
       artPlain(r) ? tr('Текст поверх рисунка: {0} — фон без LaMa', r.page.artText) : '',
+      r.page.skippedNoText ? tr('Пропущена: текста не найдено') : '',
       r.cached ? tr('Взято из кэша') : '',
     ];
     return lines.filter(Boolean).join('\n');
@@ -651,14 +658,17 @@ function main() {
         break;
       }
       case 'result-changed':
+        // Edited in the editor, or fixed by the batched translation check after it was shown:
+        // fetch the stored result again and redraw that picture (with its ⓘ and 🔍 notes).
         for (const it of items.values()) {
-          if (it.result?.key !== msg.key) continue;
+          if (it.result?.key !== msg.key || it.status !== 'done') continue;
           void send<RenderedTiles | null>({ type: 'get-result', key: msg.key })
             .then(async (r) => {
-              if (!r) return;
+              if (!r || items.get(it.id) !== it || it.result?.key !== msg.key) return;
               const tiles = await tilesOf(r);
-              it.result = { ...r, tiles: [], tilesOmitted: undefined };
-              it.overlay.setTiles(tiles, langsOf(r));
+              if (items.get(it.id) !== it) return;
+              // Keep how it was shown (cached or not) for the statistics.
+              showResult(it, { ...r, tiles, tilesOmitted: undefined, cached: it.result.cached });
             })
             .catch(() => undefined);
         }

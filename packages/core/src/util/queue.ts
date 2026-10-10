@@ -4,6 +4,12 @@ export interface QueueTask<T> {
   key: string;
   priority: number;
   run: (signal: AbortSignal) => Promise<T>;
+  /**
+   * Work that can be done before the task's turn, while the queue is full (decode the next picture
+   * while the model works on the current one, see TranslateService.prefetch). Called for the next
+   * waiting task only, one at a time: at most one task is prepared ahead. Failures are ignored.
+   */
+  prepare?: (signal: AbortSignal) => Promise<void>;
 }
 
 interface Entry<T> extends QueueTask<T> {
@@ -13,6 +19,7 @@ interface Entry<T> extends QueueTask<T> {
   reject: (e: unknown) => void;
   started: boolean;
   seq: number;
+  prepareStarted?: boolean;
 }
 
 export interface QueueStats {
@@ -32,6 +39,7 @@ export class TaskQueue {
   private seq = 0;
   private stats: QueueStats = { pending: 0, running: 0, done: 0, failed: 0 };
   private listeners = new Set<(s: QueueStats) => void>();
+  private preparing = false;
 
   constructor(public concurrency = 2) {}
 
@@ -147,6 +155,23 @@ export class TaskQueue {
           this.pump();
         });
     }
+    this.lookahead();
+  }
+
+  /** The queue is full: prepare the task that starts next (one at a time). */
+  private lookahead() {
+    if (this.preparing || this.running < this.concurrency) return;
+    const e = this.next();
+    if (!e?.prepare || e.prepareStarted) return;
+    e.prepareStarted = true;
+    this.preparing = true;
+    Promise.resolve()
+      .then(() => e.prepare!(e.controller.signal))
+      .catch(() => undefined)
+      .finally(() => {
+        this.preparing = false;
+        this.lookahead();
+      });
   }
 }
 

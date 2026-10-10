@@ -43,14 +43,43 @@ export interface PipelineConfig {
   lama?: 'engine' | 'browser';
   /** Разговорник: hints for recurring expressions (see translate/phrasebook). */
   phrasebook?: PhrasebookSettings;
+  /** Pictures without lettering (local check) are not sent to the model; default on. */
+  skipEmptyPages?: boolean;
+  /** Short pages are reviewed in batches, tiny ones by rules only (see settings.qaBatch). */
+  qaBatch?: boolean;
 }
 
-function withKeepAlive(p: ProviderConfig | undefined, s: AppSettings): ProviderConfig | null {
+/** Longest side of the picture sent to the vision model, by quality. */
+export const MAX_SIDE: Record<Quality, number> = { fast: 1280, balanced: 1568, best: 2048 };
+
+/**
+ * Ollama context window for one model, decided once from the settings and never changed between
+ * requests (a different num_ctx makes Ollama load the model again). It must hold the picture, the
+ * prompt and the answer: picture tokens (28 px patches of a page-shaped picture at the longest
+ * side) + the prompt (instructions, glossary, series context, ≈ 2500) + a dense page's answer
+ * (≈ 3500; a longer answer only gets more output room, see readView), rounded up to 2 K. Never
+ * less than the video-memory default, and at most what the card can hold.
+ */
+export function contextFor(opts: { vramGb: number; quality: Quality; maxSide?: number; glossary?: number; image: boolean }): number {
+  const base = opts.vramGb >= 16 ? 16384 : 8192;
+  const cap = opts.vramGb >= 24 ? 32768 : opts.vramGb >= 16 ? 24576 : opts.vramGb >= 12 ? 16384 : 12288;
+  const side = Math.min(MAX_SIDE[opts.quality], opts.maxSide ?? Infinity);
+  const imageTokens = opts.image ? Math.ceil((side * (side / 1.4)) / (28 * 28)) : 0;
+  const prompt = 2500 + Math.min(150, opts.glossary ?? 0) * 20;
+  const need = Math.ceil((imageTokens + prompt + 3500) / 2048) * 2048;
+  return Math.max(base, Math.min(cap, need));
+}
+
+function withKeepAlive(p: ProviderConfig | undefined, s: AppSettings, quality: Quality, visionModel: string | undefined): ProviderConfig | null {
   // Bigger context only with plenty of video memory: on 8 GB it would push the model partly into RAM.
   if (!p) return null;
   // Settings of the model's family from models.json (or the built-in rules).
   const fam = familyFor(p.model);
-  return { ...p, noThinking: p.noThinking ?? (isLocalProvider(p) ? fam?.noThinking : undefined), keepAliveMin: s.gpuKeepAliveMin ?? DEFAULT_KEEP_ALIVE_MIN, numCtx: fam?.numCtx ?? ((s.gpuVramGb ?? 12) >= 16 ? 16384 : 8192) };
+  // One window per model: the model that reads pictures gets room for one in every request (also
+  // its text requests: translation, review), so the same model never gets two sizes.
+  const glossary = s.glossary.filter((g) => g.enabled).length;
+  const numCtx = fam?.numCtx ?? contextFor({ vramGb: s.gpuVramGb ?? 12, quality, maxSide: fam?.maxSide, glossary, image: p.model === visionModel });
+  return { ...p, noThinking: p.noThinking ?? (isLocalProvider(p) ? fam?.noThinking : undefined), keepAliveMin: s.gpuKeepAliveMin ?? DEFAULT_KEEP_ALIVE_MIN, numCtx, fixedCtx: true };
 }
 
 /** Fast mode applies when the picture is read by a model on this computer / network. */
@@ -64,18 +93,20 @@ export const DEFAULT_KEEP_ALIVE_MIN = 5;
 
 export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): PipelineConfig {
   setCatalog(s.modelCatalog);
+  const quality: Quality = fastLocalActive(s) ? 'fast' : s.quality;
+  const visionModel = s.pipeline === 'engine' ? undefined : providerById(s, s.visionProviderId)?.model;
   return {
     mode: s.pipeline,
     privacy: s.privacy,
     sourceLang: s.sourceLang,
     targetLang: s.targetLang,
-    quality: fastLocalActive(s) ? 'fast' : s.quality,
+    quality,
     profile: activeProfile(s, seriesKey),
     glossary: s.glossary,
     translateSfx: s.translateSfx,
     sfxStyle: s.sfxStyle,
-    vision: withKeepAlive(providerById(s, s.visionProviderId), s),
-    translator: withKeepAlive(providerById(s, s.translationProviderId), s),
+    vision: withKeepAlive(providerById(s, s.visionProviderId), s, quality, visionModel),
+    translator: withKeepAlive(providerById(s, s.translationProviderId), s, quality, visionModel),
     engine: s.engine,
     qa: fastLocalActive(s) && (s.qaMode ?? 'fix') !== 'off' ? 'rules' : s.qaMode ?? 'fix',
     twoStep: s.twoStepTranslation ?? !(fastLocalActive(s) || s.quality === 'fast'),
@@ -84,6 +115,8 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     inpaintExpand: s.inpaintExpand,
     phrasebook: s.phrasebook,
     lama: (s.lamaMode ?? (s.lamaEngine ? 'engine' : 'off')) === 'off' ? undefined : (s.lamaMode ?? 'engine') as 'engine' | 'browser',
+    skipEmptyPages: s.skipEmptyPages ?? true,
+    qaBatch: s.qaBatch || undefined,
   };
 }
 
@@ -111,6 +144,9 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     ie: c.inpaintExpand,
     lama: c.lama ?? (c.lamaEngine ? 'engine' : undefined),
     pb: c.phrasebook ? await phrasebookHash(c.phrasebook) : undefined,
+    // Only the non-default values: results made before these settings existed keep their keys.
+    nse: c.skipEmptyPages === false ? 1 : undefined,
+    qb: c.qaBatch ? 1 : undefined,
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);
 }

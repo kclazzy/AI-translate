@@ -53,17 +53,20 @@ export class OpenAICompatibleProvider implements LlmProvider {
       if (!res.ok) throw await httpError(res, this.config.label, this.config.baseUrl, this.config.model);
       const json = (await res.json()) as {
         choices?: { message?: { content?: string | { type: string; text?: string }[] }; finish_reason?: string }[];
-        usage?: { prompt_tokens?: number; completion_tokens?: number };
+        usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
         model?: string;
       };
       const content = json.choices?.[0]?.message?.content;
       const text = stripThinking(typeof content === 'string' ? content : Array.isArray(content) ? content.map((p) => p.text ?? '').join('') : '');
       if (!text) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'Empty completion' });
+      // OpenAI (and OpenRouter) cache identical prompt prefixes automatically; cached tokens are part of prompt_tokens.
+      const cached = json.usage?.prompt_tokens_details?.cached_tokens ?? 0;
       return {
         text,
         inputTokens: json.usage?.prompt_tokens ?? 0,
         outputTokens: json.usage?.completion_tokens ?? 0,
         model: json.model ?? this.config.model,
+        ...(cached > 0 ? { cachedInputTokens: cached } : {}),
         ...(json.choices?.[0]?.finish_reason === 'length' ? { truncated: true } : {}),
       };
     } finally {
@@ -107,11 +110,11 @@ export class OpenAICompatibleProvider implements LlmProvider {
         return (await res.json()) as { message?: { content?: string }; prompt_eval_count?: number; eval_count?: number; eval_duration?: number; model?: string; done_reason?: string };
       };
       let json = await ask();
-      // The picture and the prompt filled the context window, so the answer was cut off mid-way:
-      // ask once more with a window twice as large (the memory fallback handles a card that is too small).
+      // The answer was cut off: ask once more with twice the output room. num_ctx is never changed
+      // (a different num_ctx makes Ollama reload the model, which costs far more than the retry).
       const opts = body.options as { num_ctx: number; num_predict: number };
-      if (json.done_reason === 'length' && (json.eval_count ?? 0) < opts.num_predict * 0.9 && opts.num_ctx < 32768) {
-        opts.num_ctx *= 2;
+      if (json.done_reason === 'length' && opts.num_predict < 16384) {
+        opts.num_predict = Math.min(16384, opts.num_predict * 2);
         json = await ask();
       }
       const text = stripThinking(json.message?.content ?? '');

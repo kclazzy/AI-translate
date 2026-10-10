@@ -1,4 +1,5 @@
 import type { Inpainter, PixelData } from '@ait/core';
+import { tr } from '@ait/core/i18n';
 
 /**
  * LaMa in the browser: the same model the local engine uses (Carve/LaMa-ONNX, 512×512), run with
@@ -9,19 +10,34 @@ export const LAMA_URL = 'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lam
 export const LAMA_CACHE = 'ait-models';
 const SIZE = 512;
 
+/**
+ * The ONNX Runtime engine (.wasm, ~21 MB) is not shipped with the extension: it is downloaded with
+ * the model from jsDelivr, pinned to the exact onnxruntime-web version the extension is built with,
+ * and checked against the SHA-256 of that file (both taken from node_modules at build time).
+ */
+export const ORT_VERSION = __ORT_VERSION__;
+export const ORT_WASM_SHA256 = __ORT_WASM_SHA256__;
+export const ORT_WASM_URL = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/ort-wasm-simd-threaded.jsep.wasm`;
+const ORT_WASM_SIZE = __ORT_WASM_SIZE__;
+
 export async function lamaDownloaded(): Promise<boolean> {
   try {
-    return !!(await (await caches.open(LAMA_CACHE)).match(LAMA_URL));
+    const cache = await caches.open(LAMA_CACHE);
+    return !!(await cache.match(LAMA_URL)) && !!(await cache.match(ORT_WASM_URL));
   } catch {
     return false;
   }
 }
 
-/** Download the model into the cache, reporting progress (0–1). */
-export async function downloadLama(progress: (share: number) => void, signal?: AbortSignal): Promise<void> {
-  const res = await fetch(LAMA_URL, { signal });
+async function sha256(buf: ArrayBuffer): Promise<string> {
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', buf))].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Fetch a file whole, reporting the bytes received. */
+async function fetchAll(url: string, onBytes: (got: number, total: number) => void, guess: number, signal?: AbortSignal): Promise<Blob> {
+  const res = await fetch(url, { signal });
   if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-  const total = Number(res.headers.get('content-length')) || 208_000_000;
+  const total = Number(res.headers.get('content-length')) || guess;
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let got = 0;
@@ -30,15 +46,38 @@ export async function downloadLama(progress: (share: number) => void, signal?: A
     if (done) break;
     chunks.push(value);
     got += value.length;
-    progress(Math.min(0.99, got / total));
+    onBytes(got, total);
   }
-  const blob = new Blob(chunks as BlobPart[], { type: 'application/octet-stream' });
-  await (await caches.open(LAMA_CACHE)).put(LAMA_URL, new Response(blob, { headers: { 'content-length': String(blob.size) } }));
+  return new Blob(chunks as BlobPart[], { type: 'application/octet-stream' });
+}
+
+/** Download the runtime and the model into the cache, reporting progress (0–1) over both. */
+export async function downloadLama(progress: (share: number) => void, signal?: AbortSignal): Promise<void> {
+  const cache = await caches.open(LAMA_CACHE);
+  const MODEL_GUESS = 208_000_000;
+  let wasmTotal = ORT_WASM_SIZE;
+  let wasmGot = 0;
+  let modelTotal = MODEL_GUESS;
+  let modelGot = 0;
+  const report = () => progress(Math.min(0.99, (wasmGot + modelGot) / (wasmTotal + modelTotal)));
+  if (!(await cache.match(ORT_WASM_URL))) {
+    const wasm = await fetchAll(ORT_WASM_URL, (got, total) => ((wasmGot = got), (wasmTotal = total), report()), ORT_WASM_SIZE, signal);
+    if ((await sha256(await wasm.arrayBuffer())) !== ORT_WASM_SHA256) throw new Error(tr('файл движка ONNX Runtime скачался с ошибкой или подменён (контрольная сумма не совпала). Попробуйте ещё раз позже.'));
+    await cache.put(ORT_WASM_URL, new Response(wasm, { headers: { 'content-length': String(wasm.size) } }));
+  }
+  wasmGot = wasmTotal;
+  report();
+  if (!(await cache.match(LAMA_URL))) {
+    const blob = await fetchAll(LAMA_URL, (got, total) => ((modelGot = got), (modelTotal = total), report()), MODEL_GUESS, signal);
+    await cache.put(LAMA_URL, new Response(blob, { headers: { 'content-length': String(blob.size) } }));
+  }
   progress(1);
 }
 
 export async function deleteLama(): Promise<void> {
-  await (await caches.open(LAMA_CACHE)).delete(LAMA_URL);
+  const cache = await caches.open(LAMA_CACHE);
+  await cache.delete(LAMA_URL);
+  await cache.delete(ORT_WASM_URL);
   session = null;
 }
 
@@ -47,11 +86,15 @@ let session: Promise<{ ort: Ort; s: import('onnxruntime-web').InferenceSession; 
 
 function load() {
   session ??= (async () => {
-    const hit = await (await caches.open(LAMA_CACHE)).match(LAMA_URL);
-    if (!hit) throw new Error('LaMa is not downloaded');
+    const cache = await caches.open(LAMA_CACHE);
+    const hit = await cache.match(LAMA_URL);
+    const runtime = await cache.match(ORT_WASM_URL);
+    if (!hit || !runtime) throw new Error('LaMa is not downloaded');
     const ort = await import('onnxruntime-web/webgpu');
-    // The runtime (.wasm) is shipped with the extension; no threads: the page is not cross-origin isolated.
+    // The runtime (.wasm) comes from the cache as bytes: no URL to fetch, nothing for the CSP to block.
+    // No threads: the page is not cross-origin isolated.
     ort.env.wasm.numThreads = 1;
+    ort.env.wasm.wasmBinary = await runtime.arrayBuffer();
     const bytes = new Uint8Array(await hit.arrayBuffer());
     const gpu = typeof navigator !== 'undefined' && 'gpu' in navigator;
     let s: import('onnxruntime-web').InferenceSession;

@@ -19,7 +19,7 @@ export interface RenderedTiles {
   width: number;
   height: number;
   tiles: { y: number; h: number; dataUrl: string }[];
-  page: Pick<PageResult, 'blocks' | 'timings' | 'usage' | 'pipeline' | 'stripLang' | 'artText' | 'artRedrawn'>;
+  page: Pick<PageResult, 'blocks' | 'timings' | 'usage' | 'pipeline' | 'stripLang' | 'artText' | 'artRedrawn' | 'skippedNoText'>;
   cached: boolean;
   /**
    * The tiles were too big for one message (browsers refuse messages over 64 MiB): `tiles` is
@@ -123,7 +123,9 @@ export type FromOffscreen =
   | { source: 'offscreen'; type: 'stage'; jobId: string; tabId: number; event: StageEvent }
   | { source: 'offscreen'; type: 'done'; jobId: string; tabId: number; result: RenderedTiles }
   | { source: 'offscreen'; type: 'error'; jobId: string; tabId: number; error: SerializedError }
-  | { source: 'offscreen'; type: 'save'; tabId: number; url: string; filename: string };
+  | { source: 'offscreen'; type: 'save'; tabId: number; url: string; filename: string }
+  /** A stored result changed in the background (batched translation check): redraw it where shown. */
+  | { source: 'offscreen'; type: 'result-changed'; key: string };
 
 /** An error thrown in the offscreen document, sent back as the response (not a normal result). */
 export interface OffscreenFailure {

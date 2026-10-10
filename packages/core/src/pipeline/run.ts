@@ -7,12 +7,13 @@ import { runEnginePipeline } from './engine';
 import { runStandalonePipeline, type PipelineOutput, type PipelineRequest, type StandaloneDeps } from './standalone';
 import { createProvider } from '../llm/presets';
 import { assertPrivacy } from '../llm/privacy';
-import { qaPage } from '../translate/qa';
+import { qaBatchPlan, qaPage } from '../translate/qa';
 
-export async function runPipeline(req: PipelineRequest, deps: StandaloneDeps): Promise<PipelineOutput> {
-  const out = req.config.mode === 'engine' ? await runEnginePipeline(req, deps) : await runStandalonePipeline(req, deps);
+export async function runPipeline(req: PipelineRequest & { batchReview?: boolean }, deps: StandaloneDeps): Promise<PipelineOutput & { reviewLater?: boolean }> {
+  const out: PipelineOutput & { reviewLater?: boolean } = req.config.mode === 'engine' ? await runEnginePipeline(req, deps) : await runStandalonePipeline(req, deps);
   const mode = req.config.qa ?? 'off';
   if (mode !== 'off' && !req.generic && out.page.blocks.length) {
+    const t0 = performance.now();
     // Check the translation (linguistic + semantic) with the model that translated the text.
     req.onStage?.({ stage: 'checking' });
     const cfg = req.config.translator ?? req.config.vision;
@@ -25,8 +26,18 @@ export async function runPipeline(req: PipelineRequest, deps: StandaloneDeps): P
         provider = null;
       }
     }
+    // Batched check (settings → qaBatch, not in "best" quality): 1–2 short bubbles get the rule
+    // checks only; a short page gets them now and the model's review later, together with other
+    // short pages of the chapter (the caller collects them: `batchReview`).
+    const plan = req.config.qaBatch && req.config.quality !== 'best' ? qaBatchPlan(out.page.blocks) : 'page';
+    if (plan === 'rules') provider = null;
+    else if (plan === 'batch' && req.batchReview && provider && mode !== 'rules') {
+      provider = null;
+      out.reviewLater = true;
+    }
     const usage = await qaPage(out.page.blocks, { provider, mode, targetLang: req.config.targetLang, glossary: req.config.glossary, context: out.context ?? req.context, signal: req.signal });
     out.page.usage = [...out.page.usage, ...usage];
+    out.page.timings = { ...out.page.timings, qaMs: Math.round(performance.now() - t0) };
   }
   return out;
 }

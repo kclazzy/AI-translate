@@ -59,3 +59,52 @@ export const browserBackend: ImageBackend = {
 export const MAX_CANVAS_SIDE = 16384;
 export const MAX_PIXELS = 150_000_000;
 export const TILE_HEIGHT = 4096;
+
+const losslessProbe = new WeakMap<ImageBackend, Promise<boolean>>();
+
+/**
+ * Does this backend write WebP without loss at quality 1? Chrome (and WebViews built on it) switch
+ * to lossless WebP at exactly 1.0; other browsers may encode lossy or fall back to PNG. Checked once
+ * per backend by a round trip of a small picture with sharp edges and noise: only an exact copy of
+ * every pixel counts. Stored tiles use WebP only then, so the quality never drops.
+ */
+export function losslessWebp(backend: ImageBackend): Promise<boolean> {
+  let p = losslessProbe.get(backend);
+  if (!p) {
+    p = (async () => {
+      try {
+        const w = 48;
+        const h = 40;
+        const c = backend.createCanvas(w, h);
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        const id = ctx.createImageData(w, h);
+        let seed = 12345;
+        for (let i = 0; i < w * h; i++) {
+          seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+          const edge = (i % w) % 7 < 2 ? 0 : 255;
+          id.data[i * 4] = edge ^ (seed & 15);
+          id.data[i * 4 + 1] = (seed >> 8) & 255;
+          id.data[i * 4 + 2] = (seed >> 16) & 255;
+          id.data[i * 4 + 3] = 255;
+        }
+        ctx.putImageData(id, 0, 0);
+        const want = ctx.getImageData(0, 0, w, h).data as Uint8ClampedArray;
+        const bytes = await backend.encode(c, 'image/webp', 1);
+        // RIFF....WEBP: a browser without a WebP encoder hands back PNG.
+        if (!(bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[8] === 0x57 && bytes[9] === 0x45)) return false;
+        const d = await backend.decode(bytes, 'image/webp');
+        const c2 = backend.createCanvas(w, h);
+        const ctx2 = c2.getContext('2d', { willReadFrequently: true });
+        ctx2.drawImage(d.source, 0, 0);
+        d.close?.();
+        const got = ctx2.getImageData(0, 0, w, h).data as Uint8ClampedArray;
+        for (let i = 0; i < want.length; i++) if (want[i] !== got[i]) return false;
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    losslessProbe.set(backend, p);
+  }
+  return p;
+}

@@ -26,6 +26,8 @@ export interface ProviderConfig {
   keepAliveMin?: number;
   /** Ollama: context window (tokens). Bigger needs more video memory. */
   numCtx?: number;
+  /** Ollama: never change num_ctx between requests (changing it reloads the model). Always true now; kept for settings. */
+  fixedCtx?: boolean;
 }
 
 export type ContentPart = { type: 'text'; text: string } | { type: 'image'; mime: string; base64: string };
@@ -53,6 +55,13 @@ export interface CompletionResult {
   tokensPerSecond?: number;
   /** The answer hit the output limit (finish_reason "length", stop_reason "max_tokens"): it is cut off. */
   truncated?: boolean;
+  /**
+   * Prompt tokens served from the provider's prompt cache (Anthropic cache_read_input_tokens,
+   * OpenAI prompt_tokens_details.cached_tokens). Already included in inputTokens; billed at ~10% of the input price.
+   */
+  cachedInputTokens?: number;
+  /** Prompt tokens written to the cache (Anthropic cache_creation_input_tokens). Already included in inputTokens; billed at 125%. */
+  cacheWriteTokens?: number;
 }
 
 export interface LlmProvider {

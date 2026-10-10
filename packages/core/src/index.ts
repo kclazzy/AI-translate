@@ -26,6 +26,7 @@ export * from './translate/translator';
 export * from './image/backend';
 export * from './image/tiled';
 export * from './image/clean';
+export * from './image/textcheck';
 export * from './typeset/layout';
 export * from './render/style';
 export * from './render/render';

@@ -1,11 +1,11 @@
 import { AppError } from '../errors';
 import { estimateCost } from '../llm/presets';
-import type { ChatMessage, LlmProvider } from '../llm/types';
+import type { ChatMessage, CompletionResult, LlmProvider } from '../llm/types';
 import type { TextType, Usage } from '../types';
 import { withRetry } from '../util/retry';
 import { applyForbiddenFixes, findGlossaryHits, findViolations, type GlossaryHit } from './glossary';
 import { isDegenerate, parseTranslationAnswer, tameRuns } from './parse';
-import { buildSystemPrompt, contextData, phrasebookData, repairInstruction, textTranslateInstruction, type BlockForTranslation, type PromptInput } from './prompt';
+import { buildSystemPrompt, contextData, glossaryExtra, phrasebookData, repairInstruction, textTranslateInstruction, type BlockForTranslation, type PromptInput } from './prompt';
 
 export interface TranslateBlocksResult {
   /** lowConfidence: the translation came from an answer that was cut off or had to be mended. */
@@ -15,8 +15,17 @@ export interface TranslateBlocksResult {
   usage: Usage[];
 }
 
-export function usageFrom(provider: LlmProvider, model: string, input: number, output: number): Usage {
-  return { provider: provider.config.label, model, inputTokens: input, outputTokens: output, costUsd: estimateCost(provider.config, input, output) };
+/** Tokens and price of one answer (prompt-cache reads and writes priced apart, see estimateCost). */
+export function usageFrom(provider: LlmProvider, res: Pick<CompletionResult, 'model' | 'inputTokens' | 'outputTokens' | 'cachedInputTokens' | 'cacheWriteTokens'>): Usage {
+  const cached = res.cachedInputTokens ?? 0;
+  return {
+    provider: provider.config.label,
+    model: res.model,
+    inputTokens: res.inputTokens,
+    outputTokens: res.outputTokens,
+    costUsd: estimateCost(provider.config, res.inputTokens, res.outputTokens, cached, res.cacheWriteTokens ?? 0),
+    ...(cached > 0 ? { cachedTokens: cached } : {}),
+  };
 }
 
 /**
@@ -40,8 +49,9 @@ export async function translateBlocks(
   const hintStrings: Record<string, string[]> = {};
   for (const [id, hits] of hitsByBlock) hintStrings[id] = hits.map((h) => `${h.entry.source} → ${h.entry.target}`);
 
-  const system = buildSystemPrompt(input, [...allHits.values()]);
-  const user = textTranslateInstruction(blocks, hintStrings, contextData(input), phrasebookData(input, blocks));
+  // Same system prompt for every page (cacheable prefix); this page's terms go into the message.
+  const system = buildSystemPrompt(input);
+  const user = textTranslateInstruction(blocks, hintStrings, contextData(input), phrasebookData(input, blocks), glossaryExtra(input, [...allHits.values()]));
   const usage: Usage[] = [];
 
   const retries = opts.retries ?? 2;
@@ -52,7 +62,7 @@ export async function translateBlocks(
       const last = attempt >= retries;
       const messages: ChatMessage[] = [{ role: 'user', content: user }];
       const first = await provider.complete({ system, messages, json: true, signal: opts.signal, maxTokens: room });
-      usage.push(usageFrom(provider, first.model, first.inputTokens, first.outputTokens));
+      usage.push(usageFrom(provider, first));
       if (first.truncated && !last) {
         room = Math.min(16384, room * 2);
         throw new AppError('TRANSLATION_INVALID_OUTPUT', { retryable: true, detail: 'Answer cut off at the output limit' });
@@ -66,7 +76,7 @@ export async function translateBlocks(
         messages.push({ role: 'assistant', content: first.text }, { role: 'user', content: repairInstruction(problems) });
         try {
           const second = await provider.complete({ system, messages, json: true, signal: opts.signal, maxTokens: room });
-          usage.push(usageFrom(provider, second.model, second.inputTokens, second.outputTokens));
+          usage.push(usageFrom(provider, second));
           const repaired = parseTranslationAnswer(second.text, blocks);
           const secondLow = !!(repaired.repaired || second.truncated);
           for (const id of repaired.translations.keys()) {

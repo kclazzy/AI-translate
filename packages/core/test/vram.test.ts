@@ -118,7 +118,7 @@ describe('text size scale', () => {
 });
 
 describe('an answer cut off by a full context window', () => {
-  it('Ollama is asked again with a window twice as large', async () => {
+  it('Ollama is asked again with more output room, never another window (that reloads the model)', async () => {
     const { OpenAICompatibleProvider, configFromPreset } = await import('../src');
     const sent: number[] = [];
     const f = async (_u: string, init?: RequestInit) => {
@@ -128,7 +128,7 @@ describe('an answer cut off by a full context window', () => {
     };
     const p = new OpenAICompatibleProvider({ ...configFromPreset('ollama', 'qwen3.5:9b'), numCtx: 8192 }, f as any);
     const r = await p.complete({ system: '', messages: [{ role: 'user', content: 'x' }], json: true });
-    expect(sent).toEqual([8192, 16384]);
+    expect(sent).toEqual([8192, 8192]);
     expect(r.text).toBe('{"blocks":[]}');
   });
 });

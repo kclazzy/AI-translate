@@ -44,7 +44,9 @@ export function resolveStyle(block: TextBlock, d: StyleDefaults = DEFAULT_STYLE_
   const cjkTarget = ['ja', 'zh', 'zh-TW', 'ko'].includes(d.targetLang);
   const vertical = cjkTarget && d.verticalForCjk && block.writingDirection === 'ttb-rl' && d.targetLang !== 'ko';
   const onLight = block.bubble ? isLight(block.bubble.fill) : true;
-  const inBubble = !!block.bubble && block.bubble.shape === 'ellipse';
+  // Inside a bubble whose outline was found (any shape, also one cut by the picture's edge) the
+  // letters need no halo: it would only show where they come near the outline.
+  const inBubble = !!block.bubble && (block.bubble.shape === 'ellipse' || !!block.bubble.rows);
   const base: TextStyle = {
     fontFamily: cjkTarget ? FONT_STACKS.cjk : d.dialogueFont,
     fontSize: null,

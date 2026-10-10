@@ -148,7 +148,22 @@ export interface AppSettings {
   interfaceLang?: string;
   /** Разговорник: hints for recurring expressions, entries switched off, genre sets, the user's own. */
   phrasebook?: PhrasebookSettings;
+  /**
+   * Pictures where a quick local check finds no lettering are not sent to the model (default on).
+   * ⟳ on such a picture translates it anyway.
+   */
+  skipEmptyPages?: boolean;
+  /**
+   * Translation check of short pages in batches (default off): in fast/balanced quality, pages with
+   * ≤ 6 blocks and ≤ 400 characters are reviewed up to 4 at a time in one request, and pages with
+   * 1–2 short bubbles (≤ 40 characters) get only the rule checks.
+   */
+  qaBatch?: boolean;
+  /** Most space the translation cache may take, MB (default 2048); the least recently used pages go first. */
+  cacheMaxMb?: number;
 }
+
+export const DEFAULT_CACHE_MAX_MB = 2048;
 
 export function defaultSettings(): AppSettings {
   const lmstudio = configFromPreset('lmstudio', 'lmstudio');
@@ -372,7 +387,12 @@ export function migrateSettings(raw: unknown): AppSettings {
     modelCatalog: 'object',
     modelCatalogCheckedAt: 'string',
     interfaceLang: 'string',
+    skipEmptyPages: 'boolean',
+    qaBatch: 'boolean',
+    cacheMaxMb: 'number',
   });
+  // At least 50 MB (a few chapters), at most 100 GB.
+  if (out.cacheMaxMb !== undefined) out.cacheMaxMb = Math.max(50, Math.min(100_000, Math.round(out.cacheMaxMb as number)));
   if (out.qaMode !== undefined && !['off', 'rules', 'report', 'fix'].includes(out.qaMode as string)) delete out.qaMode;
   if (out.exportPageLength !== undefined && !['normal', 'long', 'whole'].includes(out.exportPageLength as string)) delete out.exportPageLength;
   if (out.editorPageList !== undefined && !['bottom', 'right'].includes(out.editorPageList as string)) delete out.editorPageList;

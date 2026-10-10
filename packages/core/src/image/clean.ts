@@ -510,7 +510,10 @@ export function measureLettering(img: PixelData, mask: Uint8Array, rect: Box, bg
         const t = Math.max(0, Math.min(1, ((e[0] - i[0]) * d[0] + (e[1] - i[1]) * d[1] + (e[2] - i[2]) * d[2]) / len2));
         return Math.hypot(e[0] - (i[0] + d[0] * t), e[1] - (i[1] + d[1] * t), e[2] - (i[2] + d[2] * t)) < 45;
       })();
-      if (!blend && Math.hypot(e[0] - i[0], e[1] - i[1], e[2] - i[2]) > 120) {
+      // The "fill" in the colour of the bubble itself is the background seen through (the mask took
+      // in a piece of the bubble), not lettering: dark letters on a light bubble have no outline.
+      const isBg = !!bg && Math.hypot(bg[0] - i[0], bg[1] - i[1], bg[2] - i[2]) < 60;
+      if (!blend && !isBg && Math.hypot(e[0] - i[0], e[1] - i[1], e[2] - i[2]) > 120) {
         out.fill = toHex(i);
         out.outline = toHex(e);
       }
@@ -722,9 +725,41 @@ export function onBackground(cand: Uint8Array, width: number, height: number, re
 }
 
 /** Pixels still standing out from `bg` inside `rect` (what the reader could still see). */
-function residual(img: PixelData, rect: Box, bg: RGB, threshold: number): number {
+function residual(img: PixelData, rect: Box, bg: RGB, threshold: number, within?: Uint8Array): number {
   const m = textMask(img, rect, bg, threshold);
+  if (within) for (let i = 0; i < m.length; i++) if (!within[i]) m[i] = 0;
   return countMask(m) / Math.max(1, rect[2] * rect[3]);
+}
+
+/**
+ * Pixels in `rect` that stand out from the bubble colour and look like lettering: marks lying
+ * whole near the box that the bubble colour surrounds closely. The outline and the art beyond it
+ * (which a loose box takes in) run on past the box or are solid: the flood must not run through
+ * them into the picture. `reach`: about half the thickest stroke.
+ */
+function letterLike(img: PixelData, rect: Box, bg: RGB, reach: number): Uint8Array {
+  const { width, height } = img;
+  const outer = clampBox(expandBox(rect, reach * 2 + 8), width, height);
+  const cand = textMask(img, outer, bg, 60);
+  const near = new Uint8Array(width * height);
+  const [ox, oy, ow, oh] = outer;
+  for (let y = oy; y < oy + oh; y++) for (let x = ox; x < ox + ow; x++) if (!cand[y * width + x]) near[y * width + x] = 1;
+  const around = dilate(near, width, height, reach);
+  const out = new Uint8Array(width * height);
+  const [x0, y0, w, h] = rect;
+  for (const c of components(cand, width, outer)) {
+    const [bx, by, bw, bh] = c.box;
+    if (bx <= ox || by <= oy || bx + bw >= ox + ow || by + bh >= oy + oh) continue;
+    let n = 0;
+    for (const p of c.pixels) if (around[p]) n++;
+    if (n < c.pixels.length * 0.85) continue;
+    for (const p of c.pixels) {
+      const x = p % width;
+      const y = (p - x) / width;
+      if (x >= x0 && y >= y0 && x < x0 + w && y < y0 + h) out[p] = 1;
+    }
+  }
+  return out;
 }
 
 /** Solid rounded plate in the background colour: the last resort that always hides the lettering. */
@@ -764,38 +799,78 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
   let local: Box = bbox;
   let bg: RGB = [255, 255, 255];
   let flat = false;
-  let flood: FloodResult | null = null;
+  let flood = null as FloodResult | null;
   let leaked = true;
-  for (let attempt = 0; attempt < pads.length; attempt++) {
-    region = clampBox(expandBox(bbox, pads[attempt]), image.width, image.height);
+  const setRegion = (pad: number) => {
+    region = clampBox(expandBox(bbox, pad), image.width, image.height);
     img = image.getRegion(...region);
     local = [bbox[0] - region[0], bbox[1] - region[1], bbox[2], bbox[3]];
-    if (attempt === 0) {
-      // Background = the dominant colour around and inside the box (letters are a minority).
-      const around = clampBox(expandBox(local, Math.round(minDim * 0.6) + 6), img.width, img.height);
-      const dom = dominantColor(img, around);
-      bg = dom.color;
-      flat = dom.share >= 0.45;
-      if (!flat) break;
+  };
+  const floodFrom = (colour: RGB) => {
+    for (let attempt = 0; attempt < pads.length; attempt++) {
+      setRegion(pads[attempt]);
+      const seedRect = clampBox(expandBox(local, 4), img.width, img.height);
+      flood = floodBubble(img, clampBox(expandBox(local, 2), img.width, img.height), colour, 42, letterLike(img, seedRect, colour, Math.min(12, Math.max(5, Math.round(minDim * 0.2)))));
+      // Touching the analysed region's border means the flood ran out into open space;
+      // touching the picture's own border is fine (a bubble cut off by the edge of the strip).
+      leaked = floodLeaks(flood, region, image.width, image.height);
+      if (!leaked) break;
     }
-    const letters = textMask(img, clampBox(expandBox(local, 4), img.width, img.height), bg, 60);
-    flood = floodBubble(img, clampBox(expandBox(local, 2), img.width, img.height), bg, 42, letters);
-    // Touching the analysed region's border means the flood ran out into open space;
-    // touching the picture's own border is fine (a bubble cut off by the edge of the strip).
-    leaked = floodLeaks(flood, region, image.width, image.height);
-    if (!leaked) break;
+  };
+  // A bubble is a closed shape not much bigger than its text. Flooding the whole scene (a dark
+  // night sky with the text on it) is open background, not a bubble — otherwise everything
+  // inside it (stars, bokeh, other lettering) would count as text to erase.
+  const isClosed = (tentative: boolean): boolean => {
+    if (!flood || leaked || opts.sfx) return false;
+    const floodArea = boxArea(flood.box);
+    if (flood.area <= boxArea(local) * (tentative ? 0.25 : 0.5) || floodArea > Math.max(boxArea(local) * 30, 40_000)) return false;
+    // A bubble's inside fills most of its box (light letters flooded by mistake do not).
+    if (tentative && flood.area < floodArea * 0.5) return false;
+    const share = floodArea / (image.width * image.height);
+    if (share < 0.35) return true;
+    // A big part of a small picture: still a bubble when the picture's edge cuts it on one side
+    // only (or two that meet in a corner) — open background spans the picture from edge to edge.
+    const [fx, fy, fw, fh] = [flood.box[0] + region[0], flood.box[1] + region[1], flood.box[2], flood.box[3]];
+    const left = fx <= 0, top = fy <= 0, right = fx + fw >= image.width, bottom = fy + fh >= image.height;
+    return share < 0.8 && !(left && right) && !(top && bottom) && +left + +top + +right + +bottom <= 2;
+  };
+  setRegion(pads[0]);
+  // Background = the dominant colour around and inside the box (letters are a minority).
+  const around = clampBox(expandBox(local, Math.round(minDim * 0.6) + 6), img.width, img.height);
+  const dom = dominantColor(img, around);
+  bg = dom.color;
+  flat = dom.share >= 0.45;
+  if (flat) floodFrom(bg);
+  let closed = flat && isClosed(false);
+  if (!closed && !opts.sfx) {
+    // The box reaches well into the art around a bubble (a loose model box, the bubble's own box
+    // with the art in its corners, a bubble cut by the picture's edge): the bubble colour is not
+    // dominant around the box, but a light shape closing around the lettering is still a bubble.
+    const inside = dominantColor(img, clampBox(local, img.width, img.height));
+    const tries: RGB[] = [];
+    if (!flat && dom.share >= 0.2 && luminance(...bg) >= 190) tries.push(bg);
+    if (inside.share >= 0.3 && luminance(...inside.color) >= 190 && Math.hypot(inside.color[0] - bg[0], inside.color[1] - bg[1], inside.color[2] - bg[2]) > 60) tries.push(inside.color);
+    const keep = { flood, leaked, region, img, local };
+    for (const colour of tries) {
+      floodFrom(colour);
+      if (isClosed(true)) {
+        bg = colour;
+        flat = closed = true;
+        break;
+      }
+      ({ flood, leaked, region, img, local } = keep);
+    }
+  }
+  if (!flat) {
+    // Lettering over the art.
+    flood = null;
+    setRegion(pads[0]);
   }
 
   const search = clampBox(expandBox(local, Math.round(minDim * 1.2) + 12), img.width, img.height);
   let result: CleanResult;
 
   if (flat) {
-    // A bubble is a closed shape not much bigger than its text. Flooding the whole scene (a dark
-    // night sky with the text on it) is open background, not a bubble — otherwise everything
-    // inside it (stars, bokeh, other lettering) would count as text to erase.
-    const floodArea = flood ? boxArea(flood.box) : 0;
-    const closed =
-      !!flood && !leaked && !opts.sfx && flood.area > boxArea(local) * 0.5 && floodArea <= Math.max(boxArea(local) * 30, 40_000) && floodArea < image.width * image.height * 0.35;
     let mask: Uint8Array;
     let tb: Box | null;
     let letterMask: Uint8Array;
@@ -825,9 +900,12 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     const lettering = measureLettering(img, letterMask, closed ? flood!.box : search, bg);
     if (!opts.analyzeOnly) fillMask(img, mask, bg);
     let method: CleanResult['method'] = opts.analyzeOnly ? 'none' : 'fill';
-    // Verify: nothing that stands out from the bubble colour may remain where the text was.
+    // Verify: nothing that stands out from the bubble colour may remain where the text was. Only
+    // marks the bubble's background surrounds count: the outline or the art a loose box reaches
+    // into are not lettering left behind.
     const textArea = clampBox(expandBox(tb ? unionBox(tb, local) : local, 2), img.width, img.height);
-    if (!opts.analyzeOnly && residual(img, textArea, bg, 70) > 0.004) {
+    const within = flood ? enclosedHoles(flood.mask, img.width, img.height, textArea) : undefined;
+    if (!opts.analyzeOnly && residual(img, textArea, bg, 70, within) > 0.004) {
       // The plate only covers the bubble's own background and the letters, never the art or the
       // outline next to it (a rectangle would spill over the panel where the bubble is round).
       let limit: Uint8Array | undefined;
@@ -877,7 +955,11 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
         if ((l > 232 && bgLum < 200) || (l < 28 && bgLum > 60) || colorDist(img.data, p * 4, bg) > 120) cand[p] = 1;
       }
     }
+    // Lettering lies inside the searched area; a "letter" spanning it from side to side is a piece
+    // of the background (the sky around a bubble) and smearing it would wipe out the picture.
+    const spansSearch = (b: Box | null) => !!b && b[2] >= search[2] - 2 && b[3] >= search[3] - 2;
     let snap = snapToLettering(cand, img.width, search, local, img);
+    if (spansSearch(snap.box)) snap = { mask: new Uint8Array(cand.length), box: null };
     if (!snap.box) {
       // Colourful art (every stripe "far" from the average colour) hides the letters in one big
       // blob: look again for the extreme pixels only — white or black lettering and its outline.
@@ -890,6 +972,7 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
         }
       }
       snap = snapToLettering(extreme, img.width, search, local, img);
+      if (spansSearch(snap.box)) snap = { mask: new Uint8Array(cand.length), box: null };
     }
     let mask = snap.mask;
     const tb = snap.box;

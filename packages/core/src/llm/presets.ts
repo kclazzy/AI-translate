@@ -214,6 +214,13 @@ export function createProvider(config: ProviderConfig, fetchImpl?: FetchLike): L
   return new OpenAICompatibleProvider(config, fetchImpl);
 }
 
-export function estimateCost(config: ProviderConfig, inputTokens: number, outputTokens: number): number {
-  return ((config.priceInput ?? 0) * inputTokens + (config.priceOutput ?? 0) * outputTokens) / 1_000_000;
+/**
+ * Price of a request, USD. `cached` and `cacheWrite` are parts of `inputTokens` (prompt caching):
+ * tokens read from the provider's cache cost 10 % of the input price, tokens written to it 125 %.
+ */
+export function estimateCost(config: ProviderConfig, inputTokens: number, outputTokens: number, cached = 0, cacheWrite = 0): number {
+  const read = Math.max(0, Math.min(cached, inputTokens));
+  const write = Math.max(0, Math.min(cacheWrite, inputTokens - read));
+  const plain = inputTokens - read - write;
+  return ((config.priceInput ?? 0) * (plain + 0.1 * read + 1.25 * write) + (config.priceOutput ?? 0) * outputTokens) / 1_000_000;
 }

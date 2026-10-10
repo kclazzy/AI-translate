@@ -28,8 +28,12 @@ const CSS = `
 .bar button:hover { background: #fbe6ee; }
 .pill { cursor: default; background: #c8205f; color: #fff; }
 .pill.err { background: #fff; color: #c0392b; border-radius: 12px; padding: 8px 12px; max-width: 320px; white-space: normal; line-height: 1.35; }
+.pill.note { background: #fff; color: #1c2230; }
+.bar.skip { opacity: 1; }
 .pill.err small { display: block; color: #1c2230; margin-top: 4px; font-size: 12px; }
-.split { position: absolute; top: 0; bottom: 0; width: 3px; background: #c8205f; pointer-events: auto; cursor: ew-resize; }
+.bar button[aria-pressed="true"] { background: #fbe6ee; }
+.split { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1px; background: #c8205f; pointer-events: auto; cursor: ew-resize; touch-action: none; }
+.split::after { content: '⟷'; position: absolute; top: 50%; left: -12px; width: 26px; height: 26px; margin-top: -13px; border-radius: 50%; background: #c8205f; color: #fff; display: grid; place-items: center; font: 13px/1 system-ui, sans-serif; }
 `;
 
 /** Translated image drawn over the original element, plus a small toolbar. */
@@ -45,6 +49,7 @@ export class Overlay {
   /** Languages for the ⇄ button: it shows the name of the language a click switches to. */
   private langs: { source: string; target: string } | null = null;
   private toggleBtn: HTMLButtonElement | null = null;
+  private compareBtn: HTMLButtonElement | null = null;
   hasResult = false;
 
   constructor(
@@ -172,17 +177,29 @@ export class Overlay {
     this.bar.className = 'bar';
     const defs: [string, string, () => void][] = [
       ['⇄', tr('Оригинал / перевод'), this.actions.onToggle],
-      ['◫', tr('Сравнить со слайдером'), () => this.toggleCompare()],
+      ['◫', tr('Сравнить с оригиналом'), () => this.toggleCompare()],
       ['✎', tr('Править в редакторе'), this.actions.onEdit],
       ['⟳', tr('Перевести заново'), this.actions.onRetry],
     ];
     if (this.actions.onClose) defs.push(['✕', tr('Закрыть'), this.actions.onClose]);
     this.buttons(defs);
     this.toggleBtn = this.bar.querySelector('button');
+    this.compareBtn = [...this.bar.querySelectorAll('button')].find((b) => b.textContent === '◫') ?? null;
+    this.compareBtn?.setAttribute('aria-pressed', String(this.compareAt !== null));
     this.setOriginal(false);
   }
 
-  /** Translation check result: a small button that opens the editor with the report. */
+  /** The picture was not sent to the model (no lettering found): a note next to ⟳, which translates it anyway. */
+  setSkipped(text: string): void {
+    this.bar.querySelector('[data-skipped]')?.remove();
+    const p = document.createElement('span');
+    p.className = 'pill note';
+    p.dataset.skipped = '1';
+    p.textContent = text;
+    this.bar.classList.add('skip');
+    this.bar.prepend(p);
+  }
+
   /** «ⓘ»: how this page was translated (time, tokens, cost, model). */
   setInfo(details: string): void {
     this.bar.querySelector('[data-info]')?.remove();
@@ -198,6 +215,7 @@ export class Overlay {
     this.bar.append(b);
   }
 
+  /** Translation check result: a small button that opens the editor with the report. */
   setQa(count: number, details: string): void {
     if (!count) return;
     const b = document.createElement('button');
@@ -228,9 +246,11 @@ export class Overlay {
       existing.remove();
       this.tiles.style.clipPath = '';
       this.compareAt = null;
+      this.compareBtn?.setAttribute('aria-pressed', 'false');
       return;
     }
     this.compareAt = 0.5;
+    this.compareBtn?.setAttribute('aria-pressed', 'true');
     const split = document.createElement('div');
     split.className = 'split';
     const apply = () => {

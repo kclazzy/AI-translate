@@ -16,7 +16,8 @@ import type { Box, BubbleInfo, PageResult, StageEvent, TextBlock, TextStyle, Usa
 import { bytesToBase64, sha256Hex } from '../util/bytes';
 import { mapLimit } from '../util/queue';
 import { withRetry } from '../util/retry';
-import { pipelineHash, type PipelineConfig } from './config';
+import { MAX_SIDE, pipelineHash, type PipelineConfig } from './config';
+import { checkForText, type TextCheck } from '../image/textcheck';
 import { EngineClient } from './engine';
 
 export interface PipelineRequest {
@@ -28,6 +29,56 @@ export interface PipelineRequest {
   onStage?: (e: StageEvent) => void;
   /** Screen-area / UI text: no bubble analysis, text drawn on plates. */
   generic?: boolean;
+  /**
+   * Ask the model even when the local check finds no lettering (⟳ «перевести всё равно»: the
+   * service sets it for `force`). See config.skipEmptyPages.
+   */
+  noSkip?: boolean;
+  /** The picture decoded / checked / encoded ahead of time (see preparePage); must match bytes and config. */
+  prepared?: PreparedPage;
+}
+
+/** A picture made ready for the model while the previous one was still in it (prefetch). */
+export interface PreparedPage {
+  original: TiledImage;
+  decodeMs: number;
+  /** The text check (absent when it does not apply: generic, noSkip, setting off). */
+  textCheck?: TextCheck;
+  /** The views as sent to the vision model, for `viewsFor` (model + quality). */
+  views?: EncodedView[];
+  viewsFor?: string;
+}
+
+interface EncodedView {
+  view: View;
+  jpeg: Uint8Array;
+  dw: number;
+  dh: number;
+}
+
+/** Should the picture be checked for lettering before the model is asked? */
+function checksText(req: Pick<PipelineRequest, 'config' | 'generic' | 'noSkip'>): boolean {
+  return req.config.mode === 'standalone' && req.config.skipEmptyPages !== false && !req.noSkip && !req.generic;
+}
+
+const viewsKey = (config: PipelineConfig) => `${config.vision?.model ?? ''}|${config.quality}`;
+
+/**
+ * Everything before the first model call that needs only this computer: decode the picture, look
+ * for lettering, encode the views for the vision model. Run for the next page while the model
+ * works on the current one (TranslateService.prefetch).
+ */
+export async function preparePage(req: Pick<PipelineRequest, 'bytes' | 'mime' | 'config' | 'generic' | 'noSkip'>, deps: StandaloneDeps): Promise<PreparedPage> {
+  const t0 = performance.now();
+  const original = await TiledImage.fromBytes(deps.backend, req.bytes, req.mime);
+  const prep: PreparedPage = { original, decodeMs: Math.round(performance.now() - t0) };
+  if (checksText(req)) prep.textCheck = checkForText(original);
+  if (req.config.mode === 'standalone' && req.config.vision?.vision && !prep.textCheck?.noText) {
+    prep.views = [];
+    for (const view of planViews(original.width, original.height)) prep.views.push(await encodeView(original, view, req.config, req.config.vision.model, deps));
+    prep.viewsFor = viewsKey(req.config);
+  }
+  return prep;
 }
 
 export interface PipelineOutput {
@@ -45,8 +96,6 @@ export interface StandaloneDeps {
   /** LaMa running in this browser (extension), used when the settings say so. */
   inpaint?: Inpainter;
 }
-
-const MAX_SIDE: Record<PipelineConfig['quality'], number> = { fast: 1280, balanced: 1568, best: 2048 };
 
 export interface View {
   y: number;
@@ -84,8 +133,9 @@ interface Located {
   low?: boolean;
 }
 
-async function readView(provider: LlmProvider, image: TiledImage, view: View, config: PipelineConfig, context: TranslationContext | undefined, withTranslation: boolean, deps: StandaloneDeps, signal?: AbortSignal): Promise<{ answer: VisionAnswer; usage: Usage }> {
-  const family = familyFor(provider.config.model);
+/** One view of the picture as the vision model gets it: scaled to the quality's size, JPEG. */
+async function encodeView(image: TiledImage, view: View, config: PipelineConfig, model: string, deps: StandaloneDeps): Promise<EncodedView> {
+  const family = familyFor(model);
   const maxSide = Math.min(MAX_SIDE[config.quality], family?.maxSide ?? Infinity);
   const scale = Math.min(1, maxSide / Math.max(image.width, view.h));
   const dw = Math.max(1, Math.round(image.width * scale));
@@ -95,6 +145,12 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
   ctx.imageSmoothingQuality = 'high';
   image.drawRegion(ctx, 0, view.y, image.width, view.h, dw, dh);
   const jpeg = await deps.backend.encode(canvas, 'image/jpeg', 0.92);
+  return { view, jpeg, dw, dh };
+}
+
+async function readView(provider: LlmProvider, image: TiledImage, view: View, config: PipelineConfig, context: TranslationContext | undefined, withTranslation: boolean, deps: StandaloneDeps, signal?: AbortSignal, encoded?: EncodedView): Promise<{ answer: VisionAnswer; usage: Usage }> {
+  const family = familyFor(provider.config.model);
+  const { jpeg, dw, dh } = encoded ?? (await encodeView(image, view, config, provider.config.model, deps));
   const system = buildSystemPrompt(promptInput(config, context));
   const instruction = withTranslation ? visionFullInstruction(dw, dh) : visionOcrInstruction(dw, dh);
   // Single call: the page's text is not known yet, so the hints come from the previous pages' lines.
@@ -119,7 +175,7 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
       if (res.truncated) answer.repaired = true;
       // Some families answer in pixels of the picture they got: bring them to 0–1000.
       if (family?.coords === 'pixels') for (const b of answer.blocks) b.box = [(b.box[0] / dw) * 1000, (b.box[1] / dh) * 1000, (b.box[2] / dw) * 1000, (b.box[3] / dh) * 1000];
-      return { answer, usage: usageFrom(provider, res.model, res.inputTokens, res.outputTokens) };
+      return { answer, usage: usageFrom(provider, res) };
     },
     // A local model that timed out will time out again: report it instead of waiting 3× longer.
     { retries: 2, signal, shouldRetry: (e) => e.retryable && !(e.code === 'TIMEOUT' && isLocalProvider(config.vision!)) },
@@ -231,10 +287,20 @@ export function matchLettering(b: TextBlock, l: Lettering | undefined): Partial<
       }
     }
     // Outlined letters (white with a black edge over the art, coloured shouting): keep both colours.
-    if (l.fill && l.outline && b.textType !== 'SFX') {
+    // Never on a plain light bubble: a "fill" in the bubble's own colour is the bubble seen through
+    // a mask that took in part of it, and drawing it gives light letters on dark plates.
+    const onOwnColour = (() => {
+      if (!b.bubble || !l.fill) return false;
+      const f = parseHex(l.fill);
+      const bf = parseHex(b.bubble.fill);
+      return Math.hypot(f[0] - bf[0], f[1] - bf[1], f[2] - bf[2]) < 60;
+    })();
+    if (l.fill && l.outline && b.textType !== 'SFX' && !onOwnColour) {
       style.color = l.fill;
       style.strokeColor = l.outline;
-      style.strokeWidth = Math.max(2, Math.min(8, Math.round(l.stroke * 0.5)));
+      // In proportion to the letters (≈ 11 % of the font size): a thicker one merges the strokes
+      // of a line into one dark plate.
+      style.strokeWidth = 2;
     }
     // Slanted lettering (thoughts, whispers, foreign speech) stays slanted.
     if (l.italic) style.italic = true;
@@ -467,7 +533,9 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   if (translatorCfg) assertPrivacy(config.privacy, translatorCfg, 'text');
 
   stage('decoding');
-  const original = await TiledImage.fromBytes(deps.backend, req.bytes, req.mime);
+  const prepared = req.prepared;
+  const prep = prepared ?? (await preparePage(req, deps));
+  const original = prep.original;
   const tDecoded = performance.now();
   const vision = createProvider(config.vision, deps.fetchImpl);
   const usage: Usage[] = [];
@@ -475,17 +543,23 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   let cleaned: TiledImage | null = null;
   let tTranslated = 0;
   let tCleaned = 0;
+  let inpaintMs = 0;
   const artMasks: { box: Box; mask: Uint8Array }[] = [];
   let artRedrawn = false;
+  // No lettering anywhere (local check): the model is not asked at all.
+  const skipped = !!prep.textCheck?.noText;
+  let tDetected = tDecoded;
+  let entities: unknown[] = [];
+  const summaries: string[] = [];
+  if (skipped) return finish();
 
   stage('detecting');
   const views = planViews(original.width, original.height);
+  const encoded = prep.viewsFor === viewsKey(config) ? prep.views : undefined;
   const located: Located[] = [];
-  let entities: unknown[] = [];
-  const summaries: string[] = [];
   // A local server runs one request at a time anyway; parallel requests only split the GPU.
   const answers = await mapLimit(views, isLocalProvider(config.vision) ? 1 : 2, async (view, i) => {
-    const r = await readView(vision, original, view, config, req.context, !separate, deps, signal);
+    const r = await readView(vision, original, view, config, req.context, !separate, deps, signal, encoded?.find((e) => e.view.y === view.y && e.view.h === view.h));
     stage('ocr', (i + 1) / views.length);
     return { view, ...r };
   });
@@ -498,7 +572,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       located.push({ box: clampBox(box, original.width, original.height), text: b.text, translation: b.translation, type: b.type, vertical: b.vertical, view, speaker: b.speaker, gender: b.gender, ...(answer.repaired ? { low: true } : {}) });
     }
   }
-  const tDetected = performance.now();
+  tDetected = performance.now();
   const merged = dedupe(located);
   if (!merged.length) {
     return finish();
@@ -664,7 +738,11 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     // The engine gets the picture only on this computer / network, unless the cloud is allowed.
     const viaEngine = config.lama === 'engine' && config.engine?.url && (config.privacy === 'cloud' || isLocalUrl(config.engine.url));
     const inpaint = viaEngine ? engineInpainter(config.engine!, deps) : config.lama === 'browser' ? deps.inpaint : undefined;
-    if (inpaint) artRedrawn = (await redrawArt(original, cleaned, artMasks, inpaint, signal)) > 0;
+    if (inpaint) {
+      const tl = performance.now();
+      artRedrawn = (await redrawArt(original, cleaned, artMasks, inpaint, signal)) > 0;
+      inpaintMs = Math.round(performance.now() - tl);
+    }
   }
   tCleaned = performance.now();
   return finish();
@@ -681,17 +759,23 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       targetLang: config.targetLang,
       blocks: blocksOut,
       timings: {
-        decodeMs: Math.round(tDecoded - t0),
+        // Decoded ahead (prefetch): the time it took then; it was not spent waiting now.
+        decodeMs: prep.decodeMs,
+        ...(prep.textCheck ? { textCheckMs: prep.textCheck.ms } : {}),
         detectMs: Math.round(tDetected - tDecoded),
         ocrMs: 0,
         translateMs: blocksOut.length ? Math.round(tTranslated - tDetected) : 0,
+        // Includes inpaintMs (as before LaMa was measured on its own).
         cleanMs: blocksOut.length ? Math.round(tCleaned - tTranslated) : 0,
+        inpaintMs,
         totalMs: Math.round(performance.now() - t0),
+        ...(prepared ? { prefetched: true } : {}),
       },
       usage,
       pipeline: { version: 1, hash: await pipelineHash(config), mode: 'standalone' },
       summary,
       ...(artMasks.length ? { artText: artMasks.length, artRedrawn } : {}),
+      ...(skipped ? { skippedNoText: true } : {}),
       createdAt: new Date().toISOString(),
     };
     const contextUpdate: ContextUpdate = {
@@ -699,9 +783,10 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       summary,
       lines: blocksOut.filter((b) => b.textType === 'DIALOGUE' && b.translate).slice(-8).map((b) => ({ src: b.originalText, dst: b.translatedText })),
     };
-    const context = req.context ? mergeContext(req.context, contextUpdate) : undefined;
+    // A skipped picture adds nothing to the story (and is not counted as a page of it).
+    const context = req.context && !skipped ? mergeContext(req.context, contextUpdate) : undefined;
     stage('done', 1);
-    return { page, original, cleaned: cleaned ?? original.clone(), context, ...(req.context ? { contextUpdate } : {}) };
+    return { page, original, cleaned: cleaned ?? original.clone(), context, ...(req.context && !skipped ? { contextUpdate } : {}) };
   }
 }
 

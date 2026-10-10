@@ -105,16 +105,33 @@ export interface Usage {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  /** Part of inputTokens read from the provider's prompt cache (billed at a tenth of the price). */
+  cachedTokens?: number;
 }
 
+/** Time per stage of one page, ms (shown by the speed benchmark). */
 export interface PageTimings {
+  /** Picture bytes → pixels (0 when it was decoded ahead, while the previous page was in the model). */
   decodeMs?: number;
+  /** Local check for lettering before the model is asked (see image/textcheck.ts). */
+  textCheckMs?: number;
+  /** The vision model reading the picture (with the translation in single-call mode). */
   detectMs?: number;
   ocrMs?: number;
+  /** Separate text translation request(s). */
   translateMs?: number;
+  /** Translation check (rules + the model's review). */
+  qaMs?: number;
+  /** Erasing the original text, including the LaMa redraw (inpaintMs) when it ran. */
   cleanMs?: number;
+  /** LaMa redrawing text over artwork (engine or browser); part of cleanMs. */
+  inpaintMs?: number;
+  /** Typesetting the translation and encoding the tiles. */
   renderMs?: number;
+  /** The whole page, from the bytes to the stored result. */
   totalMs?: number;
+  /** The page was decoded and checked ahead of time (prefetch). */
+  prefetched?: boolean;
 }
 
 export interface PageResult {
@@ -135,6 +152,11 @@ export interface PageResult {
   artText?: number;
   /** LaMa redrew those places (in the engine or in the browser). */
   artRedrawn?: boolean;
+  /**
+   * The local check found no lettering, so the model was not asked (settings → skipEmptyPages).
+   * The UI offers «Текста не найдено — ⟳ перевести всё равно»: ⟳ translates with `force`.
+   */
+  skippedNoText?: boolean;
   createdAt: string;
 }
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   applyPreset,
   configFromPreset,
+  DEFAULT_CACHE_MAX_MB,
   presetFrom,
   createProvider,
   EngineClient,
@@ -20,8 +21,9 @@ import { readSettingsFile, settingsToFile } from '../settingsFile';
 import { LocalModels, LocalSetup, ModelCheckCard, ModelPicker, UpdateCheck } from '../ModelPicker';
 import { usePlatform } from '../platform';
 import { LamaGetButton, lamaModeOf, useLamaDownloaded } from '../lama';
+import { SpeedBenchmark } from './SpeedBenchmark';
 import { ErrorBox, Field, FoldPanel, NumberInput, Segmented, Switch, toast, useAction } from '../ui';
-import { resolveUiLang, tr, UI_LANGS } from '@ait/core/i18n';
+import { resolveUiLang, tr, uiLocale, UI_LANGS } from '@ait/core/i18n';
 
 export interface SettingsProps {
   settings: AppSettings;
@@ -319,12 +321,27 @@ function AutoSaveFolder({ settings: s, update }: { settings: AppSettings; update
   );
 }
 
-function StorageLine() {
+function StorageLine({ settings: s, update }: SettingsProps) {
   const platform = usePlatform();
   const [used, setUsed] = useState<number | null>(null);
+  const [cacheMb, setCacheMb] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
-  const measure = () => void navigator.storage?.estimate?.().then((e) => setUsed(e.usage ?? null)).catch(() => undefined);
+  const measure = () => {
+    void navigator.storage?.estimate?.().then((e) => setUsed(e.usage ?? null)).catch(() => undefined);
+    void platform.service
+      .cacheUsage()
+      .then((u) => setCacheMb(u.usedMb))
+      .catch(() => undefined);
+  };
   useEffect(measure, []);
+  const maxMb = s.cacheMaxMb ?? DEFAULT_CACHE_MAX_MB;
+  const pruneTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const setLimit = (cacheMaxMb: number) => {
+    update({ cacheMaxMb });
+    // A lower limit takes effect now (the oldest pages go), not at the next tidy-up.
+    clearTimeout(pruneTimer.current);
+    pruneTimer.current = setTimeout(() => void platform.service.prune().then(measure, () => undefined), 800);
+  };
   const clear = async (store: 'results' | 'history', what: string) => {
     if (!confirm(tr('Удалить {0}? Это нельзя отменить.', what))) return;
     setBusy(true);
@@ -336,7 +353,12 @@ function StorageLine() {
   return (
     <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 12 }} data-testid="storage-line">
       <span className="ait-muted">{tr('Занято на устройстве:')}{' '}{used === null ? '…' : tr('{0} МБ', (used / 1048576).toFixed(used > 104857600 ? 0 : 1))}</span>
+      <span className="ait-muted" data-testid="cache-usage">{tr('Занято: {0} МБ из {1} МБ', cacheMb === null ? '…' : cacheMb.toLocaleString(uiLocale()), maxMb.toLocaleString(uiLocale()))}</span>
       <button className="ait-btn small" disabled={busy} onClick={() => void clear('results', tr('переведённые страницы из кэша'))}>{tr('Очистить кэш')}</button>
+      <label style={{ display: 'flex', gap: 6, alignItems: 'center' }} data-testid="cache-max">
+        <span className="ait-muted">{tr('Лимит кэша, МБ')}</span>
+        <NumberInput min={50} max={100000} fallback={DEFAULT_CACHE_MAX_MB} value={maxMb} onChange={setLimit} style={{ width: 100 }} aria-label={tr('Лимит кэша, МБ')} />
+      </label>
       <button className="ait-btn small" disabled={busy} onClick={() => void clear('history', tr('записи истории'))}>{tr('Очистить историю')}</button>
     </div>
   );
@@ -402,6 +424,10 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
     <div>
       {params.get('setup') === '1' ? <LocalSetup settings={s} update={update} getKey={getKey} onReady={platform.setupReady ? () => platform.setupReady!(params) : undefined} /> : null}
       {s.pipeline === 'standalone' ? <ModelCheckCard settings={s} update={update} getKey={getKey} /> : null}
+      <div className="ait-panel" style={{ display: 'grid', gap: 8 }}>
+        <h2 style={{ margin: 0 }}>{tr('Скорость перевода')}</h2>
+        <SpeedBenchmark settings={s} />
+      </div>
       {s.pipeline === 'standalone' && platform.kind === 'extension' ? <LocalModels settings={s} update={update} getKey={getKey} autoStart={params.get('pull') === '1'} /> : null}
       <div className="ait-panel">
         <h2>{tr('Как переводить')}</h2>
@@ -461,6 +487,14 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
                 onChange={(stitchStrips) => update({ stitchStrips })}
                 label={tr('Склеивать соседние картинки ленты (вебтун) — баблы на стыке не теряются')}
               />
+            </div>
+            <div style={{ marginTop: 8 }} data-testid="skip-empty">
+              <Switch checked={s.skipEmptyPages !== false} onChange={(skipEmptyPages) => update({ skipEmptyPages })} label={tr('Пропускать картинки без текста')} />
+              <small className="ait-muted" style={{ display: 'block' }}>{tr('Пейзажи и фоны без букв не отправляются модели — быстрее для вебтунов. На пропущенной картинке ⟳ переведёт её всё равно.')}</small>
+            </div>
+            <div style={{ marginTop: 8 }} data-testid="qa-batch">
+              <Switch checked={!!s.qaBatch} onChange={(qaBatch) => update({ qaBatch })} label={tr('Проверять несколько коротких страниц за раз')} />
+              <small className="ait-muted" style={{ display: 'block' }}>{tr('Быстрее в режимах „Быстро“ и „Баланс“; в „Максимум“ каждая страница проверяется отдельно.')}</small>
             </div>
             <div style={{ marginTop: 8 }}>
               <Switch checked={!!s.bubblesOnly} onChange={(bubblesOnly) => update({ bubblesOnly })} label={tr('Только баблы: звуки и надписи на фоне оставлять как в оригинале')} />
@@ -699,7 +733,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
           <Switch checked={s.saveHistory} onChange={(saveHistory) => update({ saveHistory })} label={tr('Сохранять историю переводов')} />
           <Switch checked={s.debug} onChange={(debug) => update({ debug })} label={tr('Показывать отладку (время этапов, токены, стоимость)')} />
         </div>
-        <StorageLine />
+        <StorageLine settings={s} update={update} />
         <div style={{ marginTop: 14 }}>
           <span id="ait-update"><UpdateCheck current={platform.version} install={platform.installUpdate} pickFolder={platform.pickUpdateFolder} autoCheck={params.get('update') === '1'} /></span>
         </div>

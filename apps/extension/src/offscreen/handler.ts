@@ -53,6 +53,8 @@ interface Task {
   delivered: Set<number>;
   /** Job-store ids of the bytes, deleted when the job ends. */
   blobs: string[];
+  /** The bytes read ahead by `prepare` (prefetch): the run takes them instead of reading again. */
+  read?: Promise<{ bytes: Uint8Array; mime: string }>;
 }
 const tasks = new Map<string, Task>();
 /** Request (job id) → queue key of the job it waits for. */
@@ -66,6 +68,7 @@ function subscribe(task: Task, jobId: string, sub: Sub) {
 }
 
 function forget(task: Task) {
+  task.read = undefined;
   if (tasks.get(task.key) === task) tasks.delete(task.key);
   for (const id of task.subs.keys()) if (jobTask.get(id) === task.key) jobTask.delete(id);
   for (const b of task.blobs) void deleteJobBytes(b);
@@ -170,7 +173,7 @@ export function toRendered(r: StoredResult, cached: boolean): RenderedTiles {
     height: r.page.height,
     tiles: omit ? [] : r.rendered.map((_, i) => tileOf(r, i)),
     tilesOmitted: omit ? r.rendered.length : undefined,
-    page: { blocks: r.page.blocks, timings: r.page.timings, usage: r.page.usage, pipeline: r.page.pipeline, stripLang: r.page.stripLang, artText: r.page.artText, artRedrawn: r.page.artRedrawn },
+    page: { blocks: r.page.blocks, timings: r.page.timings, usage: r.page.usage, pipeline: r.page.pipeline, stripLang: r.page.stripLang, artText: r.page.artText, artRedrawn: r.page.artRedrawn, skippedNoText: r.page.skippedNoText },
     cached,
   };
 }
@@ -237,6 +240,9 @@ async function prepare() {
 }
 
 export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen) => void): Promise<unknown> {
+  // The batched translation check fixed a picture after it was shown: the pages showing it redraw
+  // it (Chrome: a message to the background; Firefox: a direct call, the handler runs there).
+  service.onResultChanged = (key) => emit({ source: 'offscreen', type: 'result-changed', key });
   await ensureFonts();
   if (!pruned) {
     pruned = true;
@@ -274,13 +280,30 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       const task: Task = { key, subs: new Map(), delivered: new Set(), blobs: msg.type === 'run' ? [msg.blobId] : [] };
       tasks.set(key, task);
       subscribe(task, jobId, sub);
+      /** The picture's bytes: the ones read ahead when there are any, else from the job store. */
+      const bytesOf = async (blobId: string) => {
+        const ahead = task.read;
+        task.read = undefined;
+        return ((ahead && (await ahead.catch(() => undefined))) || (await readBytes(blobId))).bytes;
+      };
       void queue
         .add({
           key,
           priority,
+          // While the model works on the picture before, decode this one and look for lettering.
+          prepare:
+            msg.type === 'run'
+              ? async () => {
+                  const read = readBytes(msg.blobId);
+                  task.read = read;
+                  const { bytes } = await read;
+                  if (task.read !== read) return; // already taken by the run
+                  await service.prefetch(bytes, msg.mime, { sourceUrl: msg.pageUrl, generic, force });
+                }
+              : undefined,
           run: async (signal) => {
             task.startedAt = Date.now();
-            const bytes = msg.type === 'run' ? (await readBytes(msg.blobId)).bytes : await cropScreenshot(msg.screenshot, msg.rect, msg.dpr);
+            const bytes = msg.type === 'run' ? await bytesOf(msg.blobId) : await cropScreenshot(msg.screenshot, msg.rect, msg.dpr);
             // Watchdog: a picture that gets no answer for too long fails with a clear reason and
             // the queue moves on (one stuck request must not stop the whole chapter).
             const watch = new AbortController();

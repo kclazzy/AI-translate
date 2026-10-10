@@ -1,17 +1,18 @@
 import { AppError, toAppError } from './errors';
-import type { ImageBackend, ImageMime } from './image/backend';
+import { losslessWebp, type ImageBackend, type ImageMime } from './image/backend';
 import { TiledImage } from './image/tiled';
 import type { FetchLike } from './llm/types';
 import { pipelineConfigFromSettings, pipelineHash, type PipelineConfig } from './pipeline/config';
 import { renderOutput, runPipeline, styleDefaultsFor, type RenderedPage } from './pipeline/run';
-import type { AppSettings } from './settings';
+import { DEFAULT_CACHE_MAX_MB, type AppSettings } from './settings';
 import type { IdbStore } from './storage/idb';
 import type { SecretStore } from './storage/secrets';
 import { emptyContext, mergeContext, type TranslationContext } from './translate/context';
 import type { PageResult, StageEvent, TextBlock, Usage } from './types';
 import { sha256Hex, sniffImageMime } from './util/bytes';
 import { tr } from './i18n';
-import type { Inpainter } from './pipeline/standalone';
+import { preparePage, type Inpainter, type PreparedPage } from './pipeline/standalone';
+import { QA_BATCH, qaPages } from './translate/qa';
 import { translateBlocks } from './translate/translator';
 import { createProvider } from './llm/presets';
 import { assertPrivacy, isLocalProvider } from './llm/privacy';
@@ -43,6 +44,31 @@ export interface StoredResult {
    * stored under its own key, so the full-quality key is tried again next time.
    */
   degraded?: boolean;
+  /** Bytes the record takes (pictures + an estimate for the rest), for the cache size cap. */
+  size?: number;
+}
+
+/** What the cache keeps per result besides the result itself: cheap to read for all results at once. */
+interface CacheMeta {
+  size: number;
+  lastHitAt: string;
+}
+
+const META = 'cache:';
+
+/** Bytes a stored result takes: its pictures plus an estimate for the text and boxes. */
+export function resultSize(r: Pick<StoredResult, 'rendered' | 'cleaned' | 'original' | 'page'>): number {
+  const tiles = (ts: { bytes: Uint8Array }[]) => ts.reduce((a, t) => a + t.bytes.length, 0);
+  return tiles(r.rendered) + tiles(r.cleaned) + r.original.bytes.length + 2048 + r.page.blocks.length * 768;
+}
+
+export interface CacheUsage {
+  /** Space the cached translations take, bytes / MB. */
+  usedBytes: number;
+  usedMb: number;
+  /** The cap from the settings (cacheMaxMb), MB. */
+  maxMb: number;
+  results: number;
 }
 
 /** Fonts that change the cached result: the text size scale only re-draws, so it is left out. */
@@ -68,7 +94,10 @@ export interface TranslateOptions {
   title?: string;
   seriesKey?: string;
   generic?: boolean;
+  /** Translate again, past the cache (⟳). Also asks the model when the text check finds nothing (see noSkip). */
   force?: boolean;
+  /** Ask the model even when the local check finds no lettering; default: the same as `force`. */
+  noSkip?: boolean;
   signal?: AbortSignal;
   onStage?: (e: StageEvent) => void;
   /** Keep the local model loaded at least this long (minutes) — set while a chapter is in the queue. */
@@ -96,8 +125,26 @@ export function seriesKeyFromUrl(url: string | undefined): string | undefined {
 export class TranslateService {
   /** LaMa in this browser (set by the extension when the model is downloaded). */
   inpainter?: Inpainter;
+  /**
+   * A stored result changed after it was delivered (the batched translation check fixed it):
+   * the app redraws the picture like after an edit (extension: 'result-changed').
+   */
+  onResultChanged?: (key: string) => void;
+  /** Re-store finished pictures as lossless WebP in the background when the browser can (smaller cache). */
+  compactTiles = true;
+  /** Wait this long after a page before re-storing (the page reaches the screen first). */
+  compactDelayMs = 2000;
   /** Read-modify-write of series contexts and usage totals by pages translated at the same time. */
   private locks = new KeyedMutex();
+  /** The next picture, made ready while the model works on the current one (one at most). */
+  private ahead: { id: string; promise: Promise<PreparedPage | undefined> } | null = null;
+  /** Short pages waiting for the batched translation check, by chapter + settings. */
+  private reviews = new Map<string, { items: PendingReview[]; timer?: ReturnType<typeof setTimeout> }>();
+  private reviewRuns = new Set<Promise<void>>();
+  /** Strip results being cut into pictures: a late review of one waits for that. */
+  private deriving = new Map<string, Promise<unknown>>();
+  private compactQueue: string[] = [];
+  private compacting: Promise<void> | null = null;
   constructor(
     private db: IdbStore,
     private secrets: SecretStore,
@@ -130,6 +177,7 @@ export class TranslateService {
   }
 
   async translate(bytes: Uint8Array, mime: string | undefined, opts: TranslateOptions = {}): Promise<{ result: StoredResult; cached: boolean }> {
+    const tStart = performance.now();
     if (bytes.length > MAX_INPUT_BYTES) throw new AppError('IMAGE_TOO_LARGE', { retryable: false });
     const realMime = sniffImageMime(bytes);
     if (realMime === 'image/tiff') throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: tr('TIFF браузер не открывает — сохраните картинку как PNG или JPG.') });
@@ -143,6 +191,8 @@ export class TranslateService {
       }
     }
     const baseKey = await this.cacheKey(bytes, config, { generic: opts.generic, fonts: lookOf(settings.fonts) });
+    const noSkip = opts.noSkip ?? !!opts.force;
+    const prepared = await this.takeAhead(`${baseKey}|${noSkip ? 1 : 0}`);
     if (!opts.force) {
       const hit = await this.db.get<StoredResult>('results', baseKey);
       if (hit) {
@@ -153,7 +203,8 @@ export class TranslateService {
           return { result: again, cached: true };
         }
         hit.lastHitAt = new Date().toISOString();
-        void this.db.put('results', baseKey, hit);
+        // Only the small size record: the picture data is not written again.
+        void this.markUsed(baseKey, hit).catch(() => undefined);
         opts.onStage?.({ stage: 'done', progress: 1, message: 'cache' });
         return { result: hit, cached: true };
       }
@@ -161,16 +212,22 @@ export class TranslateService {
     const context = opts.generic ? undefined : await this.getContext(seriesKey);
     let key = baseKey;
     try {
-      const { value: out, lighter } = await this.runFitting(config, opts, (cfg) => runPipeline({ bytes, mime: realMime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter }));
+      const { value: out, lighter } = await this.runFitting(config, opts, (cfg) =>
+        runPipeline(
+          { bytes, mime: realMime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic, noSkip, prepared, batchReview: !!config.qaBatch && !opts.generic },
+          { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter },
+        ),
+      );
       // A result made with lighter settings must not answer for the full-quality key.
       if (lighter) key = `${baseKey}:lite`;
       opts.onStage?.({ stage: 'rendering' });
       const rendered = await renderOutput(this.backend, out, styleDefaultsFor(config, settings.fonts));
       const cleanedTiles = await Promise.all(out.cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') })));
       const now = new Date().toISOString();
+      const page = { ...rendered.page, timings: { ...rendered.page.timings, totalMs: Math.round(performance.now() - tStart) } };
       const result: StoredResult = {
         key,
-        page: rendered.page,
+        page,
         rendered: rendered.tiles,
         mime: rendered.mime,
         original: { bytes, mime: realMime },
@@ -183,7 +240,8 @@ export class TranslateService {
         fontScale: settings.fonts.scale,
         ...(lighter ? { degraded: true } : {}),
       };
-      await this.db.put('results', key, result);
+      await this.putResult(key, result);
+      if (out.reviewLater) this.queueReview({ key, seriesKey, config, context: out.context ?? context, blocks: structuredClone(page.blocks) });
       if (seriesKey && !opts.generic) {
         if (out.contextUpdate) {
           // Merge into the latest stored context: another page of the series may have finished meanwhile.
@@ -196,6 +254,7 @@ export class TranslateService {
       }
       await this.recordUsage(rendered.page.usage);
       if (settings.saveHistory) await this.addHistory({ key, url: opts.sourceUrl, title: opts.title, date: now, pages: 1, targetLang: config.targetLang, model: (config.translator ?? config.vision)?.model ?? 'engine', status: 'done' });
+      this.scheduleCompact(key);
       return { result, cached: false };
     } catch (e) {
       const err = toAppError(e);
@@ -204,6 +263,39 @@ export class TranslateService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Make a picture ready for the model (decode, look for lettering, encode for the vision model)
+   * before its turn, while the model still works on the previous one. Only the latest picture is
+   * kept (memory stays bounded); `translate` of the same bytes with the same settings takes it.
+   * Never throws: a failed preparation only means the work is done again in `translate`.
+   */
+  async prefetch(bytes: Uint8Array, mime: string | undefined, opts: Pick<TranslateOptions, 'sourceUrl' | 'seriesKey' | 'generic' | 'force' | 'noSkip'> = {}): Promise<void> {
+    try {
+      const realMime = sniffImageMime(bytes);
+      if (!realMime || realMime === 'image/tiff' || bytes.length > MAX_INPUT_BYTES) return;
+      const seriesKey = opts.seriesKey ?? seriesKeyFromUrl(opts.sourceUrl);
+      const { settings, config } = await this.config(seriesKey);
+      if (config.mode !== 'standalone') return;
+      const key = await this.cacheKey(bytes, config, { generic: opts.generic, fonts: lookOf(settings.fonts) });
+      const noSkip = opts.noSkip ?? !!opts.force;
+      const id = `${key}|${noSkip ? 1 : 0}`;
+      if (this.ahead?.id === id) return void (await this.ahead.promise);
+      const promise = preparePage({ bytes, mime: realMime, config, generic: opts.generic, noSkip }, { backend: this.backend, fetchImpl: this.fetchImpl }).catch(() => undefined);
+      this.ahead = { id, promise };
+      await promise;
+    } catch {
+      /* best effort */
+    }
+  }
+
+  /** The prepared picture for this key, if it is the one prepared ahead (it is handed out once). */
+  private async takeAhead(id: string): Promise<PreparedPage | undefined> {
+    const a = this.ahead;
+    if (!a || a.id !== id) return undefined;
+    this.ahead = null;
+    return a.promise;
   }
 
   /**
@@ -254,17 +346,45 @@ export class TranslateService {
     const todoParts = todo.map((i) => parts[i]);
     const plan = await planStrip(this.backend, todoParts);
     const chunks = planChunks(plan.spans.map((s) => s.h), plan.calmAfter);
-    for (const chunk of chunks) {
-      opts.onChunk?.(chunk.map((j) => todo[j]));
-      const top = plan.spans[chunk[0]].y;
+    // Glue one chunk into one picture (PNG bytes).
+    const glue = async (chunk: number[]): Promise<Uint8Array> => {
       const glued = await stitchChunk(this.backend, todoParts, plan, chunk);
       const band = this.backend.createCanvas(glued.width, glued.height);
       const bctx = band.getContext('2d');
       for (const t of glued.tiles) bctx.drawImage(t.canvas, 0, t.y);
-      const bytes = await this.backend.encode(band, 'image/png');
-      const { result } = await this.translate(bytes, 'image/png', opts);
+      return this.backend.encode(band, 'image/png');
+    };
+    // The next chunk is glued and made ready (decoded, checked for text) while the model works on
+    // this one; only one chunk ahead, so memory stays bounded.
+    let next: Promise<Uint8Array> | null = chunks.length ? glue(chunks[0]) : null;
+    for (const [c, chunk] of chunks.entries()) {
+      opts.onChunk?.(chunk.map((j) => todo[j]));
+      const top = plan.spans[chunk[0]].y;
+      const bytes = await next!;
+      next = null;
+      const pending = this.translate(bytes, 'image/png', opts);
+      if (c + 1 < chunks.length) {
+        next = glue(chunks[c + 1]).then(async (b) => {
+          await this.prefetch(b, 'image/png', opts);
+          return b;
+        });
+      }
+      let result: StoredResult;
+      try {
+        ({ result } = await pending);
+      } catch (e) {
+        next?.catch(() => undefined);
+        throw e;
+      }
       const spans = chunk.map((j) => ({ y: plan.spans[j].y - top, h: plan.spans[j].h }));
-      const derived = await this.deriveParts(result, spans, chunk.map((j) => todoParts[j]));
+      const deriving = this.deriveParts(result, spans, chunk.map((j) => todoParts[j]));
+      this.deriving.set(result.key, deriving);
+      let derived: StoredResult[];
+      try {
+        derived = await deriving;
+      } finally {
+        this.deriving.delete(result.key);
+      }
       for (const [n, j] of chunk.entries()) {
         // A lighter (out-of-memory) result is shown but not remembered: next time try full quality.
         if (!result.degraded) await this.db.put('kv', `strip:${partKeys[todo[j]]}`, derived[n].key);
@@ -287,16 +407,19 @@ export class TranslateService {
         ...parent,
         key,
         page: pageForSpan(parent.page, s, i),
-        rendered: await encode(cropRows(rendered, s.y, s.h), parent.mime),
+        // PNG first (fast, lossless); re-stored as lossless WebP in the background.
+        rendered: await encode(cropRows(rendered, s.y, s.h), 'image/png'),
+        mime: 'image/png',
         cleaned: await encode(cropRows(cleaned, s.y, s.h), 'image/png'),
         original,
         strip: { parent: parent.key, index: i, y: s.y, h: s.h },
         parts: undefined,
       };
-      await this.db.put('results', key, r);
+      await this.putResult(key, r);
+      this.scheduleCompact(key);
       out.push(r);
     }
-    await this.db.put('results', parent.key, { ...parent, parts: out.map((r) => r.key) });
+    await this.putResult(parent.key, { ...parent, parts: out.map((r) => r.key) });
     return out;
   }
 
@@ -362,7 +485,8 @@ export class TranslateService {
     const rendered = await renderOutput(this.backend, { page, cleaned: image }, styleDefaultsFor({ targetLang: page.targetLang, sfxStyle: settings.sfxStyle }, settings.fonts));
     const cleanedTiles = cleaned ? await Promise.all(cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') }))) : stored.cleaned;
     const next: StoredResult = { ...stored, page: rendered.page, rendered: rendered.tiles, cleaned: cleanedTiles, lastHitAt: new Date().toISOString(), fontScale: settings.fonts.scale };
-    await this.db.put('results', key, next);
+    await this.putResult(key, next);
+    this.scheduleCompact(key);
     // A glued strip: cut the edited result back into its pictures too.
     if (stored.parts?.length) {
       const spans = [];
@@ -417,7 +541,12 @@ export class TranslateService {
     const r = await this.getResult(key);
     if (!r) return;
     r.lastHitAt = new Date().toISOString();
-    await this.db.put('results', key, r);
+    await this.markUsed(key, r);
+  }
+
+  /** Remember that a cached result was used now (cache pruning goes by the size records). */
+  private async markUsed(key: string, r: StoredResult): Promise<void> {
+    await this.db.put('kv', `${META}${key}`, { size: r.size ?? resultSize(r), lastHitAt: r.lastHitAt } satisfies CacheMeta);
   }
 
   async addHistory(e: HistoryEntry): Promise<void> {
@@ -429,12 +558,13 @@ export class TranslateService {
     return all.map(([, v]) => v).sort((a, b) => b.date.localeCompare(a.date)).slice(0, limit);
   }
 
-  async recordUsage(usage: Usage[]): Promise<void> {
+  /** Add up tokens and cost; `page` = false for a request that is not a page of its own (a batched review). */
+  async recordUsage(usage: Usage[], page = true): Promise<void> {
     if (!usage.length) return;
     // One update at a time: pages finishing together must not lose each other's counts.
     await this.locks.run('usage', async () => {
       const totals = (await this.db.get<UsageTotals>('usage', 'totals')) ?? { pages: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
-      totals.pages++;
+      if (page) totals.pages++;
       for (const u of usage) {
         totals.inputTokens += u.inputTokens;
         totals.outputTokens += u.outputTokens;
@@ -468,17 +598,37 @@ export class TranslateService {
   /** Housekeeping: old cache and old history (run on start and every few hours). */
   async prune(): Promise<{ cache: number; history: number }> {
     const s = await this.getSettings();
-    return { cache: await this.pruneCache(s.cacheDays), history: await this.pruneHistory(s.historyDays ?? 30) };
+    return { cache: await this.pruneCache(s.cacheDays, s.cacheMaxMb ?? DEFAULT_CACHE_MAX_MB), history: await this.pruneHistory(s.historyDays ?? 30) };
   }
 
-  /** Drop cached results not used for `days` days. */
-  async pruneCache(days: number): Promise<number> {
+  /**
+   * Drop cached results not used for `days` days, then the least recently used ones until the
+   * cache takes at most `maxMb`. Works from the small size records (see putResult): the pictures
+   * are not read, except once for results stored before sizes were kept.
+   */
+  async pruneCache(days: number, maxMb = Infinity): Promise<number> {
     const cutoff = Date.now() - days * 86_400_000;
+    const metas = await this.cacheIndex();
     let n = 0;
     const kept = new Set<string>();
-    for (const [key, v] of await this.db.entries<StoredResult>('results')) {
-      if (Date.parse(v.lastHitAt) < cutoff) {
-        await this.db.delete('results', key);
+    let used = 0;
+    const alive: [string, CacheMeta][] = [];
+    for (const [key, m] of metas) {
+      if (Date.parse(m.lastHitAt) < cutoff) {
+        await this.dropResult(key);
+        n++;
+      } else {
+        alive.push([key, m]);
+        used += m.size;
+      }
+    }
+    // Over the cap: oldest use first.
+    alive.sort((a, b) => a[1].lastHitAt.localeCompare(b[1].lastHitAt));
+    const cap = maxMb * 1024 * 1024;
+    for (const [key, m] of alive) {
+      if (used > cap) {
+        await this.dropResult(key);
+        used -= m.size;
         n++;
       } else kept.add(key);
     }
@@ -488,6 +638,224 @@ export class TranslateService {
     }
     return n;
   }
+
+  /** How much space the cache takes (for «Занято: N МБ из M»). */
+  async cacheUsage(): Promise<CacheUsage> {
+    const s = await this.getSettings();
+    const metas = await this.cacheIndex();
+    let usedBytes = 0;
+    for (const m of metas.values()) usedBytes += m.size;
+    return { usedBytes, usedMb: Math.round((usedBytes / 1048576) * 10) / 10, maxMb: s.cacheMaxMb ?? DEFAULT_CACHE_MAX_MB, results: metas.size };
+  }
+
+  /**
+   * Size and last use of every cached result, from the small records kept next to them. Results
+   * stored before those records existed are measured once (one at a time); records of results
+   * that are gone (cache cleared from the settings) are dropped.
+   */
+  private async cacheIndex(): Promise<Map<string, CacheMeta>> {
+    const keys = new Set(await this.db.keys('results'));
+    const metas = new Map<string, CacheMeta>();
+    for (const [k, v] of await this.db.entries<unknown>('kv')) {
+      if (!k.startsWith(META)) continue;
+      const key = k.slice(META.length);
+      if (keys.has(key)) metas.set(key, v as CacheMeta);
+      else await this.db.delete('kv', k);
+    }
+    for (const key of keys) {
+      if (metas.has(key)) continue;
+      const r = await this.getResult(key);
+      if (!r) continue;
+      const meta = { size: r.size ?? resultSize(r), lastHitAt: r.lastHitAt ?? r.createdAt ?? new Date(0).toISOString() };
+      await this.db.put('kv', `${META}${key}`, meta);
+      metas.set(key, meta);
+    }
+    return metas;
+  }
+
+  private async dropResult(key: string): Promise<void> {
+    await this.db.delete('results', key);
+    await this.db.delete('kv', `${META}${key}`);
+  }
+
+  /** Store a result with its size record. All writes of results go through here (or updateResult). */
+  private async putResult(key: string, r: StoredResult): Promise<void> {
+    await this.locks.run(`put:${key}`, () => this.write(key, r));
+  }
+
+  private async write(key: string, r: StoredResult): Promise<void> {
+    r.size = resultSize(r);
+    await this.db.put('results', key, r);
+    await this.db.put('kv', `${META}${key}`, { size: r.size, lastHitAt: r.lastHitAt } satisfies CacheMeta);
+  }
+
+  /**
+   * Read-modify-write of a stored result under a per-key lock: `fn` gets the stored record and
+   * returns the new one, or null to leave it (a background write that a user's edit overtook).
+   */
+  private async updateResult(key: string, fn: (current: StoredResult | undefined) => Promise<StoredResult | null>): Promise<boolean> {
+    return this.locks.run(`put:${key}`, async () => {
+      const r = await fn(await this.getResult(key));
+      if (!r) return false;
+      await this.write(key, r);
+      return true;
+    });
+  }
+
+  // ---- lossless WebP in the background ------------------------------------------------------
+
+  /** Re-store a result's pictures as lossless WebP later (smaller cache; nothing on the way to the screen). */
+  private scheduleCompact(key: string): void {
+    if (!this.compactTiles) return;
+    if (!this.compactQueue.includes(key)) this.compactQueue.push(key);
+    if (this.compacting) return;
+    this.compacting = (async () => {
+      // Let the page reach the screen first; the encoder then runs while the model reads the next one.
+      await new Promise((r) => setTimeout(r, this.compactDelayMs));
+      while (this.compactQueue.length) {
+        const k = this.compactQueue.shift()!;
+        try {
+          await this.compact(k);
+        } catch {
+          /* the PNG copy stays: nothing lost */
+        }
+      }
+    })().finally(() => {
+      this.compacting = null;
+      if (this.compactQueue.length) this.scheduleCompact(this.compactQueue[0]);
+    });
+  }
+
+  /** Wait for the background WebP re-store (tests, before a measurement). */
+  async compactIdle(): Promise<void> {
+    while (this.compacting) await this.compacting;
+  }
+
+  private async compact(key: string): Promise<void> {
+    if (!(await losslessWebp(this.backend))) return;
+    const r = await this.getResult(key);
+    if (!r) return;
+    const isWebp = (t: { bytes: Uint8Array }) => sniffImageMime(t.bytes) === 'image/webp';
+    if (r.rendered.every(isWebp) && r.cleaned.every(isWebp)) return;
+    const before = await tilesHash(r);
+    const recode = (tiles: { y: number; h: number; bytes: Uint8Array }[]) =>
+      Promise.all(
+        tiles.map(async (t) => {
+          if (isWebp(t)) return t;
+          const d = await this.backend.decode(t.bytes, sniffImageMime(t.bytes) ?? 'image/png');
+          try {
+            const c = this.backend.createCanvas(d.width, d.height);
+            c.getContext('2d').drawImage(d.source, 0, 0);
+            const webp = await this.backend.encode(c, 'image/webp', 1);
+            // Only when it is really smaller.
+            return webp.length < t.bytes.length && sniffImageMime(webp) === 'image/webp' ? { y: t.y, h: t.h, bytes: webp } : t;
+          } finally {
+            d.close?.();
+          }
+        }),
+      );
+    const rendered = await recode(r.rendered);
+    const cleaned = await recode(r.cleaned);
+    // Mixed tiles (a WebP tile that came out larger stays PNG) keep the old `mime`: readers sniff the bytes.
+    const mime: ImageMime = rendered.every(isWebp) ? 'image/webp' : r.mime;
+    await this.updateResult(key, async (cur) => (cur && (await tilesHash(cur)) === before ? { ...cur, rendered, cleaned, mime } : null));
+  }
+
+  // ---- batched translation check ------------------------------------------------------------
+
+  /** A short page waits (up to QA_BATCH.waitMs, or until 4 pages) to be reviewed with its neighbours. */
+  private queueReview(item: PendingReview): void {
+    const group = `${item.seriesKey ?? ''}|${item.config.targetLang}|${(item.config.translator ?? item.config.vision)?.id ?? ''}`;
+    let g = this.reviews.get(group);
+    if (!g) this.reviews.set(group, (g = { items: [] }));
+    g.items.push(item);
+    if (g.items.length >= QA_BATCH.maxPages) this.flushReviewGroup(group);
+    else if (!g.timer) g.timer = setTimeout(() => this.flushReviewGroup(group), QA_BATCH.waitMs);
+  }
+
+  private flushReviewGroup(group: string): void {
+    const g = this.reviews.get(group);
+    if (!g) return;
+    this.reviews.delete(group);
+    if (g.timer) clearTimeout(g.timer);
+    const run = this.reviewBatch(g.items).catch(() => undefined);
+    this.reviewRuns.add(run);
+    void run.finally(() => this.reviewRuns.delete(run));
+  }
+
+  /** Send every waiting review now and wait for all of them (tests; before closing). */
+  async flushReviews(): Promise<void> {
+    for (const group of [...this.reviews.keys()]) this.flushReviewGroup(group);
+    while (this.reviewRuns.size) await Promise.all([...this.reviewRuns]);
+  }
+
+  private async reviewBatch(items: PendingReview[]): Promise<void> {
+    const config = items[0].config;
+    const cfg = config.translator ?? config.vision;
+    if (!cfg) return;
+    // runPipeline checked the privacy mode before it put the page here; checked again all the same.
+    assertPrivacy(config.privacy, cfg, 'text');
+    const provider = createProvider(cfg, this.fetchImpl);
+    const pages = items.map((i) => i.blocks);
+    const usage = await qaPages(pages, { provider, mode: config.qa ?? 'fix', targetLang: config.targetLang, glossary: config.glossary, context: items[items.length - 1].context });
+    for (const [i, item] of items.entries()) await this.applyReview(item.key, pages[i], i === 0 ? usage : []);
+    await this.recordUsage(usage, false);
+  }
+
+  /** Put the reviewer's notes and fixes into the stored result; redraw and tell the app when text changed. */
+  private async applyReview(key: string, reviewed: TextBlock[], usage: Usage[]): Promise<void> {
+    await this.deriving.get(key)?.catch(() => undefined);
+    const stored = await this.getResult(key);
+    if (!stored) return;
+    const byId = new Map(reviewed.map((b) => [b.id, b]));
+    let any = false;
+    let changed = false;
+    const blocks = stored.page.blocks.map((b) => {
+      const r = byId.get(b.id);
+      // Only blocks that still read as when they were reviewed (not edited by hand meanwhile).
+      if (!r?.qa || b.edited || b.translatedText !== (r.qa.before ?? r.translatedText)) return b;
+      any = true;
+      if (r.translatedText !== b.translatedText) changed = true;
+      return { ...b, translatedText: r.translatedText, qa: r.qa };
+    });
+    if (!any) return;
+    const page: PageResult = { ...stored.page, blocks, usage: [...stored.page.usage, ...usage] };
+    if (changed) {
+      const next = await this.saveEdited(key, page);
+      for (const k of [key, ...(next.parts ?? [])]) this.onResultChanged?.(k);
+    } else {
+      await this.putResult(key, { ...stored, page });
+      // The notes changed too (shown in the editor): the pictures stay the same.
+      if (stored.parts?.length) for (const k of stored.parts) {
+        const part = await this.getResult(k);
+        if (part?.strip) await this.putResult(k, { ...part, page: pageForSpan(page, { y: part.strip.y, h: part.strip.h }, part.strip.index) });
+      }
+    }
+  }
+}
+
+interface PendingReview {
+  key: string;
+  seriesKey?: string;
+  config: PipelineConfig;
+  context?: TranslationContext;
+  /** The page's blocks as delivered (the review works on this copy). */
+  blocks: TextBlock[];
+}
+
+async function tilesHash(r: Pick<StoredResult, 'rendered' | 'cleaned'>): Promise<string> {
+  const parts = [...r.rendered, ...r.cleaned];
+  const total = parts.reduce((a, t) => a + t.bytes.length + 8, 0);
+  const all = new Uint8Array(total);
+  let o = 0;
+  for (const t of parts) {
+    all.set(t.bytes, o);
+    o += t.bytes.length;
+    new DataView(all.buffer).setUint32(o, t.y);
+    new DataView(all.buffer).setUint32(o + 4, t.h);
+    o += 8;
+  }
+  return sha256Hex(all);
 }
 
 export interface UsageTotals {
@@ -500,7 +868,8 @@ export interface UsageTotals {
 export async function tilesToImage(backend: ImageBackend, width: number, height: number, tiles: { y: number; h: number; bytes: Uint8Array }[]): Promise<TiledImage> {
   const image = new TiledImage(backend, width, height);
   for (const t of tiles) {
-    const img = await backend.decode(t.bytes, 'image/png');
+    // PNG, or lossless WebP once re-stored (see TranslateService.compact).
+    const img = await backend.decode(t.bytes, sniffImageMime(t.bytes) ?? 'image/png');
     for (const tile of image.tiles) {
       if (tile.y + tile.h <= t.y || tile.y >= t.y + t.h) continue;
       tile.canvas.getContext('2d').drawImage(img.source, 0, t.y - tile.y);

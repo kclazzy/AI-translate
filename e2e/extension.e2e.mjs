@@ -269,6 +269,36 @@ try {
     const picked = await ed.$eval('[data-testid="brush-color"]', (el) => el.value);
     const [pr, pg, pb] = [1, 3, 5].map((i) => parseInt(picked.slice(i, i + 2), 16));
     check('the pipette takes the brush colour from the picture', picked !== '#ffffff' && Math.abs(pr - pg) < 20 && Math.abs(pg - pb) < 20 && pr > 120 && pr < 235, picked);
+    // Compare with the original (◫, a slider as on the page): the blocks stay editable meanwhile.
+    await ed.click('[aria-label="Выбор"]');
+    const cmpBtn = await ed.$eval('[data-testid="compare"]', (b) => ({ icon: b.textContent, title: b.title }));
+    check('the editor compare button matches the page one', cmpBtn.icon === '◫' && cmpBtn.title === 'Сравнить с оригиналом', JSON.stringify(cmpBtn));
+    await ed.click('[data-testid="compare"]');
+    await ed.waitForSelector('.ait-compare-handle', { timeout: 3000 });
+    const boxesInCompare = await ed.$$eval('.ait-box', (l) => l.length);
+    check('blocks stay on the page while comparing', boxesInCompare === 2, `boxes=${boxesInCompare}`);
+    const boxRect = () => ed.$eval('.ait-box', (el) => {
+      const r = el.getBoundingClientRect();
+      return { x: r.left, y: r.top, w: r.width, h: r.height };
+    });
+    const b0 = await boxRect();
+    await ed.mouse.move(b0.x + b0.w / 2, b0.y + b0.h / 2);
+    await ed.mouse.down();
+    await ed.mouse.move(b0.x + b0.w / 2 + 40, b0.y + b0.h / 2 + 30, { steps: 6 });
+    await ed.mouse.up();
+    await new Promise((r) => setTimeout(r, 200));
+    const b1 = await boxRect();
+    check('a block can be dragged while comparing', b1.x - b0.x > 25 && b1.y - b0.y > 15, `${JSON.stringify(b0)} → ${JSON.stringify(b1)}`);
+    await ed.click('.ait-blocklist button');
+    await ed.$eval('.ait-props textarea', (el) => {
+      el.focus();
+      el.select();
+    });
+    await ed.keyboard.type('Сравниваю');
+    const typed = await ed.$eval('.ait-props textarea', (el) => el.value);
+    const stillComparing = !!(await ed.$('.ait-compare-handle'));
+    check('text can be edited while comparing', typed === 'Сравниваю' && stillComparing, `${typed} comparing=${stillComparing}`);
+    await ed.screenshot({ path: join(OUT, 'e2e-editor-compare.png') });
   }
 
   // Popup renders.
@@ -309,6 +339,22 @@ try {
     h1 = await historyCount();
   }
   check('screen area: capture → crop → translate completes', h1 > h0, `history ${h0} → ${h1}`);
+
+  // Settings → «Замерить скорость»: the sample page goes through the pipeline and a table of stages appears.
+  if (MODE !== 'engine') {
+    await studio.bringToFront();
+    const before = calls.length;
+    const clicked = await studio.evaluate(() => {
+      const b = [...document.querySelectorAll('[data-testid=speed-benchmark] button')].find((x) => x.textContent.includes('Замерить скорость'));
+      b?.click();
+      return !!b;
+    });
+    const table = clicked ? await studio.waitForSelector('[data-testid=speed-result] table', { timeout: 30000 }).catch(() => null) : null;
+    const benchText = table ? await studio.$eval('[data-testid=speed-result]', (e) => e.innerText) : await studio.$eval('[data-testid=speed-benchmark]', (e) => e.innerText).catch(() => '');
+    check('«Замерить скорость» shows the stage table with «Всего»', !!table && /Всего\s+[\d,.]+\s*с/.test(benchText) && benchText.includes('Чтение картинки') && benchText.includes('Быстрее всего ускорит'), benchText.replace(/\s+/g, ' ').slice(0, 300));
+    check('the benchmark skips the cache (asks the model again)', calls.length > before, `calls ${before} → ${calls.length}`);
+    await studio.screenshot({ path: join(OUT, 'e2e-benchmark.png'), fullPage: false });
+  }
 
   check('no uncaught page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 } catch (e) {

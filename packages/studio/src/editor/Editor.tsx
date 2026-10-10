@@ -1071,7 +1071,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           <span className="ait-pal-val">{Math.round(zoom * 100)}%</span>
           <button className="ait-pal-btn" onClick={() => setZoom((z) => Math.max(0.1, +(z / 1.25).toFixed(3)))} title={tr('Уменьшить')} aria-label={tr('Уменьшить')}>−</button>
           <button className="ait-pal-btn" onClick={() => setZoom(fitZoom())} title={tr('По ширине')} aria-label={tr('По ширине')}>↔</button>
-          <button className={`ait-pal-btn ${compare ? 'active' : ''}`} onClick={() => setCompare((c) => !c)} aria-pressed={compare} title={tr('Сравнить с оригиналом')} aria-label={tr('Сравнить')}>◐</button>
+          <button className={`ait-pal-btn ${compare ? 'active' : ''}`} data-testid="compare" onClick={() => setCompare((c) => !c)} aria-pressed={compare} title={tr('Сравнить с оригиналом')} aria-label={tr('Сравнить с оригиналом')}>◫</button>
         </div>
         <canvas ref={overlayRef} className="ait-stroke-overlay" aria-hidden style={{ display: 'none' }} />
         {showMinimap ? (
@@ -1164,11 +1164,13 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                       }}
                       width={original.width}
                       height={t.h}
-                      style={{ position: 'absolute', left: 0, top: t.y, clipPath: `inset(0 ${(1 - split) * 100}% 0 0)` }}
+                      // Only a picture: clicks and tools go through it to the page as usual.
+                      style={{ position: 'absolute', left: 0, top: t.y, clipPath: `inset(0 ${(1 - split) * 100}% 0 0)`, pointerEvents: 'none' }}
                     />
                   ))
                 : null}
-              {!compare && tool === 'select'
+              {/* The comparison is a slider over the page (as on the site): the blocks stay editable. */}
+              {tool === 'select'
                 ? blocks.map((b) => {
                     // Keep the frame on the picture: a box sticking out above the page cannot be grabbed.
                     const raw = targetBox(b, defaults);

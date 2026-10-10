@@ -170,9 +170,20 @@ describe('speed and the local model', () => {
     const cloud = { ...s, providers: [...s.providers, { ...configFromPreset('openai', 'oa') }], visionProviderId: 'oa' };
     expect(pipelineConfigFromSettings(cloud)).toMatchObject({ quality: 'best', qa: 'fix' });
   });
-  it('context window follows the video memory', () => {
-    expect(pipelineConfigFromSettings({ ...defaultSettings(), gpuVramGb: 8 }).vision?.numCtx).toBe(8192);
+  it('context window follows the video memory and holds a page picture, the prompt and the answer', () => {
+    // 1568 px picture (balanced) ≈ 2240 tokens + prompt + answer: more than 8 K.
+    expect(pipelineConfigFromSettings({ ...defaultSettings(), gpuVramGb: 8 }).vision?.numCtx).toBe(10240);
+    expect(pipelineConfigFromSettings({ ...defaultSettings(), gpuVramGb: 8, quality: 'fast' }).vision?.numCtx).toBe(8192);
     expect(pipelineConfigFromSettings({ ...defaultSettings(), gpuVramGb: 16 }).vision?.numCtx).toBe(16384);
+    // Fixed per model: the provider never changes it between requests (that reloads the model).
+    expect(pipelineConfigFromSettings(defaultSettings()).vision?.fixedCtx).toBe(true);
+  });
+  it('the same model gets the same context window for reading and for translating', () => {
+    const s = defaultSettings();
+    const c = pipelineConfigFromSettings({ ...s, translationProviderId: s.visionProviderId, twoStepTranslation: true });
+    expect(c.translator?.numCtx).toBe(c.vision?.numCtx);
+    const big = pipelineConfigFromSettings({ ...s, quality: 'best', gpuVramGb: 12, glossary: Array.from({ length: 150 }, (_, i) => ({ id: `g${i}`, source: `s${i}`, target: `t${i}`, matchMode: 'exact' as const, caseSensitive: false, forbidden: [], enabled: true })) });
+    expect(big.vision?.numCtx).toBe(14336);
   });
   it('reports tokens per second and sends num_ctx to Ollama', async () => {
     let body: Record<string, any> = {};

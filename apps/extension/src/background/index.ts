@@ -117,7 +117,21 @@ function track(tabId: number, jobId: string, on: boolean) {
   saveRunning();
 }
 
+/**
+ * A stored result changed (edited, or fixed by the batched translation check): every tab gets the
+ * key and the page that shows that result fetches it again (others ignore it — the key is a hash
+ * of the picture, so no page learns anything it does not show).
+ */
+async function broadcastResultChanged(key: string): Promise<void> {
+  const tabs = await chrome.tabs.query({}).catch(() => [] as chrome.tabs.Tab[]);
+  for (const t of tabs) if (t.id !== undefined) sendToTab(t.id, { type: 'result-changed', key });
+}
+
 function relayFromOffscreen(m: FromOffscreen) {
+  if (m.type === 'result-changed') {
+    void broadcastResultChanged(m.key);
+    return;
+  }
   if (m.type === 'save') {
     // Only files the worker made itself (blob: URLs of this extension).
     if (!m.url.startsWith(`blob:${chrome.runtime.getURL('').replace(/\/$/, '')}`)) return;
@@ -676,11 +690,9 @@ async function handleUi(msg: UiToBackground): Promise<unknown> {
       saveRunning();
       return toOffscreen({ target: 'offscreen', type: 'cancel-tab', tabId: msg.tabId });
     }
-    case 'result-changed': {
-      const tabs = await chrome.tabs.query({});
-      for (const t of tabs) if (t.id !== undefined) sendToTab(t.id, { type: 'result-changed', key: msg.key });
+    case 'result-changed':
+      await broadcastResultChanged(msg.key);
       return null;
-    }
   }
 }
 
