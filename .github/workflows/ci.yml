@@ -107,7 +107,7 @@ jobs:
           echo "tag=v$V" >> "$GITHUB_OUTPUT"
           # Already published (the desktop file is there): nothing to do for this version.
           if [ "${GITHUB_REF}" = "refs/heads/main" ] && gh release view "v$V" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -q "desktop-v$V.zip"; then echo "skip=1" >> "$GITHUB_OUTPUT"; fi
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: steps.v.outputs.skip != '1'
         with: { name: release-web, path: release }
       - uses: softprops/action-gh-release@v2
