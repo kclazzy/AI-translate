@@ -4,7 +4,7 @@ import { TiledImage } from '../image/tiled';
 import { mergeContext, type TranslationContext } from '../translate/context';
 import type { PageResult, StageEvent } from '../types';
 import { timeoutSignal } from '../util/retry';
-import type { FetchLike } from '../llm/types';
+import type { FetchLike, ProviderConfig } from '../llm/types';
 import { isLocalUrl } from '../llm/privacy';
 import { pipelineHash, type PipelineConfig } from './config';
 import type { PipelineOutput, PipelineRequest } from './standalone';
@@ -80,6 +80,17 @@ export class EngineClient {
     return new Uint8Array(await res.arrayBuffer());
   }
 
+  /**
+   * Provider settings for the engine. API keys go only to an engine on this computer / network or
+   * over HTTPS: never in clear text across the internet.
+   */
+  providerForEngine(p: ProviderConfig | null | undefined): ProviderConfig | null {
+    if (!p) return null;
+    if (!p.apiKey || isLocalUrl(this.baseUrl) || /^https:/i.test(this.baseUrl)) return p;
+    const { apiKey: _key, ...rest } = p;
+    return rest;
+  }
+
   /** Submit a page and follow its progress over Server-Sent Events. */
   async translatePage(bytes: Uint8Array, mime: string, config: PipelineConfig, context: TranslationContext | undefined, opts: { signal?: AbortSignal; onStage?: (e: StageEvent) => void } = {}): Promise<EngineDone> {
     const form = new FormData();
@@ -96,8 +107,8 @@ export class EngineClient {
         context: context ?? null,
         translateSfx: config.translateSfx,
         sfxStyle: config.sfxStyle,
-        translator: config.translator ?? config.vision,
-        vision: config.vision,
+        translator: this.providerForEngine(config.translator ?? config.vision),
+        vision: this.providerForEngine(config.vision),
         ...(config.engine?.options ?? {}),
       }),
     );
@@ -190,5 +201,5 @@ export async function runEnginePipeline(req: PipelineRequest, deps: { backend: I
   const page: PageResult = { ...done.page, pipeline: { version: 1, hash: await pipelineHash(req.config), mode: 'engine' } };
   const context = req.context && done.contextUpdate ? mergeContext(req.context, done.contextUpdate) : req.context;
   req.onStage?.({ stage: 'done', progress: 1 });
-  return { page, original, cleaned, context };
+  return { page, original, cleaned, context, ...(req.context && done.contextUpdate ? { contextUpdate: done.contextUpdate } : {}) };
 }

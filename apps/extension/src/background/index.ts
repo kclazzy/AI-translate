@@ -1,6 +1,7 @@
 import '@ait/core/i18n/all';
-import { AppError, bytesToBase64, checkReadiness, dataUrlToBytes, isOllama, ollamaUnloadAll, readinessText, toAppError, type Readiness } from '@ait/core';
-import type { BackgroundToContent, ContentToBackground, FromOffscreen, ImageRef, JobStatus, ToOffscreen, UiToBackground, UiStrings } from '../shared/messages';
+import { AppError, checkReadiness, dataUrlToBytes, isOllama, ollamaUnloadAll, readinessText, toAppError, type Readiness } from '@ait/core';
+import { PAGE_PORT, type BackgroundToContent, type ContentToBackground, type FromOffscreen, type ImageRef, type JobStatus, type OffscreenFailure, type ToOffscreen, type UiToBackground, type UiStrings } from '../shared/messages';
+import { deleteJobBytes, hashBytes, putJobBytes } from '../shared/jobstore';
 import { hostOf, loadSettings, saveSettings } from '../shared/store';
 import { dictionaryFor, setUiLang, tr, uiLang } from '@ait/core/i18n';
 
@@ -18,9 +19,33 @@ function dlog(...args: unknown[]) {
   if (debugLog.length > 200) debugLog.shift();
   console.debug('[AIT]', ...args);
 }
-const MAX_FETCH_BYTES = 60 * 1024 * 1024;
+/** Bigger pictures are refused with a clear reason (they would also not fit in browser messages). */
+const MAX_FETCH_BYTES = 40 * 1024 * 1024;
 let creating: Promise<void> | null = null;
 const running = new Map<number, Set<string>>();
+
+// The job counts on the toolbar badge survive the service worker being stopped while idle.
+let saveRunningTimer: ReturnType<typeof setTimeout> | null = null;
+function saveRunning() {
+  if (saveRunningTimer) return;
+  saveRunningTimer = setTimeout(() => {
+    saveRunningTimer = null;
+    const data = Object.fromEntries([...running].filter(([, s]) => s.size).map(([t, s]) => [t, [...s]]));
+    void chrome.storage.session?.set({ running: data }).catch(() => undefined);
+  }, 200);
+}
+const runningRestored = (async () => {
+  try {
+    const { running: saved } = (await chrome.storage.session.get('running')) as { running?: Record<string, string[]> };
+    for (const [t, ids] of Object.entries(saved ?? {})) {
+      const set = running.get(Number(t)) ?? new Set<string>();
+      for (const id of ids) set.add(id);
+      running.set(Number(t), set);
+    }
+  } catch {
+    /* no session storage */
+  }
+})();
 
 async function ensureOffscreen(): Promise<void> {
   const off = chrome.offscreen;
@@ -45,12 +70,17 @@ async function toOffscreen<T = unknown>(msg: ToOffscreen): Promise<T> {
     // browser closed it): retry for a few seconds instead of failing the picture.
     for (let attempt = 0; ; attempt++) {
       await ensureOffscreen();
+      let r: unknown;
       try {
-        return (await chrome.runtime.sendMessage(msg)) as T;
+        r = await chrome.runtime.sendMessage(msg);
       } catch (e) {
         if (attempt >= 30 || !/Receiving end does not exist|Could not establish connection|message port closed/i.test(String(e))) throw e;
-        await new Promise((r) => setTimeout(r, 150));
+        await new Promise((res) => setTimeout(res, 150));
+        continue;
       }
+      // The worker failed: an error, not a result.
+      if (r && typeof r === 'object' && '__aitError' in r) throw toAppError((r as OffscreenFailure).__aitError);
+      return r as T;
     }
   }
   const { handleOffscreen } = await import('../offscreen/handler');
@@ -81,12 +111,16 @@ function track(tabId: number, jobId: string, on: boolean) {
   const set = running.get(tabId) ?? new Set<string>();
   if (on) set.add(jobId);
   else set.delete(jobId);
-  running.set(tabId, set);
+  if (set.size) running.set(tabId, set);
+  else running.delete(tabId);
   setBadge(tabId);
+  saveRunning();
 }
 
 function relayFromOffscreen(m: FromOffscreen) {
   if (m.type === 'save') {
+    // Only files the worker made itself (blob: URLs of this extension).
+    if (!m.url.startsWith(`blob:${chrome.runtime.getURL('').replace(/\/$/, '')}`)) return;
     // Some systems accept only Latin file names: transliterate each folder name if refused.
     const latin = m.filename.split('/').map((x) => translit(x).replace(/[^A-Za-z0-9 ._,()-]+/g, ' ').replace(/\s+/g, ' ').trim() || 'page').join('/');
     void chrome.downloads
@@ -106,8 +140,152 @@ function relayFromOffscreen(m: FromOffscreen) {
   }
 }
 
-let ruleSeq = 1000;
-/** Fetch an image as the page would: with cookies and the page as Referer (hotlink protection). */
+// ---- image fetching ----------------------------------------------------------------------------
+
+/** Session rules from 1000 up are ours (Referer for picture requests); older ones are left-overs. */
+const RULE_MIN = 1000;
+const RULE_SPAN = 2_000_000_000;
+/** A worker stopped mid-fetch leaves its rule behind (session rules outlive the worker): clear them. */
+const rulesReady: Promise<void> = (async () => {
+  const dnr = chrome.declarativeNetRequest;
+  if (!dnr?.getSessionRules) return;
+  const ids = (await dnr.getSessionRules()).map((r) => r.id).filter((id) => id >= RULE_MIN);
+  if (ids.length) await dnr.updateSessionRules({ removeRuleIds: ids });
+})().catch((e) => dlog('stale rules not cleared', e));
+
+/**
+ * One Referer rule per picture host at a time: requests to the same host from two pages with
+ * different Referers wait for each other instead of getting each other's header.
+ */
+interface RefererRule {
+  referer: string;
+  id: number;
+  users: number;
+  ready: Promise<void>;
+  done: Promise<void>;
+  release: () => void;
+}
+const refererRules = new Map<string, RefererRule>();
+
+async function acquireReferer(host: string, referer: string): Promise<RefererRule | null> {
+  const dnr = chrome.declarativeNetRequest;
+  if (!dnr?.updateSessionRules) return null;
+  await rulesReady;
+  for (;;) {
+    const cur = refererRules.get(host);
+    if (!cur) break;
+    if (cur.referer === referer) {
+      cur.users++;
+      await cur.ready;
+      return cur;
+    }
+    await cur.done;
+  }
+  let release!: () => void;
+  const done = new Promise<void>((r) => (release = r));
+  const id = RULE_MIN + Math.floor(Math.random() * RULE_SPAN);
+  const rule: RefererRule = { referer, id, users: 1, ready: Promise.resolve(), done, release };
+  rule.ready = dnr.updateSessionRules({
+    addRules: [
+      {
+        id,
+        priority: 1,
+        action: { type: dnr.RuleActionType.MODIFY_HEADERS, requestHeaders: [{ header: 'referer', operation: dnr.HeaderOperation.SET, value: referer }] },
+        condition: {
+          requestDomains: [host],
+          initiatorDomains: [new URL(chrome.runtime.getURL('')).host],
+          // Only requests made by the extension itself outside any tab (this worker's fetch).
+          tabIds: [-1],
+          resourceTypes: [dnr.ResourceType.XMLHTTPREQUEST, dnr.ResourceType.OTHER],
+        },
+      },
+    ],
+  });
+  refererRules.set(host, rule);
+  try {
+    await rule.ready;
+  } catch (e) {
+    refererRules.delete(host);
+    release();
+    throw e;
+  }
+  return rule;
+}
+
+function releaseReferer(host: string, rule: RefererRule) {
+  if (--rule.users > 0) return;
+  void chrome.declarativeNetRequest
+    .updateSessionRules({ removeRuleIds: [rule.id] })
+    .catch(() => undefined)
+    .finally(() => {
+      if (refererRules.get(host) === rule) refererRules.delete(host);
+      rule.release();
+    });
+}
+
+/** Addresses inside the user's own network (router, NAS, local servers). */
+function isPrivateHost(host: string): boolean {
+  const h = host.replace(/^\[|\]$/g, '').toLowerCase();
+  if (h === 'localhost' || /\.(localhost|local|lan|internal|home\.arpa)$/.test(h)) return true;
+  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(h);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  }
+  if (h.includes(':')) return h === '::1' || h === '::' || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe[89ab][0-9a-f]:/.test(h) || /^::ffff:(7f|a|c0a8|ac1)/.test(h);
+  // A name without dots (http://nas/) only exists inside a local network.
+  return !h.includes('.');
+}
+
+/** The "site" of a host (registrable domain, approximately: no public-suffix list in the extension). */
+function siteOf(host: string): string {
+  const h = host.replace(/^\[|\]$/g, '').toLowerCase();
+  if (/^[\d.]+$/.test(h) || h.includes(':')) return h;
+  const parts = h.split('.');
+  if (parts.length <= 2) return h;
+  const tld = parts[parts.length - 1];
+  const second = parts[parts.length - 2];
+  // co.uk, com.au, ne.jp, or.kr… keep three labels.
+  const n = tld.length === 2 && /^(co|com|net|org|gov|edu|ac|or|ne|go|gr|lg|ad|ed|mil|nom)$/.test(second) ? 3 : 2;
+  return parts.slice(-n).join('.');
+}
+
+/** Read a response body, refusing it as soon as it grows past the limit. */
+async function readCapped(res: Response): Promise<Uint8Array> {
+  const tooBig = () => new AppError('IMAGE_TOO_LARGE', { retryable: false, detail: tr('Картинка больше {0} МБ — такую не перевести.', MAX_FETCH_BYTES / 1024 / 1024) });
+  if (!res.body) {
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if (buf.length > MAX_FETCH_BYTES) throw tooBig();
+    return buf;
+  }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    got += value.length;
+    if (got > MAX_FETCH_BYTES) {
+      void reader.cancel().catch(() => undefined);
+      throw tooBig();
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(got);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.length;
+  }
+  return out;
+}
+
+/**
+ * Fetch an image as the page would: with the page as Referer (hotlink protection), and with cookies
+ * only when the picture is on the page's own site. Addresses inside the local network are fetched
+ * only for a page on that same address (a site cannot use the extension to read the user's router).
+ */
 async function fetchImage(src: string, pageUrl: string): Promise<{ bytes: Uint8Array; mime: string }> {
   if (src.startsWith('data:')) return dataUrlToBytes(src);
   let url: URL;
@@ -117,42 +295,76 @@ async function fetchImage(src: string, pageUrl: string): Promise<{ bytes: Uint8A
     throw new AppError('IMAGE_FETCH_FAILED', { retryable: false, detail: 'Bad image URL' });
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new AppError('IMAGE_FETCH_FAILED', { retryable: false, detail: `Unsupported scheme ${url.protocol}` });
-  const ruleId = ++ruleSeq;
-  let ruleAdded = false;
+  const pageHost = hostOf(pageUrl);
+  if (isPrivateHost(url.hostname) && url.hostname !== pageHost) {
+    throw new AppError('IMAGE_FETCH_FAILED', { retryable: false, detail: tr('Картинка лежит во внутренней сети, а страница — нет: такую картинку расширение не загружает.') });
+  }
+  const sameSite = !!pageHost && siteOf(url.hostname) === siteOf(pageHost);
+  const rule = pageUrl.startsWith('http') ? await acquireReferer(url.hostname, pageUrl) : null;
   try {
-    if (chrome.declarativeNetRequest?.updateSessionRules && pageUrl.startsWith('http')) {
-      await chrome.declarativeNetRequest.updateSessionRules({
-        addRules: [
-          {
-            id: ruleId,
-            priority: 1,
-            action: { type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS, requestHeaders: [{ header: 'referer', operation: chrome.declarativeNetRequest.HeaderOperation.SET, value: pageUrl }] },
-            condition: { requestDomains: [url.hostname], initiatorDomains: [new URL(chrome.runtime.getURL('')).host], resourceTypes: [chrome.declarativeNetRequest.ResourceType.XMLHTTPREQUEST, chrome.declarativeNetRequest.ResourceType.OTHER] },
-          },
-        ],
-      });
-      ruleAdded = true;
-    }
-    const res = await fetch(url.href, { credentials: 'include', cache: 'force-cache' });
+    const res = await fetch(url.href, { credentials: sameSite ? 'include' : 'omit', cache: 'force-cache' });
     if (!res.ok) throw new AppError('IMAGE_FETCH_FAILED', { detail: `HTTP ${res.status}` });
     const len = Number(res.headers.get('content-length') ?? 0);
-    if (len > MAX_FETCH_BYTES) throw new AppError('IMAGE_TOO_LARGE', { retryable: false });
-    const buf = new Uint8Array(await res.arrayBuffer());
-    if (buf.length > MAX_FETCH_BYTES) throw new AppError('IMAGE_TOO_LARGE', { retryable: false });
-    return { bytes: buf, mime: res.headers.get('content-type') ?? '' };
+    if (len > MAX_FETCH_BYTES) throw new AppError('IMAGE_TOO_LARGE', { retryable: false, detail: tr('Картинка больше {0} МБ — такую не перевести.', MAX_FETCH_BYTES / 1024 / 1024) });
+    const bytes = await readCapped(res);
+    return { bytes, mime: res.headers.get('content-type') ?? '' };
   } finally {
-    if (ruleAdded) void chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [ruleId] });
+    if (rule) releaseReferer(url.hostname, rule);
   }
 }
 
-async function capture(windowId: number): Promise<string> {
-  return chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+// ---- screenshots -------------------------------------------------------------------------------
+
+/** Browsers allow about two captures a second: take them one after another, spaced out. */
+const CAPTURE_GAP_MS = 550;
+let captureChain: Promise<unknown> = Promise.resolve();
+let lastCapture = 0;
+
+/**
+ * Screenshot of the picture `imageId` in tab `tabId`. Only when that tab is the one on screen (the
+ * active tab of a focused window): otherwise the screenshot would show another tab. The page hides
+ * our overlays over the picture and measures it again right before the shot.
+ */
+function captureFor(tabId: number, windowId: number, imageId: string): Promise<{ shot: string; rect: { x: number; y: number; width: number; height: number }; dpr: number }> {
+  const run = async () => {
+    const wait = lastCapture + CAPTURE_GAP_MS - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const onScreen = async () => {
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      const win = chrome.windows?.get ? await chrome.windows.get(windowId).catch(() => null) : { focused: true };
+      return !!tab?.active && tab.windowId === windowId && !!win?.focused;
+    };
+    if (!(await onScreen())) throw new AppError('IMAGE_FETCH_FAILED', { retryable: true, detail: tr('Картинку можно перевести только снимком экрана, а вкладка не на экране. Откройте вкладку и нажмите «Повторить».') });
+    const prep = (await chrome.tabs.sendMessage(tabId, { type: 'prepare-capture', id: imageId } satisfies BackgroundToContent).catch(() => null)) as { rect: { x: number; y: number; width: number; height: number }; dpr: number } | null;
+    if (!prep) throw new AppError('IMAGE_FETCH_FAILED', { retryable: true, detail: tr('Картинку можно перевести только снимком экрана, а она видна не целиком. Прокрутите к ней и нажмите «Повторить».') });
+    try {
+      // The user may have switched tabs while the page was getting ready.
+      if (!(await onScreen())) throw new AppError('IMAGE_FETCH_FAILED', { retryable: true, detail: tr('Картинку можно перевести только снимком экрана, а вкладка не на экране. Откройте вкладку и нажмите «Повторить».') });
+      const shot = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+      return { shot, ...prep };
+    } finally {
+      lastCapture = Date.now();
+      sendToTab(tabId, { type: 'end-capture', id: imageId });
+    }
+  };
+  const p = captureChain.then(run, run);
+  captureChain = p.catch(() => undefined);
+  return p;
+}
+
+/** Bytes go to the job store; the worker gets their id and hash (see ToOffscreen 'run'). */
+async function stash(jobId: string, bytes: Uint8Array, mime: string): Promise<{ blobId: string; hash: string }> {
+  const blobId = `${jobId}#${Date.now().toString(36)}`;
+  const [hash] = await Promise.all([hashBytes(bytes), putJobBytes(blobId, bytes, mime)]);
+  return { blobId, hash };
 }
 
 async function handleContent(msg: ContentToBackground, sender: chrome.runtime.MessageSender): Promise<unknown> {
   const tabId = sender.tab?.id;
   const windowId = sender.tab?.windowId;
   if (tabId === undefined || windowId === undefined) return null;
+  // The page shown in the tab (a reload or a new page in it is another one; Firefox has no id).
+  const doc = sender.documentId ?? '';
   switch (msg.type) {
     case 'translate': {
       const jobId = `${tabId}|${msg.image.id}`;
@@ -168,6 +380,7 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
         return { queued: false };
       }
       track(tabId, jobId, true);
+      let blobId = '';
       try {
         let bytes: Uint8Array | null = null;
         let mime = '';
@@ -176,20 +389,24 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
           try {
             ({ bytes, mime } = await fetchImage(msg.image.src, msg.pageUrl));
           } catch (e) {
-            if (!msg.image.rect) throw e;
+            // Too big stays too big on screen; anything else: try what is on screen.
+            if (!msg.image.rect || (e instanceof AppError && e.code === 'IMAGE_TOO_LARGE')) throw e;
           }
         }
         if (!bytes) {
           if (!msg.image.rect) throw new AppError('IMAGE_FETCH_FAILED', { retryable: false });
           // Protected reader (canvas, blob, blocked hotlink): translate what is on screen.
-          const shot = await capture(windowId);
-          await toOffscreen({ target: 'offscreen', type: 'crop-run', jobId, tabId, screenshot: shot, rect: msg.image.rect, dpr: msg.image.dpr ?? 1, pageUrl: msg.pageUrl, title: msg.title, generic: false, priority: msg.priority });
+          const { shot, rect, dpr } = await captureFor(tabId, windowId, msg.image.id);
+          await toOffscreen({ target: 'offscreen', type: 'crop-run', jobId, tabId, doc, screenshot: shot, rect, dpr, pageUrl: msg.pageUrl, title: msg.title, generic: false, priority: msg.priority });
           return { queued: true, captured: true };
         }
-        await toOffscreen({ target: 'offscreen', type: 'run', jobId, tabId, bytesB64: bytesToBase64(bytes), mime, pageUrl: msg.pageUrl, title: msg.title, priority: msg.priority, force: msg.force, imageSrc: msg.image.src });
+        const stashed = await stash(jobId, bytes, mime);
+        blobId = stashed.blobId;
+        await toOffscreen({ target: 'offscreen', type: 'run', jobId, tabId, doc, blobId, hash: stashed.hash, mime, pageUrl: msg.pageUrl, title: msg.title, priority: msg.priority, force: msg.force, imageSrc: msg.image.src });
         return { queued: true };
       } catch (e) {
         dlog('translate failed', e);
+        if (blobId) void deleteJobBytes(blobId);
         track(tabId, jobId, false);
         sendToTab(tabId, { type: 'job-error', id: msg.image.id, error: toAppError(e).toJSON() });
         return { queued: false };
@@ -205,22 +422,34 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       }
       const jobIds = msg.images.map((im) => `${tabId}|${im.id}`);
       for (const j of jobIds) track(tabId, j, true);
-      const parts: { bytesB64: string; mime?: string; src?: string }[] = [];
+      const parts: { blobId: string; hash: string; mime?: string; src?: string }[] = [];
       try {
-        for (const image of msg.images) {
+        for (const [i, image] of msg.images.entries()) {
           let got: { bytes: Uint8Array; mime: string } | null = null;
           if (image.dataUrl) got = dataUrlToBytes(image.dataUrl);
           else if (image.src) got = await fetchImage(image.src, msg.pageUrl).catch(() => null);
           if (!got) throw new Error('fetch');
-          parts.push({ bytesB64: bytesToBase64(got.bytes), mime: got.mime, src: image.src });
+          parts.push({ ...(await stash(jobIds[i], got.bytes, got.mime)), mime: got.mime, src: image.src });
         }
       } catch {
         // A picture that cannot be fetched (protected reader): each one on its own, as before.
+        for (const p of parts) void deleteJobBytes(p.blobId);
         for (const j of jobIds) track(tabId, j, false);
         for (const image of msg.images) void one(image);
         return { queued: false };
       }
-      await toOffscreen({ target: 'offscreen', type: 'run-strip', jobIds, tabId, parts, pageUrl: msg.pageUrl, title: msg.title, priority: msg.priority, force: msg.force });
+      try {
+        await toOffscreen({ target: 'offscreen', type: 'run-strip', jobIds, tabId, doc, parts, pageUrl: msg.pageUrl, title: msg.title, priority: msg.priority, force: msg.force });
+      } catch (e) {
+        dlog('strip failed', e);
+        for (const p of parts) void deleteJobBytes(p.blobId);
+        const error = toAppError(e).toJSON();
+        for (const [i, j] of jobIds.entries()) {
+          track(tabId, j, false);
+          sendToTab(tabId, { type: 'job-error', id: msg.images[i].id, error });
+        }
+        return { queued: false };
+      }
       return { queued: true };
     }
     case 'capture-area': {
@@ -237,13 +466,14 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       }
       track(tabId, jobId, true);
       try {
-        const shot = await capture(windowId);
-        await toOffscreen({ target: 'offscreen', type: 'crop-run', jobId, tabId, screenshot: shot, rect: msg.image.rect!, dpr: msg.image.dpr ?? 1, pageUrl: msg.pageUrl, title: msg.title, generic: true });
+        const { shot, rect, dpr } = await captureFor(tabId, windowId, msg.image.id);
+        await toOffscreen({ target: 'offscreen', type: 'crop-run', jobId, tabId, doc, screenshot: shot, rect, dpr, pageUrl: msg.pageUrl, title: msg.title, generic: true });
+        return { queued: true };
       } catch (e) {
         track(tabId, jobId, false);
         sendToTab(tabId, { type: 'job-error', id: msg.image.id, error: toAppError(e).toJSON() });
+        return { queued: false };
       }
-      return { queued: true };
     }
     case 'status': {
       const res = await toOffscreen<Record<string, JobStatus>>({ target: 'offscreen', type: 'status', jobIds: msg.ids.map((id) => `${tabId}|${id}`) });
@@ -259,8 +489,8 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
     }
     case 'build-download': {
       const s = await loadSettings();
-      const r = await toOffscreen<{ url: string; name: string; pages: number; size: number } | { error: string }>({ target: 'offscreen', type: 'build-file', keys: msg.keys, title: msg.title, format: msg.format, lang: s.targetLang });
-      if (!r || 'error' in r) throw new AppError('UNKNOWN', { retryable: false, detail: r && 'error' in r ? r.error : 'build failed' });
+      const r = await toOffscreen<{ url: string; name: string; pages: number; size: number }>({ target: 'offscreen', type: 'build-file', keys: msg.keys, title: msg.title, format: msg.format, lang: s.targetLang });
+      if (!r?.url) throw new AppError('UNKNOWN', { retryable: false, detail: 'build failed' });
       let id: number;
       try {
         id = await chrome.downloads.download({ url: r.url, filename: r.name, saveAs: false, conflictAction: 'uniquify' });
@@ -287,7 +517,7 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
     case 'lookup-cached': {
       const s = await loadSettings();
       if (s.enabled === false || s.autoApplyCached === false || !msg.srcs.length) return {};
-      return toOffscreen({ target: 'offscreen', type: 'lookup-cached', srcs: msg.srcs });
+      return toOffscreen<Record<string, string>>({ target: 'offscreen', type: 'lookup-cached', srcs: msg.srcs });
     }
     case 'free-memory': {
       // Unload every local model from video memory; the next picture loads only the one it needs.
@@ -301,6 +531,8 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       return null;
     case 'get-result':
       return toOffscreen({ target: 'offscreen', type: 'get-result', key: msg.key });
+    case 'get-tile':
+      return toOffscreen({ target: 'offscreen', type: 'get-tile', key: msg.key, index: msg.index });
   }
 }
 
@@ -352,6 +584,7 @@ async function setEnabled(enabled: boolean): Promise<{ unloaded: string[] }> {
   if (!enabled) {
     const busyTabs = [...running.keys()];
     running.clear();
+    saveRunning();
     for (const t of busyTabs) setBadge(t);
     await toOffscreen({ target: 'offscreen', type: 'cancel-tab' }).catch(() => undefined);
     const urls = new Set(s.providers.filter((p) => isOllama(p)).map((p) => p.baseUrl));
@@ -420,6 +653,7 @@ async function handleUi(msg: UiToBackground): Promise<unknown> {
       if (msg.tabId === undefined) running.clear();
       else running.delete(msg.tabId);
       if (msg.tabId !== undefined) setBadge(msg.tabId);
+      saveRunning();
       return toOffscreen({ target: 'offscreen', type: 'cancel-tab', tabId: msg.tabId });
     }
     case 'result-changed': {
@@ -434,12 +668,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return false;
   dlog('message', (msg as { type?: string }).type, sender.url);
   if ((msg as { target?: string }).target === 'offscreen') return false; // for the offscreen document
-  if ((msg as { source?: string }).source === 'offscreen') {
-    relayFromOffscreen(msg as FromOffscreen);
-    return false;
-  }
   // Only our own extension pages and content scripts can reach this listener.
   if (sender.id !== chrome.runtime.id) return false;
+  if ((msg as { source?: string }).source === 'offscreen') {
+    // Worker reports come only from the offscreen document (in Firefox the worker runs right here
+    // and reports by a direct call, never by message).
+    if (chrome.offscreen && !sender.tab && (sender.url ?? '').startsWith(chrome.runtime.getURL(OFFSCREEN_URL))) relayFromOffscreen(msg as FromOffscreen);
+    else dlog('rejected worker report from', sender.url);
+    return false;
+  }
   const fromExtensionPage = (sender.url ?? '').startsWith(chrome.runtime.getURL(''));
   const p = fromExtensionPage ? handleUi(msg as UiToBackground) : handleContent(msg as ContentToBackground, sender);
   p.then(sendResponse, (e) => sendResponse({ error: toAppError(e).toJSON() }));
@@ -513,15 +750,37 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (command === 'translate-page' || command === 'select-area' || command === 'toggle-original') sendToTab(tab.id, { type: 'command', command });
 });
 
-// A closed tab or a new page in it: its pictures are no longer needed — free the queue for the new ones.
-const cancelTab = (tabId: number) => {
-  if (!running.get(tabId)?.size) return;
-  running.delete(tabId);
-  void toOffscreen({ target: 'offscreen', type: 'cancel-tab', tabId }).catch(() => undefined);
+// A page with pictures in work keeps a port open (content script). When the page goes away —
+// tab closed, reload, another page in the tab — the port closes and its pictures leave the queue.
+// This works after the service worker was stopped and started again, unlike in-memory bookkeeping.
+const cancelPage = (tabId: number, doc?: string) => {
+  const set = running.get(tabId);
+  if (set && !doc) {
+    running.delete(tabId);
+    setBadge(tabId);
+    saveRunning();
+  }
+  void toOffscreen({ target: 'offscreen', type: 'cancel-tab', tabId, doc }).catch(() => undefined);
 };
-chrome.tabs.onRemoved.addListener((tabId) => cancelTab(tabId));
-chrome.tabs.onUpdated.addListener((tabId, info) => {
-  if (info.status === 'loading' && info.url) cancelTab(tabId);
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== PAGE_PORT || port.sender?.id !== chrome.runtime.id) return;
+  const tabId = port.sender.tab?.id;
+  if (tabId === undefined) return;
+  const doc = port.sender.documentId;
+  let idle = false;
+  port.onMessage.addListener((m: { type?: string }) => {
+    // 'ping' only keeps the worker awake while pictures are in work; 'idle' comes right before a
+    // deliberate close (nothing left in work).
+    if (m?.type === 'idle') idle = true;
+  });
+  port.onDisconnect.addListener(() => {
+    void chrome.runtime.lastError;
+    if (!idle) cancelPage(tabId, doc);
+  });
+});
+chrome.tabs.onRemoved.addListener((tabId) => {
+  // Nothing to stop unless this tab had work (the worker is not woken up for every closed tab).
+  void runningRestored.then(() => running.get(tabId)?.size && cancelPage(tabId));
 });
 
 // Show the on/off state on the icon after the browser or the extension starts.

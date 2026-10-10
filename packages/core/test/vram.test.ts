@@ -23,6 +23,13 @@ describe('a local model that runs out of video memory', () => {
     const { result } = await svc.translate(bytes, 'image/png', { generic: true, onStage: (e) => e.message && stages.push(e.message) });
     expect(result.page.blocks.length).toBe(bubbles.length);
     expect(stages.filter((m) => /видеопамяти/.test(m))).toHaveLength(2);
+    // Made lighter: kept under its own key, so the full-quality key is tried again next time.
+    expect(result.degraded).toBe(true);
+    expect(result.key.endsWith(':lite')).toBe(true);
+    const calls = mock.calls.length;
+    const again = await svc.translate(bytes, 'image/png', { generic: true });
+    expect(again.cached).toBe(false);
+    expect(mock.calls.length).toBeGreaterThan(calls);
   });
 
   it('is reported with its own error code', async () => {

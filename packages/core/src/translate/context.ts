@@ -1,3 +1,5 @@
+import { sanitizeLine } from './parse';
+
 export type EntityKind = 'character' | 'place' | 'term' | 'ability' | 'item' | 'organization' | 'title';
 
 export interface ContextEntity {
@@ -42,8 +44,9 @@ const KINDS: EntityKind[] = ['character', 'place', 'term', 'ability', 'item', 'o
 export function normalizeEntity(raw: unknown, page?: number): ContextEntity | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  const source = typeof r.source === 'string' ? r.source.trim().slice(0, 80) : '';
-  const target = typeof r.target === 'string' ? r.target.trim().slice(0, 80) : '';
+  // Learned from a model answer, i.e. from text on the page: untrusted, one short line each.
+  const source = sanitizeLine(r.source, 80);
+  const target = sanitizeLine(r.target, 80);
   if (!source || !target) return null;
   const kind = KINDS.includes(r.kind as EntityKind) ? (r.kind as EntityKind) : 'term';
   const g = r.gender;
@@ -56,10 +59,13 @@ export function normalizeEntity(raw: unknown, page?: number): ContextEntity | nu
  * Locked entities are never overwritten; unlocked ones keep their first translation
  * so names stay consistent across a chapter.
  */
-export function mergeContext(
-  ctx: TranslationContext,
-  update: { entities?: unknown[]; summary?: string; lines?: { src: string; dst: string }[] },
-): TranslationContext {
+export interface ContextUpdate {
+  entities?: unknown[];
+  summary?: string;
+  lines?: { src: string; dst: string }[];
+}
+
+export function mergeContext(ctx: TranslationContext, update: ContextUpdate): TranslationContext {
   const entities = [...ctx.entities];
   const index = new Map(entities.map((e, i) => [e.source, i]));
   for (const raw of update.entities ?? []) {
@@ -77,13 +83,15 @@ export function mergeContext(
     }
   }
   const summaries = [...ctx.summaries];
-  if (update.summary && update.summary.trim()) summaries.push(update.summary.trim().slice(0, CONTEXT_LIMITS.summaryChars));
+  const summary = sanitizeLine(update.summary, CONTEXT_LIMITS.summaryChars);
+  if (summary) summaries.push(summary);
   while (summaries.length > CONTEXT_LIMITS.summaries) {
     // Compress the two oldest summaries into one so long chapters keep a bounded prompt.
     const merged = `${summaries[0]} ${summaries[1]}`.slice(0, CONTEXT_LIMITS.summaryChars);
     summaries.splice(0, 2, merged);
   }
-  const recentLines = [...ctx.recentLines, ...(update.lines ?? [])].slice(-CONTEXT_LIMITS.recentLines);
+  const lines = (update.lines ?? []).map((l) => ({ src: sanitizeLine(l.src, 300), dst: sanitizeLine(l.dst, 300) })).filter((l) => l.src && l.dst);
+  const recentLines = [...ctx.recentLines, ...lines].slice(-CONTEXT_LIMITS.recentLines);
   return { ...ctx, entities, summaries, recentLines, pagesSeen: ctx.pagesSeen + 1, updatedAt: new Date().toISOString() };
 }
 

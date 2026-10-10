@@ -7,10 +7,10 @@ import { detectScript } from '../languages';
 import { assertPrivacy, isLocalProvider, isLocalUrl } from '../llm/privacy';
 import { createProvider } from '../llm/presets';
 import type { FetchLike, LlmProvider } from '../llm/types';
-import { mergeContext, type TranslationContext } from '../translate/context';
+import { mergeContext, type ContextUpdate, type TranslationContext } from '../translate/context';
 import { applyForbiddenFixes, findGlossaryHits, findViolations } from '../translate/glossary';
 import { isDegenerate, parseVisionAnswer, tameRuns, type VisionAnswer } from '../translate/parse';
-import { buildSystemPrompt, visionFullInstruction, visionOcrInstruction, type PromptInput } from '../translate/prompt';
+import { buildSystemPrompt, contextData, visionFullInstruction, visionOcrInstruction, type PromptInput } from '../translate/prompt';
 import { translateBlocks, usageFrom } from '../translate/translator';
 import type { Box, BubbleInfo, PageResult, StageEvent, TextBlock, TextStyle, Usage } from '../types';
 import { bytesToBase64, sha256Hex } from '../util/bytes';
@@ -35,6 +35,8 @@ export interface PipelineOutput {
   original: TiledImage;
   cleaned: TiledImage;
   context?: TranslationContext;
+  /** What this page adds to the series context (merged into the latest stored context by the caller). */
+  contextUpdate?: ContextUpdate;
 }
 
 export interface StandaloneDeps {
@@ -78,6 +80,8 @@ interface Located {
   view: View;
   speaker?: string;
   gender?: 'male' | 'female' | 'unknown';
+  /** Read from an answer that was cut off or had to be mended. */
+  low?: boolean;
 }
 
 async function readView(provider: LlmProvider, image: TiledImage, view: View, config: PipelineConfig, context: TranslationContext | undefined, withTranslation: boolean, deps: StandaloneDeps, signal?: AbortSignal): Promise<{ answer: VisionAnswer; usage: Usage }> {
@@ -93,17 +97,25 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
   const jpeg = await deps.backend.encode(canvas, 'image/jpeg', 0.92);
   const system = buildSystemPrompt(promptInput(config, context));
   const instruction = withTranslation ? visionFullInstruction(dw, dh) : visionOcrInstruction(dw, dh);
+  const data = contextData(promptInput(config, context));
+  let room = 6000;
   return withRetry(
     async (attempt) => {
+      const last = attempt >= 2;
       const res = await provider.complete({
         system,
-        messages: [{ role: 'user', content: [{ type: 'image', mime: 'image/jpeg', base64: bytesToBase64(jpeg) }, { type: 'text', text: instruction }] }],
+        messages: [{ role: 'user', content: [{ type: 'image', mime: 'image/jpeg', base64: bytesToBase64(jpeg) }, { type: 'text', text: data ? `${data}\n\n${instruction}` : instruction }] }],
         json: true,
         signal,
-        maxTokens: 6000,
+        maxTokens: room,
       });
-      // A cut-off answer is asked again first; only the last try keeps what can be mended.
-      const answer = parseVisionAnswer(res.text, withTranslation, attempt >= 2);
+      // A cut-off answer is asked again first (with more room); only the last try keeps what can be mended.
+      if (res.truncated && !last) {
+        room = 12000;
+        throw new AppError('TRANSLATION_INVALID_OUTPUT', { retryable: true, detail: 'Answer cut off at the output limit' });
+      }
+      const answer = parseVisionAnswer(res.text, withTranslation, last);
+      if (res.truncated) answer.repaired = true;
       // Some families answer in pixels of the picture they got: bring them to 0–1000.
       if (family?.coords === 'pixels') for (const b of answer.blocks) b.box = [(b.box[0] / dw) * 1000, (b.box[1] / dh) * 1000, (b.box[2] / dw) * 1000, (b.box[3] / dh) * 1000];
       return { answer, usage: usageFrom(provider, res.model, res.inputTokens, res.outputTokens) };
@@ -480,7 +492,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     if (answer.summary) summaries.push(answer.summary);
     for (const b of answer.blocks) {
       const box: Box = [(b.box[0] / 1000) * original.width, view.y + (b.box[1] / 1000) * view.h, ((b.box[2] - b.box[0]) / 1000) * original.width, ((b.box[3] - b.box[1]) / 1000) * view.h];
-      located.push({ box: clampBox(box, original.width, original.height), text: b.text, translation: b.translation, type: b.type, vertical: b.vertical, view, speaker: b.speaker, gender: b.gender });
+      located.push({ box: clampBox(box, original.width, original.height), text: b.text, translation: b.translation, type: b.type, vertical: b.vertical, view, speaker: b.speaker, gender: b.gender, ...(answer.repaired ? { low: true } : {}) });
     }
   }
   const tDetected = performance.now();
@@ -509,6 +521,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       fontSizeEstimate: estimateFontSize(l.box, l.text),
       bubble: null,
       translate: !skip && !(l.type === 'SFX' && !config.translateSfx),
+      ...(l.low ? { lowConfidence: true } : {}),
       ...(l.speaker ? { speaker: l.speaker } : {}),
       ...(l.gender ? { speakerGender: l.gender } : {}),
     };
@@ -527,6 +540,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       if (t) {
         b.translatedText = t.text;
         if (t.type) b.textType = t.type;
+        if (t.lowConfidence) b.lowConfidence = true;
       } else if (b.translate) {
         b.translatedText = b.originalText;
         b.lowConfidence = true;
@@ -541,7 +555,10 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         usage.push(...res.usage);
         for (const b of stuck) {
           const t = res.translations.get(b.id);
-          if (t) b.translatedText = t.text;
+          if (t) {
+            b.translatedText = t.text;
+            if (t.lowConfidence) b.lowConfidence = true;
+          }
         }
       } catch (e) {
         if ((e as { code?: string }).code === 'CANCELLED') throw e;
@@ -674,15 +691,14 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       summary,
       createdAt: new Date().toISOString(),
     };
-    const context = req.context
-      ? mergeContext(req.context, {
-          entities,
-          summary,
-          lines: blocksOut.filter((b) => b.textType === 'DIALOGUE' && b.translate).slice(-8).map((b) => ({ src: b.originalText, dst: b.translatedText })),
-        })
-      : undefined;
+    const contextUpdate: ContextUpdate = {
+      entities,
+      summary,
+      lines: blocksOut.filter((b) => b.textType === 'DIALOGUE' && b.translate).slice(-8).map((b) => ({ src: b.originalText, dst: b.translatedText })),
+    };
+    const context = req.context ? mergeContext(req.context, contextUpdate) : undefined;
     stage('done', 1);
-    return { page, original, cleaned: cleaned ?? original.clone(), context };
+    return { page, original, cleaned: cleaned ?? original.clone(), context, ...(req.context ? { contextUpdate } : {}) };
   }
 }
 
@@ -741,13 +757,18 @@ export async function recognizeRegion(
       fontSizeEstimate: estimateFontSize(rounded, b.text),
       bubble: null,
       translate: true,
+      ...(answer.repaired ? { lowConfidence: true } : {}),
     };
   });
   if (separate && blocks.length) {
     assertPrivacy(config.privacy, config.translator!, 'text');
     const res = await translateBlocks(createProvider(config.translator!, deps.fetchImpl), promptInput(config, opts.context), blocks.map((b) => ({ id: b.id, type: b.textType, text: b.originalText })), { signal: opts.signal });
     usages.push(...res.usage);
-    for (const b of blocks) b.translatedText = res.translations.get(b.id)?.text ?? b.originalText;
+    for (const b of blocks) {
+      const t = res.translations.get(b.id);
+      b.translatedText = t?.text ?? b.originalText;
+      if (!t || t.lowConfidence) b.lowConfidence = true;
+    }
   }
   return { blocks, usage: usages };
 }
@@ -759,7 +780,10 @@ export async function retranslate(blocks: TextBlock[], config: PipelineConfig, d
   assertPrivacy(config.privacy, provider, 'text');
   const res = await translateBlocks(createProvider(provider, deps.fetchImpl), promptInput(config, context), blocks.map((b) => ({ id: b.id, type: b.textType, text: b.originalText })), { signal });
   return {
-    blocks: blocks.map((b) => ({ ...b, translatedText: res.translations.get(b.id)?.text ?? b.translatedText })),
+    blocks: blocks.map((b) => {
+      const t = res.translations.get(b.id);
+      return t ? { ...b, translatedText: t.text, ...(t.lowConfidence ? { lowConfidence: true } : {}) } : b;
+    }),
     usage: res.usage,
   };
 }

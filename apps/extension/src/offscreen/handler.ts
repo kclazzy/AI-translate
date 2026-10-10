@@ -1,8 +1,9 @@
-import { AppError, base64ToBytes, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type StoredResult } from '@ait/core';
+import { AppError, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type StoredResult } from '@ait/core';
 import { loadBundledFonts, loadUserFonts } from '@ait/studio/fonts';
 import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
 import type { StageEvent } from '@ait/core';
-import type { FromOffscreen, JobStatus, RenderedTiles, SpeedStats, ToOffscreen } from '../shared/messages';
+import { CANCELLED_ALL, type FromOffscreen, type JobStatus, type RenderedTiles, type SpeedStats, type ToOffscreen } from '../shared/messages';
+import { deleteJobBytes, getJobBytes, pruneJobBytes } from '../shared/jobstore';
 import { db, loadSettings, secrets } from '../shared/store';
 import { lamaDownloaded, lamaInpainter } from './lama';
 import { setUiLang, tr } from '@ait/core/i18n';
@@ -20,6 +21,8 @@ const WATCHDOG_LOCAL_MIN = 12;
 const WATCHDOG_CLOUD_MIN = 5;
 /** Keep the local model loaded this long while a chapter is still in the queue. */
 const CHAPTER_KEEP_ALIVE_MIN = 15;
+/** Results bigger than this go to the page tile by tile (browsers refuse messages over 64 MiB). */
+const MAX_TILES_IN_MESSAGE = 40 * 1024 * 1024;
 
 /** Moving average of the time per page, shown in the popup ("~18 с на страницу"). */
 async function recordSpeed(ms: number, usage: { outputTokens: number }[]): Promise<void> {
@@ -30,20 +33,63 @@ async function recordSpeed(ms: number, usage: { outputTokens: number }[]): Promi
   await db.put('kv', 'speed', { avgMs, pages: prev.pages + 1, lastMs: ms, lastTokens: tokens, at: new Date().toISOString() } satisfies SpeedStats);
 }
 
-/** What each job is doing, so the page can show progress and notice lost jobs. */
-const jobs = new Map<string, { tabId: number; startedAt?: number; stage?: StageEvent }>();
+/**
+ * Queue jobs are keyed by content (the picture's hash), not by request: the same picture asked for
+ * twice — two tabs, a resend after a restart, a strip and a single retry — is translated once and
+ * the result goes to every request waiting for it. A request is a subscriber of the job; `part` is
+ * the index of its picture within a strip (0 for a single picture).
+ */
+interface Sub {
+  tabId: number;
+  doc: string;
+  part: number;
+}
+interface Task {
+  key: string;
+  subs: Map<string, Sub>;
+  startedAt?: number;
+  stage?: StageEvent;
+  /** Strip parts whose result was already sent. */
+  delivered: Set<number>;
+  /** Job-store ids of the bytes, deleted when the job ends. */
+  blobs: string[];
+}
+const tasks = new Map<string, Task>();
+/** Request (job id) → queue key of the job it waits for. */
+const jobTask = new Map<string, string>();
 
-/** Pictures translated together as one strip share the queue job of the first one. */
-const alias = new Map<string, string>();
-const main = (id: string) => alias.get(id) ?? id;
+function subscribe(task: Task, jobId: string, sub: Sub) {
+  const prev = jobTask.get(jobId);
+  if (prev && prev !== task.key) tasks.get(prev)?.subs.delete(jobId);
+  task.subs.set(jobId, sub);
+  jobTask.set(jobId, task.key);
+}
+
+function forget(task: Task) {
+  if (tasks.get(task.key) === task) tasks.delete(task.key);
+  for (const id of task.subs.keys()) if (jobTask.get(id) === task.key) jobTask.delete(id);
+  for (const b of task.blobs) void deleteJobBytes(b);
+}
+
+/** Nobody waits for a part that is not ready yet: stop the job. */
+function dropIfUnneeded(task: Task) {
+  if ([...task.subs.values()].some((s) => !task.delivered.has(s.part))) return;
+  queue.cancel(task.key);
+  forget(task);
+}
+
+function emitTo(task: Task, part: number | null, emit: (m: FromOffscreen) => void, make: (jobId: string, sub: Sub) => FromOffscreen) {
+  for (const [jobId, sub] of task.subs) if (part === null || sub.part === part) emit(make(jobId, sub));
+}
 
 export function jobStatus(jobId: string): JobStatus {
-  jobId = main(jobId);
-  const info = jobs.get(jobId);
-  const pos = queue.position(jobId);
+  const key = jobTask.get(jobId);
+  const task = key ? tasks.get(key) : undefined;
+  if (!key || !task) return { state: 'unknown' };
+  const pos = queue.position(key);
   if (pos.state === 'unknown') return { state: 'unknown' };
   if (pos.state === 'pending') return { state: 'pending', ahead: pos.ahead };
-  return { state: 'running', elapsedMs: info?.startedAt ? Date.now() - info.startedAt : 0, stage: info?.stage?.stage };
+  return { state: 'running', elapsedMs: task.startedAt ? Date.now() - task.startedAt : 0, stage: task.stage?.stage };
 }
 let pruned = false;
 
@@ -65,7 +111,17 @@ async function autoSave(r: StoredResult, pageUrl: string, title: string, src: st
   } catch {
     /* keep */
   }
-  const base = src && !src.startsWith('data:') ? clean(decodeURIComponent(new URL(src, pageUrl).pathname.split('/').pop() ?? '').replace(/\.\w+$/, '')) : '';
+  let base = '';
+  if (src && !src.startsWith('data:')) {
+    let last = '';
+    try {
+      last = new URL(src, pageUrl).pathname.split('/').pop() ?? '';
+      last = decodeURIComponent(last);
+    } catch {
+      /* a malformed %-escape: keep the name as it is written */
+    }
+    base = clean(last.replace(/\.\w+$/, ''));
+  }
   const name = base || r.key.slice(0, 10);
   const image = await tilesToImage(browserBackend, r.page.width, r.page.height, r.rendered);
   const c = browserBackend.createCanvas(image.width, image.height);
@@ -99,12 +155,21 @@ async function browserLama(mode: string | undefined) {
   return mode === 'browser' && (await lamaDownloaded()) ? lamaInpainter : undefined;
 }
 
+function tileOf(r: StoredResult, i: number) {
+  const t = r.rendered[i];
+  return { y: t.y, h: t.h, dataUrl: bytesToDataUrl(t.bytes, r.mime) };
+}
+
 export function toRendered(r: StoredResult, cached: boolean): RenderedTiles {
+  // base64 is 4/3 of the bytes; past the limit the page fetches the tiles one by one.
+  const size = r.rendered.reduce((a, t) => a + Math.ceil(t.bytes.length / 3) * 4, 0);
+  const omit = size > MAX_TILES_IN_MESSAGE;
   return {
     key: r.key,
     width: r.page.width,
     height: r.page.height,
-    tiles: r.rendered.map((t) => ({ y: t.y, h: t.h, dataUrl: bytesToDataUrl(t.bytes, r.mime) })),
+    tiles: omit ? [] : r.rendered.map((_, i) => tileOf(r, i)),
+    tilesOmitted: omit ? r.rendered.length : undefined,
     page: { blocks: r.page.blocks, timings: r.page.timings, usage: r.page.usage, pipeline: r.page.pipeline, stripLang: r.page.stripLang },
     cached,
   };
@@ -124,38 +189,98 @@ async function cropScreenshot(screenshot: string, rect: { x: number; y: number; 
   return browserBackend.encode(c, 'image/png');
 }
 
+/**
+ * Fonts for drawing the translation. A broken bundled font is tried again on the next picture; a
+ * broken font of the user's is skipped (logged) and never blocks translation.
+ */
+function ensureFonts(): Promise<void> {
+  fontsReady ??= (async () => {
+    let bundledOk = true;
+    try {
+      await loadBundledFonts();
+    } catch (e) {
+      bundledOk = false;
+      console.warn('[AIT] bundled fonts failed', e);
+    }
+    try {
+      await loadUserFonts(db);
+    } catch (e) {
+      console.warn('[AIT] user fonts failed', e);
+    }
+    if (!bundledOk) fontsReady = null;
+  })();
+  return fontsReady;
+}
+
+async function readBytes(blobId: string): Promise<{ bytes: Uint8Array; mime: string }> {
+  const got = await getJobBytes(blobId);
+  if (!got) throw new AppError('IMAGE_FETCH_FAILED', { retryable: true, detail: tr('Картинка потерялась в очереди. Нажмите «Повторить».') });
+  return got;
+}
+
+function watchdogError(limitMin: number) {
+  return new AppError('TIMEOUT', { retryable: true, detail: tr('Модель не ответила за {0} мин. Картинка пропущена, перевод главы продолжается. Проверьте модель в настройках: возможно, она не помещается в видеопамять.', limitMin) });
+}
+
+/** The queue setting for the current settings: local servers answer one request at a time. */
+async function prepare() {
+  const settings = await loadSettings();
+  service.inpainter = await browserLama(settings.lamaMode);
+  // This document can live for days: follow a language changed since it opened.
+  setUiLang(settings.interfaceLang, false);
+  const vision = settings.providers.find((p) => p.id === settings.visionProviderId);
+  const local = settings.pipeline !== 'engine' && (!vision || isLocalProvider(vision));
+  // Running two pages at once on a local server makes both twice as slow and can push a single
+  // page past the timeout.
+  queue.concurrency = local ? 1 : Math.max(1, settings.concurrency);
+  return local;
+}
+
 export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen) => void): Promise<unknown> {
-  fontsReady ??= loadBundledFonts().then(() => loadUserFonts(db)).then(() => undefined);
-  await fontsReady;
+  await ensureFonts();
   if (!pruned) {
     pruned = true;
     void service.prune();
+    // Bytes of jobs lost when this worker was closed mid-queue.
+    void pruneJobBytes(10 * 60_000).catch(() => undefined);
     // The offscreen document can live for days: tidy up again every 6 hours.
-    setInterval(() => void service.prune(), 6 * 3_600_000);
+    setInterval(() => {
+      void service.prune();
+      void pruneJobBytes(6 * 3_600_000).catch(() => undefined);
+    }, 6 * 3_600_000);
   }
   switch (msg.type) {
     case 'run':
     case 'crop-run': {
-      const settings = await loadSettings();
-      service.inpainter = await browserLama(settings.lamaMode);
-      // This document can live for days: follow a language changed since it opened.
-      setUiLang(settings.interfaceLang, false);
-      // Local servers (Ollama, LM Studio) answer one request at a time: running two pages at once
-      // makes both twice as slow and can push a single page past the timeout.
-      const vision = settings.providers.find((p) => p.id === settings.visionProviderId);
-      const local = settings.pipeline !== 'engine' && (!vision || isLocalProvider(vision));
-      queue.concurrency = local ? 1 : Math.max(1, settings.concurrency);
+      const local = await prepare();
       const { jobId, tabId } = msg;
+      const sub: Sub = { tabId, doc: msg.doc ?? '', part: 0 };
       const priority = msg.priority ?? 100;
-      jobs.set(jobId, { tabId });
+      const force = msg.type === 'run' ? !!msg.force : false;
+      const generic = msg.type === 'crop-run' ? msg.generic ?? true : !!msg.generic;
+      // A screen capture is never the same job as another one; a picture is known by its bytes.
+      let key = msg.type === 'run' ? `run:${msg.hash}:${force ? 'f' : ''}:${generic ? 'g' : ''}` : `crop:${jobId}`;
+      const existing = tasks.get(key);
+      if (existing && !existing.delivered.size && queue.has(key)) {
+        subscribe(existing, jobId, sub);
+        if (msg.type === 'run' && !existing.blobs.includes(msg.blobId)) void deleteJobBytes(msg.blobId);
+        // A higher priority (the picture came on screen) moves the shared job up; add() with a
+        // known key only raises the priority of the waiting job.
+        void queue.add({ key, priority, run: async () => undefined }).catch(() => undefined);
+        return { queued: true, status: jobStatus(jobId) };
+      }
+      // The same job is just finishing: start a separate one (its result comes from the cache).
+      if (existing) key = `${key}#${jobId}`;
+      const task: Task = { key, subs: new Map(), delivered: new Set(), blobs: msg.type === 'run' ? [msg.blobId] : [] };
+      tasks.set(key, task);
+      subscribe(task, jobId, sub);
       void queue
         .add({
-          key: jobId,
+          key,
           priority,
           run: async (signal) => {
-            const info = jobs.get(jobId);
-            if (info) info.startedAt = Date.now();
-            const bytes = msg.type === 'run' ? base64ToBytes(msg.bytesB64) : await cropScreenshot(msg.screenshot, msg.rect, msg.dpr);
+            task.startedAt = Date.now();
+            const bytes = msg.type === 'run' ? (await readBytes(msg.blobId)).bytes : await cropScreenshot(msg.screenshot, msg.rect, msg.dpr);
             // Watchdog: a picture that gets no answer for too long fails with a clear reason and
             // the queue moves on (one stuck request must not stop the whole chapter).
             const watch = new AbortController();
@@ -168,94 +293,24 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
               const { result, cached } = await service.translate(bytes, msg.type === 'run' ? msg.mime : 'image/png', {
                 sourceUrl: msg.pageUrl,
                 title: msg.title,
-                generic: msg.type === 'crop-run' ? msg.generic ?? true : msg.generic,
-                force: msg.type === 'run' ? msg.force : false,
+                generic,
+                force,
                 signal: watch.signal,
                 // While more pages wait, keep the local model in video memory between them.
                 keepAliveMin: local && queue.getStats().pending > 0 ? CHAPTER_KEEP_ALIVE_MIN : undefined,
                 onStage: (event) => {
-                  const i = jobs.get(jobId);
-                  if (i) i.stage = event;
-                  emit({ source: 'offscreen', type: 'stage', jobId, tabId, event });
+                  task.stage = event;
+                  emitTo(task, null, emit, (id, s) => ({ source: 'offscreen', type: 'stage', jobId: id, tabId: s.tabId, event }));
                 },
               });
               if (!cached) void recordSpeed(Date.now() - t0, result.page.usage);
-              emit({ source: 'offscreen', type: 'done', jobId, tabId, result: toRendered(result, cached) });
+              task.delivered.add(0);
+              const rendered = toRendered(result, cached);
+              emitTo(task, null, emit, (id, s) => ({ source: 'offscreen', type: 'done', jobId: id, tabId: s.tabId, result: rendered }));
               if (msg.type === 'run') void rememberSrc(msg.imageSrc, result.key);
               if (!cached) void autoSave(result, msg.pageUrl, msg.title, msg.type === 'run' ? msg.imageSrc : undefined, tabId, emit).catch(() => undefined);
             } catch (e) {
-              if (watch.signal.aborted && watch.signal.reason instanceof DOMException && watch.signal.reason.message === 'watchdog') {
-                throw new AppError('TIMEOUT', { retryable: true, detail: tr('Модель не ответила за {0} мин. Картинка пропущена, перевод главы продолжается. Проверьте модель в настройках: возможно, она не помещается в видеопамять.', limitMin) });
-              }
-              throw e;
-            } finally {
-              clearTimeout(timer);
-              signal.removeEventListener('abort', onAbort);
-            }
-          },
-        })
-        .catch((e) => emit({ source: 'offscreen', type: 'error', jobId, tabId, error: toAppError(e).toJSON() }))
-        .finally(() => jobs.delete(jobId));
-      return { queued: true, status: jobStatus(jobId) };
-    }
-    case 'run-strip': {
-      const settings = await loadSettings();
-      service.inpainter = await browserLama(settings.lamaMode);
-      setUiLang(settings.interfaceLang, false);
-      const vision = settings.providers.find((p) => p.id === settings.visionProviderId);
-      const local = settings.pipeline !== 'engine' && (!vision || isLocalProvider(vision));
-      queue.concurrency = local ? 1 : Math.max(1, settings.concurrency);
-      const { tabId, jobIds } = msg;
-      const jobId = jobIds[0];
-      for (const id of jobIds.slice(1)) alias.set(id, jobId);
-      jobs.set(jobId, { tabId });
-      const done = new Set<string>();
-      void queue
-        .add({
-          key: jobId,
-          priority: msg.priority ?? 100,
-          run: async (signal) => {
-            const info = jobs.get(jobId);
-            if (info) info.startedAt = Date.now();
-            const watch = new AbortController();
-            const onAbort = () => watch.abort(signal.reason);
-            signal.addEventListener('abort', onAbort, { once: true });
-            // A strip is several pictures: allow time for each chunk of it.
-            const limitMin = (local ? WATCHDOG_LOCAL_MIN : WATCHDOG_CLOUD_MIN) * Math.max(1, Math.ceil(jobIds.length / 3));
-            const timer = setTimeout(() => watch.abort(new DOMException('watchdog', 'TimeoutError')), limitMin * 60_000);
-            let t0 = Date.now();
-            let current: string[] = jobIds;
-            try {
-              await service.translateStrip(
-                msg.parts.map((p) => ({ bytes: base64ToBytes(p.bytesB64), mime: p.mime })),
-                {
-                  sourceUrl: msg.pageUrl,
-                  title: msg.title,
-                  force: msg.force,
-                  signal: watch.signal,
-                  keepAliveMin: local ? CHAPTER_KEEP_ALIVE_MIN : undefined,
-                  onChunk: (idx) => {
-                    current = idx.map((i) => jobIds[i]);
-                    t0 = Date.now();
-                  },
-                  onStage: (event) => {
-                    const i = jobs.get(jobId);
-                    if (i) i.stage = event;
-                    for (const id of current) if (!done.has(id)) emit({ source: 'offscreen', type: 'stage', jobId: id, tabId, event });
-                  },
-                  onPart: (i, result, cached) => {
-                    done.add(jobIds[i]);
-                    if (!cached && result.strip?.index === 0) void recordSpeed(Date.now() - t0, result.page.usage);
-                    emit({ source: 'offscreen', type: 'done', jobId: jobIds[i], tabId, result: toRendered(result, cached) });
-                    void rememberSrc(msg.parts[i].src, result.key);
-                    if (!cached) void autoSave(result, msg.pageUrl, msg.title, msg.parts[i].src, tabId, emit).catch(() => undefined);
-                  },
-                },
-              );
-            } catch (e) {
-              if (watch.signal.aborted && watch.signal.reason instanceof DOMException && watch.signal.reason.message === 'watchdog') {
-                throw new AppError('TIMEOUT', { retryable: true, detail: tr('Модель не ответила за {0} мин. Картинка пропущена, перевод главы продолжается. Проверьте модель в настройках: возможно, она не помещается в видеопамять.', limitMin) });
-              }
+              if (watch.signal.aborted && watch.signal.reason instanceof DOMException && watch.signal.reason.message === 'watchdog') throw watchdogError(limitMin);
               throw e;
             } finally {
               clearTimeout(timer);
@@ -265,37 +320,132 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
         })
         .catch((e) => {
           const error = toAppError(e).toJSON();
-          for (const id of jobIds) if (!done.has(id)) emit({ source: 'offscreen', type: 'error', jobId: id, tabId, error });
+          emitTo(task, null, emit, (id, s) => ({ source: 'offscreen', type: 'error', jobId: id, tabId: s.tabId, error }));
         })
-        .finally(() => {
-          jobs.delete(jobId);
-          for (const id of jobIds) alias.delete(id);
-        });
+        .finally(() => forget(task));
       return { queued: true, status: jobStatus(jobId) };
     }
-    case 'cancel':
-      return { cancelled: queue.cancel(main(msg.jobId)) };
+    case 'run-strip': {
+      const local = await prepare();
+      const { tabId, jobIds } = msg;
+      const doc = msg.doc ?? '';
+      let key = `strip:${msg.parts.map((p) => p.hash).join(',')}:${msg.force ? 'f' : ''}`;
+      const existing = tasks.get(key);
+      if (existing && !existing.delivered.size && queue.has(key)) {
+        jobIds.forEach((id, part) => subscribe(existing, id, { tabId, doc, part }));
+        for (const p of msg.parts) if (!existing.blobs.includes(p.blobId)) void deleteJobBytes(p.blobId);
+        return { queued: true, status: jobStatus(jobIds[0]) };
+      }
+      if (existing) key = `${key}#${jobIds[0]}`;
+      const task: Task = { key, subs: new Map(), delivered: new Set(), blobs: msg.parts.map((p) => p.blobId) };
+      tasks.set(key, task);
+      jobIds.forEach((id, part) => subscribe(task, id, { tabId, doc, part }));
+      void queue
+        .add({
+          key,
+          priority: msg.priority ?? 100,
+          run: async (signal) => {
+            task.startedAt = Date.now();
+            const parts = [];
+            for (const p of msg.parts) parts.push({ bytes: (await readBytes(p.blobId)).bytes, mime: p.mime });
+            const watch = new AbortController();
+            const onAbort = () => watch.abort(signal.reason);
+            signal.addEventListener('abort', onAbort, { once: true });
+            // A strip is several pictures: allow time for each chunk of it.
+            const limitMin = (local ? WATCHDOG_LOCAL_MIN : WATCHDOG_CLOUD_MIN) * Math.max(1, Math.ceil(jobIds.length / 3));
+            const timer = setTimeout(() => watch.abort(new DOMException('watchdog', 'TimeoutError')), limitMin * 60_000);
+            let t0 = Date.now();
+            let current: number[] = jobIds.map((_, i) => i);
+            try {
+              await service.translateStrip(parts, {
+                sourceUrl: msg.pageUrl,
+                title: msg.title,
+                force: msg.force,
+                signal: watch.signal,
+                keepAliveMin: local ? CHAPTER_KEEP_ALIVE_MIN : undefined,
+                onChunk: (idx) => {
+                  current = idx;
+                  t0 = Date.now();
+                },
+                onStage: (event) => {
+                  task.stage = event;
+                  for (const part of current) {
+                    if (task.delivered.has(part)) continue;
+                    emitTo(task, part, emit, (id, s) => ({ source: 'offscreen', type: 'stage', jobId: id, tabId: s.tabId, event }));
+                  }
+                },
+                onPart: (i, result, cached) => {
+                  task.delivered.add(i);
+                  if (!cached && result.strip?.index === 0) void recordSpeed(Date.now() - t0, result.page.usage);
+                  const rendered = toRendered(result, cached);
+                  emitTo(task, i, emit, (id, s) => ({ source: 'offscreen', type: 'done', jobId: id, tabId: s.tabId, result: rendered }));
+                  void rememberSrc(msg.parts[i].src, result.key);
+                  if (!cached) void autoSave(result, msg.pageUrl, msg.title, msg.parts[i].src, tabId, emit).catch(() => undefined);
+                },
+              });
+            } catch (e) {
+              if (watch.signal.aborted && watch.signal.reason instanceof DOMException && watch.signal.reason.message === 'watchdog') throw watchdogError(limitMin);
+              throw e;
+            } finally {
+              clearTimeout(timer);
+              signal.removeEventListener('abort', onAbort);
+            }
+          },
+        })
+        .catch((e) => {
+          const error = toAppError(e).toJSON();
+          for (const [id, s] of task.subs) if (!task.delivered.has(s.part)) emit({ source: 'offscreen', type: 'error', jobId: id, tabId: s.tabId, error });
+        })
+        .finally(() => forget(task));
+      return { queued: true, status: jobStatus(jobIds[0]) };
+    }
+    case 'cancel': {
+      // One request stops waiting; the job itself stops only when nobody else waits for it
+      // (✕ on one picture of a strip leaves its neighbours alone).
+      const key = jobTask.get(msg.jobId);
+      const task = key ? tasks.get(key) : undefined;
+      jobTask.delete(msg.jobId);
+      if (!task) return { cancelled: false };
+      task.subs.delete(msg.jobId);
+      dropIfUnneeded(task);
+      return { cancelled: true };
+    }
     case 'cancel-tab': {
       let n = 0;
-      for (const [id, j] of jobs) if (msg.tabId === undefined || j.tabId === msg.tabId) n += queue.cancel(id) ? 1 : 0;
+      const error = new AppError('CANCELLED', { detail: CANCELLED_ALL }).toJSON();
+      for (const task of [...tasks.values()]) {
+        for (const [id, s] of [...task.subs]) {
+          if (msg.tabId !== undefined && s.tabId !== msg.tabId) continue;
+          if (msg.doc && s.doc && s.doc !== msg.doc) continue;
+          task.subs.delete(id);
+          jobTask.delete(id);
+          if (!task.delivered.has(s.part)) emit({ source: 'offscreen', type: 'error', jobId: id, tabId: s.tabId, error });
+          n++;
+        }
+        dropIfUnneeded(task);
+      }
       return { cancelled: n };
     }
     case 'status':
       return Object.fromEntries(msg.jobIds.map((id) => [id, jobStatus(id)]));
     case 'lookup-cached': {
-      // Pictures of this page translated before (to the current language): their results.
+      // Pictures of this page translated before (to the current language): only their keys — the
+      // page fetches the results one by one, so no single message gets too big.
       const s = await loadSettings();
-      const out: Record<string, RenderedTiles> = {};
+      const out: Record<string, string> = {};
       for (const src of msg.srcs.slice(0, 300)) {
         const key = await db.get<string>('kv', `src:${s.targetLang}:${src}`);
-        const r = key ? await service.getResult(key) : undefined;
-        if (r) out[src] = toRendered(r, true);
+        if (key) out[src] = key;
       }
       return out;
     }
     case 'get-result': {
       const r = await service.getResult(msg.key);
       return r ? toRendered(r, true) : null;
+    }
+    case 'get-tile': {
+      const r = await service.getResult(msg.key);
+      return r && r.rendered[msg.index] ? tileOf(r, msg.index) : null;
     }
     case 'build-file': {
       // Assemble the translated pages of a chapter into one file and hand back a blob URL.

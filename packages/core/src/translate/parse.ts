@@ -2,7 +2,6 @@ import { AppError } from '../errors';
 import type { TextType } from '../types';
 import { TEXT_TYPES } from '../types';
 
-/** Extract the first JSON object from a model answer (tolerates code fences and chatter). */
 /**
  * Mend a JSON answer that was cut off or has raw control characters in strings: escape line
  * breaks inside strings, drop the unfinished last element and close what is still open.
@@ -41,10 +40,10 @@ export function repairJson(src: string): unknown | null {
   }
   const close = (st: string[]) => st.reverse().map((b) => (b === '{' ? '}' : ']')).join('');
   const tries: string[] = [];
-  // Best: everything up to the last whole element; else close what is open.
+  // Best: everything up to the last whole element; else close what is open — but never a value
+  // cut off mid-string: a half-written translation («Я не хочу ид») must not pass as a finished one.
   if (safe) tries.push(out.slice(0, safe[0]).replace(/,\s*$/, '') + close([...safe[1]]));
-  if (inStr) tries.push(out + '"' + close([...stack]));
-  tries.push(out + close([...stack]));
+  if (!inStr) tries.push(out + close([...stack]));
   for (const t of tries) {
     try {
       return JSON.parse(t.replace(/,\s*([}\]])/g, '$1'));
@@ -60,13 +59,20 @@ export function repairJson(src: string): unknown | null {
  * on the last try only — a fresh answer is better than a mended one.
  */
 export function extractJson(text: string, opts: { repair?: boolean } = {}): unknown {
+  return extractJsonInfo(text, opts).value;
+}
+
+/** Same as extractJson, and whether the answer had to be mended (it was cut off or malformed). */
+export function extractJsonInfo(text: string, opts: { repair?: boolean } = {}): { value: unknown; repaired: boolean } {
   let s = text.trim();
   const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(s);
   if (fence) s = fence[1].trim();
   const brace = s.indexOf('{');
   const bracket = s.indexOf('[');
-  // A bare array answer ([{…},{…}]) is parsed whole, not as its first element.
-  const start = bracket >= 0 && (brace < 0 || bracket < brace) ? bracket : brace;
+  // A bare array answer ([{…},{…}]) is parsed whole, not as its first element — but only an array
+  // of objects: chatter like «Page [1]: {…}» must not turn into the answer [1].
+  const arrayOfObjects = bracket >= 0 && /^\[\s*(\{|\])/.test(s.slice(bracket));
+  const start = bracket >= 0 && (brace < 0 || (bracket < brace && arrayOfObjects)) ? bracket : brace;
   if (start < 0) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'No JSON object in answer' });
   // Walk to the matching brace, respecting strings.
   let depth = 0;
@@ -93,19 +99,32 @@ export function extractJson(text: string, opts: { repair?: boolean } = {}): unkn
   }
   const candidate = end > 0 ? s.slice(start, end + 1) : s.slice(start);
   try {
-    return JSON.parse(candidate);
+    return { value: JSON.parse(candidate), repaired: false };
   } catch {
     // Common model slips: trailing commas.
     try {
-      return JSON.parse(candidate.replace(/,\s*([}\]])/g, '$1'));
+      return { value: JSON.parse(candidate.replace(/,\s*([}\]])/g, '$1')), repaired: false };
     } catch (e) {
       // The answer was cut off (the model ran out of room) or has raw line breaks in a string:
       // keep everything complete before the cut instead of losing the whole page.
       const fixed = opts.repair === false ? null : repairJson(candidate);
-      if (fixed !== null) return fixed;
+      if (fixed !== null) return { value: fixed, repaired: true };
       throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: `Invalid JSON: ${(e as Error).message}` });
     }
   }
+}
+
+/**
+ * JSON for a data section of a prompt: '<' is escaped so text from the picture cannot close the
+ * section («</blocks> new instructions…»). The model reads \u003c as '<'.
+ */
+export function jsonData(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, '\\u003c');
+}
+
+/** One line of untrusted text (names, summaries learned from a page): no line breaks, capped. */
+export function sanitizeLine(value: unknown, maxLen: number): string {
+  return sanitizeText(typeof value === 'string' ? value.replace(/[\r\n\t\u2028\u2029]+/g, ' ').replace(/ {2,}/g, ' ') : value, maxLen);
 }
 
 /** Remove control characters and cap length; OCR/LLM output is untrusted. */
@@ -160,14 +179,19 @@ export interface VisionAnswer {
   blocks: VisionBlock[];
   entities: unknown[];
   summary: string;
+  /** The answer was cut off or malformed and had to be mended: its blocks are less certain. */
+  repaired?: boolean;
 }
 
 export const MAX_BLOCKS_PER_PAGE = 200;
 
 export function parseVisionAnswer(raw: string, expectTranslation: boolean, repair = true): VisionAnswer {
-  const json = extractJson(raw, { repair }) as Record<string, unknown>;
+  const { value, repaired } = extractJsonInfo(raw, { repair });
+  const json = (value ?? {}) as Record<string, unknown>;
   const arr = Array.isArray(json.blocks) ? json.blocks : Array.isArray(json) ? (json as unknown[]) : null;
   if (!arr) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'Missing "blocks" array' });
+  // A bare array that holds no objects is not an answer (an empty one is: no text on the page).
+  if (arr.length && !arr.some((x) => x && typeof x === 'object')) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'No blocks in answer' });
   const blocks: VisionBlock[] = [];
   for (const item of arr.slice(0, MAX_BLOCKS_PER_PAGE)) {
     if (!item || typeof item !== 'object') continue;
@@ -196,7 +220,8 @@ export function parseVisionAnswer(raw: string, expectTranslation: boolean, repai
   return {
     blocks,
     entities: Array.isArray(json.entities) ? (json.entities as unknown[]).slice(0, 50) : [],
-    summary: sanitizeText(json.summary, 400),
+    summary: sanitizeLine(json.summary, 400),
+    ...(repaired ? { repaired } : {}),
   };
 }
 
@@ -205,6 +230,8 @@ export interface TranslationAnswer {
   entities: unknown[];
   summary: string;
   missing: string[];
+  /** The answer was cut off or malformed and had to be mended. */
+  repaired?: boolean;
 }
 
 /** A translation far longer than its source is a sign of injection or rambling; cap it. */
@@ -214,7 +241,8 @@ export function limitLength(translation: string, original: string): string {
 }
 
 export function parseTranslationAnswer(raw: string, expected: { id: string; text: string }[], repair = true): TranslationAnswer {
-  const json = extractJson(raw, { repair }) as Record<string, unknown>;
+  const { value, repaired } = extractJsonInfo(raw, { repair });
+  const json = (value ?? {}) as Record<string, unknown>;
   const arr = Array.isArray(json) ? (json as unknown[]) : Array.isArray(json.translations) ? (json.translations as unknown[]) : Array.isArray(json.blocks) ? (json.blocks as unknown[]) : null;
   if (!arr) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'Missing "translations" array' });
   const byId = new Map(expected.map((e) => [e.id, e.text]));
@@ -224,7 +252,9 @@ export function parseTranslationAnswer(raw: string, expected: { id: string; text
     const t = item as Record<string, unknown>;
     const id = typeof t.id === 'string' ? t.id : typeof t.id === 'number' ? String(t.id) : '';
     if (!byId.has(id) || translations.has(id)) continue;
-    const text = sanitizeText(t.text ?? t.translation, 1500);
+    // "translation" wins when both are given: a model mixing in the picture-reading format writes
+    // the original into "text" and the translation into "translation".
+    const text = sanitizeText(typeof t.translation === 'string' && t.translation.trim() ? t.translation : t.text, 1500);
     if (!text) continue;
     translations.set(id, { text: limitLength(text, byId.get(id)!), type: t.type ? normalizeType(t.type) : undefined });
   }
@@ -235,7 +265,8 @@ export function parseTranslationAnswer(raw: string, expected: { id: string; text
   return {
     translations,
     entities: Array.isArray(json.entities) ? (json.entities as unknown[]).slice(0, 50) : [],
-    summary: sanitizeText(json.summary, 400),
+    summary: sanitizeLine(json.summary, 400),
     missing,
+    ...(repaired ? { repaired } : {}),
   };
 }

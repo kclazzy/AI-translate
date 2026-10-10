@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyContext, mergeContext, CONTEXT_LIMITS } from '../src/translate/context';
 import { applyForbiddenFixes, findGlossaryHits, findViolations, replaceInText, type GlossaryEntry } from '../src/translate/glossary';
 import { extractJson, parseTranslationAnswer, parseVisionAnswer, sanitizeText } from '../src/translate/parse';
-import { buildSystemPrompt, textTranslateInstruction } from '../src/translate/prompt';
+import { buildSystemPrompt, contextData, textTranslateInstruction } from '../src/translate/prompt';
 import { DEFAULT_PROFILES } from '../src/translate/profiles';
 import { translateBlocks } from '../src/translate/translator';
 import { OpenAICompatibleProvider } from '../src/llm/openai';
@@ -60,10 +60,14 @@ describe('context', () => {
     expect(ctx.summaries.at(-1)).toBe('Страница 29');
   });
 
-  it('puts locked names and glossary into the system prompt', () => {
-    const ctx = mergeContext(emptyContext('s3'), { entities: [{ source: '田中', target: 'Танака', kind: 'character', gender: 'male' }] });
-    const p = buildSystemPrompt({ sourceLang: 'ja', targetLang: 'ru', profile: DEFAULT_PROFILES[1], glossary: [g({ source: '魔王', target: 'Король Демонов', forbidden: ['Демон-король'] })], context: ctx, translateSfx: true });
+  it('puts locked names and glossary into the system prompt, learned names into the data section', () => {
+    let ctx = mergeContext(emptyContext('s3'), { entities: [{ source: '田中', target: 'Танака', kind: 'character', gender: 'male' }, { source: '佐藤', target: 'Сато', kind: 'character' }] });
+    ctx = { ...ctx, entities: ctx.entities.map((e) => (e.source === '田中' ? { ...e, locked: true } : e)) };
+    const input = { sourceLang: 'ja', targetLang: 'ru', profile: DEFAULT_PROFILES[1], glossary: [g({ source: '魔王', target: 'Король Демонов', forbidden: ['Демон-король'] })], context: ctx, translateSfx: true };
+    const p = buildSystemPrompt(input);
     expect(p).toContain('田中 → Танака');
+    expect(p).not.toContain('Сато');
+    expect(contextData(input)).toContain('"target":"Сато"');
     expect(p).toContain('魔王 → Король Демонов (never: Демон-король)');
     expect(p).toContain('Russian');
     expect(p).toContain('honorifics');

@@ -51,6 +51,8 @@ export interface CompletionResult {
   model: string;
   /** Generation speed reported by the server (Ollama), tokens per second. */
   tokensPerSecond?: number;
+  /** The answer hit the output limit (finish_reason "length", stop_reason "max_tokens"): it is cut off. */
+  truncated?: boolean;
 }
 
 export interface LlmProvider {

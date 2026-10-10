@@ -5,10 +5,11 @@ import type { TextType, Usage } from '../types';
 import { withRetry } from '../util/retry';
 import { applyForbiddenFixes, findGlossaryHits, findViolations, type GlossaryHit } from './glossary';
 import { isDegenerate, parseTranslationAnswer, tameRuns } from './parse';
-import { buildSystemPrompt, repairInstruction, textTranslateInstruction, type BlockForTranslation, type PromptInput } from './prompt';
+import { buildSystemPrompt, contextData, repairInstruction, textTranslateInstruction, type BlockForTranslation, type PromptInput } from './prompt';
 
 export interface TranslateBlocksResult {
-  translations: Map<string, { text: string; type?: TextType }>;
+  /** lowConfidence: the translation came from an answer that was cut off or had to be mended. */
+  translations: Map<string, { text: string; type?: TextType; lowConfidence?: boolean }>;
   entities: unknown[];
   summary: string;
   usage: Usage[];
@@ -40,24 +41,38 @@ export async function translateBlocks(
   for (const [id, hits] of hitsByBlock) hintStrings[id] = hits.map((h) => `${h.entry.source} → ${h.entry.target}`);
 
   const system = buildSystemPrompt(input, [...allHits.values()]);
-  const user = textTranslateInstruction(blocks, hintStrings);
+  const user = textTranslateInstruction(blocks, hintStrings, contextData(input));
   const usage: Usage[] = [];
 
   const retries = opts.retries ?? 2;
+  // After an answer cut off at the output limit, the next try gets twice the room.
+  let room = Math.min(8192, 400 + blocks.length * 160);
   return withRetry(
     async (attempt) => {
+      const last = attempt >= retries;
       const messages: ChatMessage[] = [{ role: 'user', content: user }];
-      const first = await provider.complete({ system, messages, json: true, signal: opts.signal, maxTokens: Math.min(8192, 400 + blocks.length * 160) });
+      const first = await provider.complete({ system, messages, json: true, signal: opts.signal, maxTokens: room });
       usage.push(usageFrom(provider, first.model, first.inputTokens, first.outputTokens));
-      let answer = parseTranslationAnswer(first.text, blocks, attempt >= retries);
+      if (first.truncated && !last) {
+        room = Math.min(16384, room * 2);
+        throw new AppError('TRANSLATION_INVALID_OUTPUT', { retryable: true, detail: 'Answer cut off at the output limit' });
+      }
+      let answer = parseTranslationAnswer(first.text, blocks, last);
+      // Ids whose translation comes from a cut-off or mended answer.
+      const low = new Set<string>(answer.repaired || first.truncated ? answer.translations.keys() : []);
       const sources = new Map(blocks.map((b) => [b.id, b.text]));
       let problems = collectProblems(answer.translations, hitsByBlock, answer.missing, sources);
       if (problems.length) {
         messages.push({ role: 'assistant', content: first.text }, { role: 'user', content: repairInstruction(problems) });
         try {
-          const second = await provider.complete({ system, messages, json: true, signal: opts.signal, maxTokens: Math.min(8192, 400 + blocks.length * 160) });
+          const second = await provider.complete({ system, messages, json: true, signal: opts.signal, maxTokens: room });
           usage.push(usageFrom(provider, second.model, second.inputTokens, second.outputTokens));
           const repaired = parseTranslationAnswer(second.text, blocks);
+          const secondLow = !!(repaired.repaired || second.truncated);
+          for (const id of repaired.translations.keys()) {
+            if (secondLow) low.add(id);
+            else low.delete(id);
+          }
           // Keep anything the first answer had that the repair dropped.
           for (const [id, t] of answer.translations) if (!repaired.translations.has(id)) repaired.translations.set(id, t);
           answer = { ...repaired, missing: blocks.filter((b) => !repaired.translations.has(b.id)).map((b) => b.id) };
@@ -68,18 +83,16 @@ export async function translateBlocks(
         problems = collectProblems(answer.translations, hitsByBlock, answer.missing, sources);
       }
       // Deterministic last resort for forbidden forms.
+      const translations: TranslateBlocksResult['translations'] = new Map();
       for (const [id, t] of answer.translations) {
         // Still a run of one letter: no translation is better than «Хххххх» in the bubble.
-        if (isDegenerate(t.text, sources.get(id) ?? '')) {
-          answer.translations.delete(id);
-          continue;
-        }
+        if (isDegenerate(t.text, sources.get(id) ?? '')) continue;
         const text = tameRuns(t.text);
         const v = findViolations(text, hitsByBlock.get(id) ?? []);
         const fixed = v.length ? applyForbiddenFixes(text, v) : text;
-        if (fixed !== t.text) answer.translations.set(id, { ...t, text: fixed });
+        translations.set(id, { ...t, text: fixed, ...(low.has(id) ? { lowConfidence: true } : {}) });
       }
-      return { translations: answer.translations, entities: answer.entities, summary: answer.summary, usage };
+      return { translations, entities: answer.entities, summary: answer.summary, usage };
     },
     { retries, signal: opts.signal },
   );

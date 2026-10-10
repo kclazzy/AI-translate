@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { emptyContext, type AppSettings, type TranslationContext } from '@ait/core';
 import { CachedPageEditor } from './editor/EditorHost';
 import { WelcomePanel } from './panels/WelcomePanel';
 import { loadBundledFonts } from './fonts';
-import { PlatformContext, usePlatform, type StudioPlatform } from './platform';
+import { PlatformContext, usePlatform, withSafeFileNames, type StudioPlatform } from './platform';
+import { confirmLeave } from './editor/guard';
 import { ContextEditor, GlossaryEditor } from './panels/GlossaryPanel';
 import { HistoryPanel, PrivacyPanel } from './panels/InfoPanels';
 import { ProjectPanel } from './panels/ProjectPanel';
@@ -72,7 +73,9 @@ function SeriesContexts() {
   );
 }
 
-export function StudioApp({ platform, initialView, resultKey, chapterKeys, sharedFiles }: StudioAppProps) {
+export function StudioApp({ platform: hostPlatform, initialView, resultKey, chapterKeys, sharedFiles }: StudioAppProps) {
+  // Every saved file gets a safe name (titles may be page addresses with slashes).
+  const platform = useMemo(() => withSafeFileNames(hostPlatform), [hostPlatform]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [view, setView] = useState<View>(initialView ?? (resultKey ? 'editor' : 'quick'));
   const [editKey, setEditKey] = useState<string | undefined>(resultKey);
@@ -114,6 +117,12 @@ export function StudioApp({ platform, initialView, resultKey, chapterKeys, share
     [platform],
   );
 
+  /** Leaving the editor with unsaved edits asks first (save and go / go without saving / stay). */
+  const go = async (v: View) => {
+    if (v !== view && !(await confirmLeave())) return;
+    setView(v);
+  };
+
   if (!settings) return <div className="ait-content ait-muted">{tr('Загрузка…')}</div>;
   if (platform.kind === 'mobile' && !settings.onboarded) {
     return (
@@ -151,14 +160,14 @@ export function StudioApp({ platform, initialView, resultKey, chapterKeys, share
             <small>{tr('переводчик манги и комиксов')}</small>
           </div>
           {nav.map((n) => (
-            <button key={n.id} className="ait-nav-btn" aria-current={view === n.id ? 'page' : undefined} onClick={() => setView(n.id)}>
+            <button key={n.id} className="ait-nav-btn" aria-current={view === n.id ? 'page' : undefined} onClick={() => void go(n.id)}>
               {n.icon}
               <span className="label-long">{n.long ?? n.label}</span>
               <span className="label-short">{n.label}</span>
             </button>
           ))}
           <div className="ait-side-foot">
-            <button className="ait-nav-btn" aria-current={view === 'privacy' ? 'page' : undefined} onClick={() => setView('privacy')}>
+            <button className="ait-nav-btn" aria-current={view === 'privacy' ? 'page' : undefined} onClick={() => void go('privacy')}>
               <Icon.Lock />
               <span>{settings.privacy === 'local' ? tr('Локальный режим') : tr('Приватность')}</span>
             </button>

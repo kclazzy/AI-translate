@@ -4,8 +4,7 @@ import type { ModelCheck } from './llm/selftest';
 import type { PrivacyMode } from './llm/privacy';
 import type { ProviderConfig } from './llm/types';
 import { configFromPreset } from './llm/presets';
-import type { GlossaryEntry } from './translate/glossary';
-import { DEFAULT_PROFILES, type PromptProfile, type SfxStyle } from './translate/profiles';
+import type { GlossaryEntry } from './translate/glossary';import { DEFAULT_PROFILES, type PromptProfile, type SfxStyle } from './translate/profiles';
 
 export type PipelineMode = 'standalone' | 'engine';
 export type Quality = 'fast' | 'balanced' | 'best';
@@ -180,23 +179,191 @@ export function defaultSettings(): AppSettings {
   };
 }
 
-/** Fill gaps after upgrades so older stored settings keep working. */
+// ---- validation of stored / imported settings ---------------------------------------------------
+// Settings come from storage written by older versions and from settings files other people share,
+// so every field is checked: a wrong type falls back to the default instead of breaking the UI.
+
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const oneOf = <T extends string>(v: unknown, list: readonly T[], d: T): T => (list.includes(v as T) ? (v as T) : d);
+const strOr = (v: unknown, d: string): string => (typeof v === 'string' ? v : d);
+const strOrNull = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+const stringMap = (v: unknown): Record<string, string> => (isObj(v) ? Object.fromEntries(Object.entries(v).filter(([, x]) => typeof x === 'string')) as Record<string, string> : {});
+
+/** Copy only optional fields of the right type. */
+function pickTyped(src: Obj, out: Obj, kinds: Record<string, 'string' | 'number' | 'boolean' | 'object'>): void {
+  for (const [k, kind] of Object.entries(kinds)) {
+    const v = src[k];
+    if (v === undefined) continue;
+    if (kind === 'number' ? isNum(v) : kind === 'object' ? isObj(v) : typeof v === kind) out[k] = v;
+  }
+}
+
+function cleanProvider(v: unknown): ProviderConfig | null {
+  if (!isObj(v) || typeof v.id !== 'string' || !v.id || typeof v.baseUrl !== 'string') return null;
+  const out: Obj = {
+    id: v.id,
+    label: strOr(v.label, v.id),
+    kind: oneOf(v.kind, ['openai-compatible', 'anthropic'] as const, 'openai-compatible'),
+    preset: strOr(v.preset, 'custom'),
+    baseUrl: v.baseUrl,
+    model: strOr(v.model, ''),
+    vision: v.vision === true,
+    jsonMode: oneOf(v.jsonMode, ['json_object', 'none'] as const, 'json_object'),
+  };
+  pickTyped(v, out, { apiKey: 'string', priceInput: 'number', priceOutput: 'number', timeoutMs: 'number', maxOutputTokens: 'number', temperature: 'number', noThinking: 'boolean', keepAliveMin: 'number', numCtx: 'number' });
+  return out as unknown as ProviderConfig;
+}
+
+function cleanGlossaryEntry(v: unknown, i: number): GlossaryEntry | null {
+  if (!isObj(v) || typeof v.source !== 'string' || typeof v.target !== 'string') return null;
+  const out: GlossaryEntry = {
+    id: typeof v.id === 'string' && v.id ? v.id : `g${i}`,
+    source: v.source,
+    target: v.target,
+    matchMode: oneOf(v.matchMode, ['exact', 'regex'] as const, 'exact'),
+    caseSensitive: v.caseSensitive === true,
+    forbidden: strings(v.forbidden),
+    enabled: v.enabled !== false,
+  };
+  if (typeof v.note === 'string') out.note = v.note;
+  return out;
+}
+
+function cleanProfile(v: unknown): PromptProfile | null {
+  if (!isObj(v) || typeof v.id !== 'string' || !v.id) return null;
+  const base = DEFAULT_PROFILES[0];
+  return {
+    id: v.id,
+    name: strOr(v.name, v.id),
+    customPrompt: strOr(v.customPrompt, ''),
+    honorifics: oneOf(v.honorifics, ['keep', 'adapt', 'drop'] as const, base.honorifics),
+    names: oneOf(v.names, ['transliterate', 'keep-original', 'adapt'] as const, base.names),
+    sfx: oneOf(v.sfx, ['translate', 'keep'] as const, base.sfx),
+    sfxStyle: oneOf(v.sfxStyle, SFX_STYLES, base.sfxStyle),
+    tone: strOr(v.tone, ''),
+  };
+}
+
+const SFX_STYLES = ['original', 'translated', 'small', 'large', 'artistic'] as const;
+const CHECKER_KINDS = ['deepl', 'google', 'yandex', 'libre', 'llm'] as const;
+
+function cleanCrossCheck(v: unknown): AppSettings['crossCheck'] {
+  if (!isObj(v)) return undefined;
+  const checkers = (Array.isArray(v.checkers) ? v.checkers : []).flatMap((c) => {
+    if (!isObj(c) || typeof c.id !== 'string' || !c.id || !CHECKER_KINDS.includes(c.kind as never)) return [];
+    const out: Obj = { id: c.id, kind: c.kind, enabled: c.enabled !== false };
+    pickTyped(c, out, { url: 'string', folderId: 'string', providerId: 'string' });
+    return [out as unknown as NonNullable<AppSettings['crossCheck']>['checkers'][number]];
+  });
+  return { enabled: v.enabled === true, checkers, judge: strOr(v.judge, 'main'), mode: oneOf(v.mode, ['report', 'fix'] as const, 'report') };
+}
+
+function cleanPreset(v: unknown): ModelPreset | null {
+  if (!isObj(v) || typeof v.id !== 'string' || typeof v.name !== 'string') return null;
+  const out: Obj = {
+    id: v.id,
+    name: v.name,
+    pipeline: oneOf(v.pipeline, ['standalone', 'engine'] as const, 'standalone'),
+    visionProviderId: strOrNull(v.visionProviderId),
+    translationProviderId: strOrNull(v.translationProviderId),
+    quality: oneOf(v.quality, ['fast', 'balanced', 'best'] as const, 'balanced'),
+    models: stringMap(v.models),
+  };
+  pickTyped(v, out, { twoStepTranslation: 'boolean', qaMode: 'string' });
+  return out as unknown as ModelPreset;
+}
+
+const ENGINE_DETECTORS = ['auto', 'classic', 'ctd', 'vision'] as const;
+const ENGINE_OCR = ['auto', 'vision', 'manga-ocr', 'paddle'] as const;
+const ENGINE_INPAINTERS = ['auto', 'fill', 'telea', 'lama'] as const;
+
+/** Fill gaps after upgrades so older stored settings keep working; drop anything of the wrong shape. */
 export function migrateSettings(raw: unknown): AppSettings {
   const d = defaultSettings();
-  if (!raw || typeof raw !== 'object') return d;
-  const r = raw as Partial<AppSettings>;
-  return {
+  if (!isObj(raw)) return d;
+  const r = raw;
+  const engine = isObj(r.engine) ? r.engine : {};
+  const options = isObj(engine.options) ? engine.options : {};
+  const fonts = isObj(r.fonts) ? r.fonts : {};
+  const auto = isObj(r.autoTranslate) ? r.autoTranslate : {};
+  const providers = Array.isArray(r.providers) ? r.providers.map(cleanProvider).filter((p): p is ProviderConfig => !!p) : d.providers;
+  const profiles = Array.isArray(r.profiles) ? r.profiles.map(cleanProfile).filter((p): p is PromptProfile => !!p) : [];
+  const out: Obj = {
     ...d,
-    ...r,
-    engine: { ...d.engine, ...(r.engine ?? {}), options: { ...d.engine.options, ...(r.engine?.options ?? {}) } },
-    autoTranslate: { ...d.autoTranslate, ...(r.autoTranslate ?? {}) },
-    fonts: { ...d.fonts, ...(r.fonts ?? {}) },
-    profiles: r.profiles?.length ? r.profiles : d.profiles,
-    providers: Array.isArray(r.providers) ? r.providers : d.providers,
-    glossary: Array.isArray(r.glossary) ? r.glossary : [],
-    seriesProfiles: r.seriesProfiles ?? {},
+    theme: oneOf(r.theme, ['system', 'light', 'dark'] as const, d.theme),
+    uiMode: oneOf(r.uiMode, ['reader', 'advanced', 'scanlator'] as const, d.uiMode),
+    pipeline: oneOf(r.pipeline, ['standalone', 'engine'] as const, d.pipeline),
+    privacy: oneOf(r.privacy, ['local', 'hybrid', 'cloud'] as const, d.privacy),
+    engine: {
+      url: strOr(engine.url, d.engine.url),
+      token: strOr(engine.token, ''),
+      options: {
+        detector: oneOf(options.detector, ENGINE_DETECTORS, 'auto'),
+        ocr: oneOf(options.ocr, ENGINE_OCR, 'auto'),
+        inpainter: oneOf(options.inpainter, ENGINE_INPAINTERS, 'auto'),
+      },
+    },
+    providers,
+    visionProviderId: r.visionProviderId === undefined ? d.visionProviderId : strOrNull(r.visionProviderId),
+    translationProviderId: strOrNull(r.translationProviderId),
+    sourceLang: strOr(r.sourceLang, d.sourceLang),
+    targetLang: strOr(r.targetLang, d.targetLang),
+    quality: oneOf(r.quality, ['fast', 'balanced', 'best'] as const, d.quality),
+    translateSfx: typeof r.translateSfx === 'boolean' ? r.translateSfx : d.translateSfx,
+    sfxStyle: oneOf(r.sfxStyle, SFX_STYLES, d.sfxStyle),
+    profiles: profiles.length ? profiles : d.profiles,
+    activeProfileId: strOr(r.activeProfileId, d.activeProfileId),
+    seriesProfiles: stringMap(r.seriesProfiles),
+    glossary: Array.isArray(r.glossary) ? r.glossary.map(cleanGlossaryEntry).filter((g): g is GlossaryEntry => !!g) : [],
+    concurrency: isNum(r.concurrency) ? Math.max(1, Math.min(16, Math.round(r.concurrency))) : d.concurrency,
+    autoTranslate: { enabled: auto.enabled === true, sites: strings(auto.sites) },
+    minImageSize: isNum(r.minImageSize) ? r.minImageSize : d.minImageSize,
+    saveHistory: typeof r.saveHistory === 'boolean' ? r.saveHistory : d.saveHistory,
+    debug: r.debug === true,
+    fonts: { dialogue: strOr(fonts.dialogue, ''), narration: strOr(fonts.narration, ''), sfx: strOr(fonts.sfx, ''), ...(isNum(fonts.scale) ? { scale: fonts.scale } : {}) },
+    cacheDays: isNum(r.cacheDays) ? r.cacheDays : d.cacheDays,
     version: 1,
   };
+  pickTyped(r, out, {
+    uiLang: 'string',
+    onboarded: 'boolean',
+    gpuVramGb: 'number',
+    modelChecks: 'object',
+    ollamaModelsDir: 'string',
+    enabled: 'boolean',
+    gpuKeepAliveMin: 'number',
+    historyDays: 'number',
+    qaMode: 'string',
+    fastLocal: 'boolean',
+    exportPageLength: 'string',
+    twoStepTranslation: 'boolean',
+    stitchStrips: 'boolean',
+    bubblesOnly: 'boolean',
+    onlySourceLang: 'boolean',
+    autoApplyCached: 'boolean',
+    autoSave: 'boolean',
+    autoSaveDir: 'string',
+    editorPageList: 'string',
+    inpaintExpand: 'number',
+    lamaEngine: 'boolean',
+    lamaMode: 'string',
+    modelCatalog: 'object',
+    modelCatalogCheckedAt: 'string',
+    interfaceLang: 'string',
+  });
+  if (out.qaMode !== undefined && !['off', 'rules', 'report', 'fix'].includes(out.qaMode as string)) delete out.qaMode;
+  if (out.exportPageLength !== undefined && !['normal', 'long', 'whole'].includes(out.exportPageLength as string)) delete out.exportPageLength;
+  if (out.editorPageList !== undefined && !['bottom', 'right'].includes(out.editorPageList as string)) delete out.editorPageList;
+  if (out.lamaMode !== undefined && !['off', 'engine', 'browser'].includes(out.lamaMode as string)) delete out.lamaMode;
+  if (r.crossCheck !== undefined) {
+    const cc = cleanCrossCheck(r.crossCheck);
+    if (cc) out.crossCheck = cc;
+  }
+  if (Array.isArray(r.presets)) out.presets = r.presets.map(cleanPreset).filter((p): p is ModelPreset => !!p);
+  return out as unknown as AppSettings;
 }
 
 export function activeProfile(s: AppSettings, seriesKey?: string): PromptProfile {

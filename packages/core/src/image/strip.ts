@@ -1,6 +1,6 @@
 import type { Box, PageResult, TextBlock } from '../types';
 import { dominantLanguage } from '../languages';
-import type { ImageBackend } from './backend';
+import type { DecodedImage, ImageBackend } from './backend';
 import { rowBusyness } from './slice';
 import { TiledImage } from './tiled';
 
@@ -69,38 +69,80 @@ export interface Stitched {
   calmAfter: boolean[];
 }
 
-/** Glue pictures one under another at the width of the first (others are scaled to it). */
-export async function stitchParts(backend: ImageBackend, parts: StripPart[]): Promise<Stitched> {
-  const decoded = [];
-  try {
-    for (const p of parts) decoded.push(await backend.decode(p.bytes, p.mime));
-    const width = decoded[0].width;
-    const spans: PartSpan[] = [];
-    let y = 0;
-    for (const d of decoded) {
+export interface StripPlan {
+  /** Common width: the first picture's; the others are scaled to it. */
+  width: number;
+  spans: PartSpan[];
+  /** Calmness of the seam after each picture (the last one is always calm). */
+  calmAfter: boolean[];
+}
+
+const SEAM_BAND = 4;
+
+/** Pixels of `rows` rows at the top or bottom of a decoded picture, scaled to `width`. */
+function edgeRows(backend: ImageBackend, d: DecodedImage, width: number, top: boolean): Float32Array {
+  const srcRows = Math.min(d.height, Math.max(1, Math.round((SEAM_BAND * d.width) / width)));
+  const c = backend.createCanvas(width, SEAM_BAND);
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(d.source, 0, top ? 0 : d.height - srcRows, d.width, srcRows, 0, 0, width, SEAM_BAND);
+  return rowBusyness(ctx.getImageData(0, 0, width, SEAM_BAND).data, width, SEAM_BAND);
+}
+
+/**
+ * Lay out pictures one under another without gluing them: sizes and seams only. One picture is
+ * decoded at a time and released at once, so a whole chapter never sits in memory.
+ */
+export async function planStrip(backend: ImageBackend, parts: StripPart[]): Promise<StripPlan> {
+  const spans: PartSpan[] = [];
+  const tops: Float32Array[] = [];
+  const bottoms: Float32Array[] = [];
+  let width = 0;
+  let y = 0;
+  for (const p of parts) {
+    const d = await backend.decode(p.bytes, p.mime);
+    try {
+      if (!width) width = d.width;
       const h = Math.max(1, Math.round((d.height * width) / d.width));
       spans.push({ y, h });
       y += h;
+      tops.push(edgeRows(backend, d, width, true));
+      bottoms.push(edgeRows(backend, d, width, false));
+    } finally {
+      d.close?.();
     }
-    const image = new TiledImage(backend, width, y);
-    for (const [i, d] of decoded.entries()) {
-      const s = spans[i];
+  }
+  const calmAfter = spans.map((_, i) => (i === spans.length - 1 ? true : calmSeam(bottoms[i], tops[i + 1])));
+  return { width, spans, calmAfter };
+}
+
+/** Glue the pictures of one chunk (indices into `parts`/`plan.spans`), decoding one at a time. */
+export async function stitchChunk(backend: ImageBackend, parts: StripPart[], plan: StripPlan, chunk: number[]): Promise<TiledImage> {
+  const top = plan.spans[chunk[0]].y;
+  const last = plan.spans[chunk[chunk.length - 1]];
+  const image = new TiledImage(backend, plan.width, last.y + last.h - top);
+  for (const i of chunk) {
+    const d = await backend.decode(parts[i].bytes, parts[i].mime);
+    try {
+      const s = { y: plan.spans[i].y - top, h: plan.spans[i].h };
       for (const t of image.tiles) {
         if (t.y + t.h <= s.y || t.y >= s.y + s.h) continue;
-        t.canvas.getContext('2d').drawImage(d.source, 0, 0, d.width, d.height, 0, s.y - t.y, width, s.h);
+        t.canvas.getContext('2d').drawImage(d.source, 0, 0, d.width, d.height, 0, s.y - t.y, plan.width, s.h);
       }
+    } finally {
+      d.close?.();
     }
-    const calmAfter = spans.map((s, i) => {
-      if (i === spans.length - 1) return true;
-      const band = 4;
-      const a = image.getRegion(0, s.y + s.h - band, width, band);
-      const b = image.getRegion(0, s.y + s.h, width, band);
-      return calmSeam(rowBusyness(a.data, width, band), rowBusyness(b.data, width, band));
-    });
-    return { image, spans, calmAfter };
-  } finally {
-    for (const d of decoded) d.close?.();
   }
+  return image;
+}
+
+/**
+ * Glue all pictures one under another at the width of the first (others are scaled to it).
+ * Holds the whole strip in memory: for long chapters use planStrip + stitchChunk.
+ */
+export async function stitchParts(backend: ImageBackend, parts: StripPart[]): Promise<Stitched> {
+  const plan = await planStrip(backend, parts);
+  const image = await stitchChunk(backend, parts, plan, parts.map((_, i) => i));
+  return { image, spans: plan.spans, calmAfter: plan.calmAfter };
 }
 
 /** Cut a horizontal band out of a tiled image. */
@@ -129,12 +171,26 @@ export function shiftBlock(b: TextBlock, dy: number): TextBlock {
   return out;
 }
 
-/** The blocks that belong to one picture: those whose centre lies in it, in its coordinates. */
+/** Where a block's text is drawn: its text box, else its bubble, else the box of the original text. */
+function drawnBox(b: TextBlock): Box {
+  return b.textBox ?? b.bubble?.box ?? b.bbox;
+}
+
+/**
+ * The blocks of one picture, in its coordinates. A block belongs to the picture holding the centre of
+ * its drawn text; a picture also gets a copy (`continued: true`) of every other block whose drawn
+ * text reaches into it, so a bubble crossing the seam is drawn on both halves.
+ */
 export function pageForSpan(page: PageResult, span: PartSpan, index: number): PageResult {
-  const blocks = page.blocks.filter((b) => {
-    const box = b.bubble?.box ?? b.bbox;
+  const blocks: TextBlock[] = [];
+  for (const b of page.blocks) {
+    const box = drawnBox(b);
     const cy = box[1] + box[3] / 2;
-    return cy >= span.y && cy < span.y + span.h;
-  });
-  return { ...page, stripLang: dominantLanguage(page.blocks.map((b) => b.language)), pageId: `${page.pageId}~${index}`, height: span.h, blocks: blocks.map((b) => shiftBlock(b, span.y)), usage: index === 0 ? page.usage : [] };
+    const own = cy >= span.y && cy < span.y + span.h;
+    const reaches = box[1] < span.y + span.h && box[1] + box[3] > span.y;
+    if (!own && !reaches) continue;
+    const { continued: _continued, ...rest } = b;
+    blocks.push(shiftBlock(own ? rest : { ...rest, continued: true }, span.y));
+  }
+  return { ...page, stripLang: dominantLanguage(page.blocks.map((b) => b.language)), pageId: `${page.pageId}~${index}`, height: span.h, blocks, usage: index === 0 ? page.usage : [] };
 }

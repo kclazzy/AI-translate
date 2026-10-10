@@ -2,7 +2,7 @@ import '@ait/core/i18n/all';
 import { Capacitor } from '@capacitor/core';
 import { createRoot } from 'react-dom/client';
 import { browserBackend, bytesToBase64, IdbStore, migrateSettings, pickAsset, releaseAssets, SecretStore, TranslateService, type AppSettings, type UpdateInfo } from '@ait/core';
-import { downloadFile, StudioApp, type StudioPlatform } from '@ait/studio';
+import { downloadFile, safeFileName, StudioApp, type StudioPlatform } from '@ait/studio';
 import '@ait/studio/styles.css';
 import './mobile.css';
 import { tr } from '@ait/core/i18n';
@@ -23,6 +23,8 @@ async function saveSettings(s: AppSettings): Promise<void> {
 
 /** Save or share a file: native share sheet in the app, Web Share or download in the browser. */
 async function saveFile(name: string, bytes: Uint8Array, mime: string): Promise<void> {
+  // A title can be a page address: a "/" would make the cache path a missing sub-folder.
+  name = safeFileName(name);
   if (Capacitor.isNativePlatform()) {
     const { Filesystem, Directory } = await import('@capacitor/filesystem');
     const { Share } = await import('@capacitor/share');
@@ -87,7 +89,7 @@ const platform: StudioPlatform = {
   loadSettings,
   saveSettings,
   saveFile,
-  version: '0.6.3',
+  version: '0.7.0',
   installUpdate,
 };
 

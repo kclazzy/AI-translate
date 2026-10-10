@@ -1,13 +1,10 @@
 import JSZip from 'jszip';
 import type { AppSettings, HistoryEntry, IdbStore } from '@ait/core';
+import { sanitizeSettings } from './settingsFile';
 
-/** Settings without anything secret: API keys, engine token, addresses with passwords. */
+/** Settings without anything secret: API keys, engine token, addresses with passwords or query keys. */
 export function redactSettings(s: AppSettings): unknown {
-  const clean = JSON.parse(JSON.stringify(s)) as AppSettings & Record<string, unknown>;
-  clean.providers = clean.providers.map((p) => ({ ...p, apiKey: p.apiKey ? '[скрыто]' : undefined, baseUrl: p.baseUrl.replace(/\/\/[^/@]*@/, '//[скрыто]@') }));
-  if (clean.engine) clean.engine = { ...clean.engine, token: clean.engine.token ? '[скрыто]' : '' };
-  delete clean.modelCatalog;
-  return clean;
+  return sanitizeSettings(s);
 }
 
 /**

@@ -109,6 +109,8 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
   const payload = {
     v: 1,
     mode: c.mode,
+    // Privacy decides which reviewers and cross-check translators may run, so it changes the result.
+    privacy: c.privacy,
     src: c.sourceLang,
     dst: c.targetLang,
     q: c.quality,

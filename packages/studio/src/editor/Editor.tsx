@@ -4,20 +4,23 @@ import {
   cleanBlock,
   clampBox,
   ctxMeasurer,
+  drawBlock,
   layoutBlock,
   paintRegion,
   parseHex,
   recognizeRegion,
-  renderTiles,
   resolveStyle,
   retranslate,
+  shouldDraw,
   styleDefaultsFor,
   targetBox,
   TEXT_TYPES,
   type AppSettings,
   type Box,
+  type LayoutResult,
   type PageResult,
   type PixelData,
+  type StyleDefaults,
   type TextBlock,
   type TextStyle,
   type TiledImage,
@@ -26,16 +29,14 @@ import {
 } from '@ait/core';
 import { loadUserFonts, registerUserFont, saveUserFont } from '../fonts';
 import { exportChapterTexts, exportTexts, importTexts } from './texts';
-import { exportPsd } from '../psd';
+import { EditHistory, type HistoryItem } from './history';
+import { confirmLeave, setActiveEditor, type EditorGuard } from './guard';
+import { exportPsd, psdTooBig } from '../psd';
 import { usePlatform } from '../platform';
 import { ErrorBox, Field, Switch, toast, useAction } from '../ui';
 import { tr } from '@ait/core/i18n';
 
 type Tool = 'select' | 'brush' | 'eraser' | 'inpaint' | 'ocr' | 'picker' | 'crop';
-
-type HistoryItem =
-  | { kind: 'blocks'; before: TextBlock[]; after: TextBlock[] }
-  | { kind: 'pixels'; box: Box; before: PixelData; after: PixelData; blocksBefore?: TextBlock[]; blocksAfter?: TextBlock[] };
 
 export interface EditorProps {
   page: PageResult;
@@ -53,16 +54,41 @@ export interface EditorProps {
   chapterTexts?: (current: TextBlock[]) => Promise<TextBlock[][]>;
   /** Pages of a project can be cut to a frame (pictures on a site cannot: they must keep their size). */
   onCrop?: (rect: Box, blocks: TextBlock[]) => Promise<void>;
+  /** Told whenever the page gets or loses unsaved edits (the page list marks it). */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 const BASE_FONTS = ['"AIT Lettering"', '"AIT Comic"', '"AIT Narration"', '"AIT SFX"', 'Arial', '"Comic Sans MS"', '"Times New Roman"', 'Georgia', 'Impact'];
-const MAX_HISTORY = 60;
 
 function clonePixels(p: PixelData): PixelData {
   return { width: p.width, height: p.height, data: new Uint8ClampedArray(p.data) };
 }
 
-export function Editor({ page, original, cleaned, settings, onSave, onClose, title, marks, toolbarExtra, chapterTexts, onCrop }: EditorProps) {
+/** A block the proof-reader should look at: the translators disagree, the check found problems, or the text does not fit. */
+function hasRemark(b: TextBlock, overflow: Set<string>): boolean {
+  return b.check?.verdict === 'differs' || !!b.qa?.issues.length || overflow.has(b.id);
+}
+
+/** Rows a block's letters can reach (overflowing or rotated text runs past its box). */
+function blockRows(b: TextBlock, l: LayoutResult, d: StyleDefaults): [number, number] {
+  const box = l.box ?? targetBox(b, d);
+  const ys = l.vertical ? l.glyphs.map((g) => g.y) : l.lines.map((x) => x.y);
+  const pad = l.fontSize * 1.5;
+  let top = box[1] + Math.min(0, ...ys) - pad;
+  let bottom = box[1] + Math.max(box[3], ...ys) + pad;
+  if (resolveStyle(b, d).rotation) {
+    const cy = box[1] + box[3] / 2;
+    const r = Math.hypot(box[2], Math.max(box[3], bottom - top)) / 2 + pad;
+    top = Math.min(top, cy - r);
+    bottom = Math.max(bottom, cy + r);
+  }
+  return [top, bottom];
+}
+
+const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((x) => b.has(x));
+const OVERLAY_COLORS = { brush: '', eraser: '#1c6ed8', inpaint: '#c8205f' } as const;
+
+export function Editor({ page, original, cleaned, settings, onSave, onClose, title, marks, toolbarExtra, chapterTexts, onCrop, onDirtyChange }: EditorProps) {
   const platform = usePlatform();
   const [blocks, setBlocks] = useState<TextBlock[]>(page.blocks);
   const [selected, setSelected] = useState<string | null>(page.blocks[0]?.id ?? null);
@@ -72,8 +98,6 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   const [zoom, setZoom] = useState(() => Math.min(1, 900 / page.width));
   const [compare, setCompare] = useState(false);
   const [split, setSplit] = useState(0.5);
-  const [version, setVersion] = useState(0); // bumps when cleaned pixels change
-  const [pixelsChanged, setPixelsChanged] = useState(false);
   const [overflow, setOverflow] = useState<Set<string>>(new Set());
   const [fonts, setFonts] = useState<string[]>(BASE_FONTS);
   const [dirty, setDirty] = useState(false);
@@ -85,19 +109,35 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   zoomRef.current = zoom;
   const toolRef = useRef(tool);
   toolRef.current = tool;
-  const undoStack = useRef<HistoryItem[]>([]);
-  const redoStack = useRef<HistoryItem[]>([]);
+  /** The blocks as they are right now: async actions build on these, not on the render they started in. */
+  const blocksRef = useRef(blocks);
+  blocksRef.current = blocks;
+  const historyRef = useRef<EditHistory | null>(null);
+  const history = (historyRef.current ??= new EditHistory());
   const [, forceHistory] = useState(0);
+  /** Bumps with every edit: a save only clears «unsaved» when nothing changed while it ran. */
+  const editSeq = useRef(0);
+  /** Pixels of the cleaned picture changed since the last save. */
+  const pixelsChanged = useRef(false);
   const tileCanvases = useRef<(HTMLCanvasElement | null)[]>([]);
   const origCanvases = useRef<(HTMLCanvasElement | null)[]>([]);
   const innerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  /** Brush preview: a canvas the size of the visible stage, not of the (possibly 30 000 px) page. */
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   /** Where the brush outline is drawn (inside the editor frame), or nowhere. */
   const [cursorAt, setCursorAt] = useState<[number, number] | null>(null);
   const resizing = useRef(false);
   /** Manual OCR: the frame being stretched, in page pixels. */
   const [ocrFrame, setOcrFrame] = useState<Box | null>(null);
+  /** Esc stops the drag / stroke / frame in progress. */
+  const cancelGesture = useRef<(() => void) | null>(null);
+  /** Typing in one field is one undo step: the step stays open while the field keeps the focus. */
+  const typing = useRef<{ id: string; field: 'translatedText' | 'originalText'; item: HistoryItem } | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /** The part of the page in view (page rows), for the minimap. */
+  const [view, setView] = useState<[number, number]>([0, 0]);
   const fitZoom = useCallback(() => {
     const w = stageRef.current?.clientWidth ?? 900;
     return Math.max(0.1, Math.min(1, (w - 56) / page.width));
@@ -105,41 +145,115 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   useEffect(() => {
     setZoom(fitZoom());
   }, [fitZoom]);
-  const strokeCanvas = useRef<HTMLCanvasElement>(null);
-  const editStart = useRef<TextBlock[] | null>(null);
   const defaults = useMemo(() => styleDefaultsFor({ targetLang: page.targetLang, sfxStyle: settings.sfxStyle }, settings.fonts), [page.targetLang, settings.sfxStyle, settings.fonts]);
 
-  const push = (item: HistoryItem) => {
-    undoStack.current.push(item);
-    if (undoStack.current.length > MAX_HISTORY) undoStack.current.shift();
-    redoStack.current = [];
+  const setBlocksNow = (next: TextBlock[]) => {
+    blocksRef.current = next;
+    setBlocks(next);
+  };
+  const touched = () => {
+    editSeq.current++;
     setDirty(true);
+  };
+  const push = (item: HistoryItem) => {
+    history.push(item);
+    touched();
     forceHistory((n) => n + 1);
   };
 
-  const commitBlocks = useCallback(
-    (next: TextBlock[], before = blocks) => {
-      push({ kind: 'blocks', before, after: next });
-      setBlocks(next);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [blocks],
-  );
+  /** Replace the blocks as one undo step. `before` defaults to the blocks as they are now. */
+  const commitBlocks = (next: TextBlock[], before = blocksRef.current) => {
+    push({ kind: 'blocks', before, after: next });
+    setBlocksNow(next);
+  };
+  /** Change the current blocks (for async actions: whatever the user did meanwhile is kept). */
+  const commitWith = (fn: (prev: TextBlock[]) => TextBlock[]) => {
+    const prev = blocksRef.current;
+    const next = fn(prev);
+    if (next !== prev) commitBlocks(next, prev);
+  };
 
-  // ---- rendering --------------------------------------------------------------------
-  useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      const { tiles, overflow: of } = renderTiles(platform.backend, cleaned, blocks, defaults);
-      tiles.forEach((t, i) => {
-        const c = tileCanvases.current[i];
-        if (!c) return;
-        c.getContext('2d')!.clearRect(0, 0, c.width, c.height);
-        c.getContext('2d')!.drawImage(t.canvas as unknown as CanvasImageSource, 0, 0);
-      });
-      setOverflow(of);
+  // ---- rendering: only the tiles whose texts or pixels changed, at most once per frame ----------------------
+  const measurer = useMemo(() => ctxMeasurer(platform.backend.createCanvas(8, 8).getContext('2d')), [platform.backend]);
+  const layoutCache = useMemo(() => new WeakMap<TextBlock, LayoutResult | null>(), [defaults, measurer, cleaned]); // eslint-disable-line react-hooks/exhaustive-deps
+  const renderState = useRef({ all: true, rows: [] as [number, number][], drawn: new Map<string, { block: TextBlock; rows: [number, number] | null }>(), frame: 0 });
+  const live = useRef({ defaults, cleaned, layoutCache });
+  live.current = { defaults, cleaned, layoutCache };
+  const layoutOf = (b: TextBlock): LayoutResult | null => {
+    const { defaults: d, cleaned: img, layoutCache: cache } = live.current;
+    let l = cache.get(b);
+    if (l === undefined) {
+      l = shouldDraw(b, d) ? layoutBlock(measurer, b, d, { width: img.width, height: img.height }) : null;
+      cache.set(b, l);
+    }
+    return l;
+  };
+  const renderNow = () => {
+    const rs = renderState.current;
+    rs.frame = 0;
+    const { defaults: d, cleaned: img } = live.current;
+    const bl = blocksRef.current;
+    const layouts = new Map<string, LayoutResult>();
+    const rows = new Map<string, [number, number]>();
+    const of = new Set<string>();
+    for (const b of bl) {
+      const l = layoutOf(b);
+      if (!l) continue;
+      layouts.set(b.id, l);
+      rows.set(b.id, blockRows(b, l, d));
+      if (l.overflow) of.add(b.id);
+    }
+    const spans = rs.rows;
+    rs.rows = [];
+    const next = new Map<string, { block: TextBlock; rows: [number, number] | null }>();
+    for (const b of bl) {
+      const prev = rs.drawn.get(b.id);
+      const r = rows.get(b.id) ?? null;
+      next.set(b.id, { block: b, rows: r });
+      if (!prev || prev.block !== b) {
+        if (prev?.rows) spans.push(prev.rows);
+        if (r) spans.push(r);
+      }
+    }
+    for (const [id, prev] of rs.drawn) if (!next.has(id) && prev.rows) spans.push(prev.rows);
+    rs.drawn = next;
+    const all = rs.all;
+    rs.all = false;
+    img.tiles.forEach((t, i) => {
+      if (!all && !spans.some(([a, b]) => b >= t.y && a <= t.y + t.h)) return;
+      const c = tileCanvases.current[i];
+      if (!c) return;
+      const ctx = c.getContext('2d')!;
+      ctx.clearRect(0, 0, c.width, c.height);
+      ctx.drawImage(t.canvas as unknown as CanvasImageSource, 0, 0);
+      for (const b of bl) {
+        const l = layouts.get(b.id);
+        const r = rows.get(b.id);
+        if (!l || !r || r[1] < t.y || r[0] > t.y + t.h) continue;
+        drawBlock(ctx, b, l, d, t.y);
+      }
     });
-    return () => cancelAnimationFrame(id);
-  }, [blocks, cleaned, defaults, platform.backend, version]);
+    setOverflow((prev) => (sameSet(prev, of) ? prev : of));
+  };
+  const scheduleRender = () => {
+    const rs = renderState.current;
+    if (!rs.frame) rs.frame = requestAnimationFrame(renderNow);
+  };
+  /** Pixels of the cleaned picture changed in these rows. */
+  const markPixels = (box: Box) => {
+    renderState.current.rows.push([box[1], box[1] + box[3]]);
+    pixelsChanged.current = true;
+    scheduleRender();
+  };
+  useEffect(() => {
+    renderState.current.all = true;
+    renderState.current.drawn = new Map();
+    scheduleRender();
+  }, [cleaned, defaults]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    scheduleRender();
+  }, [blocks]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => cancelAnimationFrame(renderState.current.frame), []);
 
   useEffect(() => {
     original.tiles.forEach((t, i) => {
@@ -150,44 +264,60 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
 
   // ---- undo / redo --------------------------------------------------------------------
   const applyHistory = (item: HistoryItem, dir: 'undo' | 'redo') => {
-    if (item.kind === 'blocks') setBlocks(dir === 'undo' ? item.before : item.after);
+    typing.current = null;
+    if (item.kind === 'blocks') setBlocksNow(dir === 'undo' ? item.before : item.after);
     else {
       cleaned.putRegion(dir === 'undo' ? item.before : item.after, item.box[0], item.box[1]);
-      if (item.blocksBefore && item.blocksAfter) setBlocks(dir === 'undo' ? item.blocksBefore : item.blocksAfter);
-      setVersion((v) => v + 1);
-      setPixelsChanged(true);
+      if (item.blocksBefore && item.blocksAfter) setBlocksNow(dir === 'undo' ? item.blocksBefore : item.blocksAfter);
+      markPixels(item.box);
     }
-    setDirty(true);
+    touched();
   };
   const undo = () => {
-    const it = undoStack.current.pop();
+    const it = history.undo();
     if (!it) return;
     applyHistory(it, 'undo');
-    redoStack.current.push(it);
     forceHistory((n) => n + 1);
   };
   const redo = () => {
-    const it = redoStack.current.pop();
+    const it = history.redo();
     if (!it) return;
     applyHistory(it, 'redo');
-    undoStack.current.push(it);
     forceHistory((n) => n + 1);
+  };
+
+  /** Typing into a text field of a block: one undo step per field while it keeps the focus. */
+  const typeText = (id: string, field: 'translatedText' | 'originalText', value: string) => {
+    const prev = blocksRef.current;
+    const next = prev.map((b) => (b.id === id ? { ...b, [field]: value, ...(field === 'translatedText' ? { edited: true } : {}) } : b));
+    const t = typing.current;
+    if (t && t.id === id && t.field === field && history.top() === t.item && t.item.kind === 'blocks') {
+      t.item.after = next;
+      touched();
+    } else {
+      const item: HistoryItem = { kind: 'blocks', before: prev, after: next };
+      push(item);
+      typing.current = { id, field, item };
+    }
+    setBlocksNow(next);
+  };
+  const endTyping = () => {
+    typing.current = null;
   };
 
   const sel = blocks.find((b) => b.id === selected) ?? null;
   /** The size the selected text gets automatically (shown as the hint, the start for A−/A+). */
   const autoSize = useMemo(() => {
     if (!sel) return 0;
-    const m = ctxMeasurer(platform.backend.createCanvas(8, 8).getContext('2d'));
     const b = { ...sel, style: { ...(sel.style ?? {}), fontSize: null } };
-    return Math.round(layoutBlock(m, b, defaults, { width: page.width, height: page.height }).fontSize);
-  }, [sel, defaults, platform.backend, page.width, page.height]);
-  const updateBlock = (id: string, patch: Partial<TextBlock>) => commitBlocks(blocks.map((b) => (b.id === id ? { ...b, ...patch, edited: true } : b)));
+    return Math.round(layoutBlock(measurer, b, defaults, { width: page.width, height: page.height }).fontSize);
+  }, [sel, defaults, measurer, page.width, page.height]);
+  const updateBlock = (id: string, patch: Partial<TextBlock>) => commitWith((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch, edited: true } : b)));
   /** The selected block and the others picked with Ctrl/Shift+click. */
   const targets = selected ? new Set([selected, ...multi]) : new Set(multi);
   const updateStyle = (id: string, patch: Partial<TextStyle>) => {
     const ids = id === selected ? targets : new Set([id]);
-    commitBlocks(blocks.map((b) => (ids.has(b.id) ? { ...b, style: { ...(b.style ?? {}), ...patch }, edited: true } : b)));
+    commitWith((prev) => prev.map((b) => (ids.has(b.id) ? { ...b, style: { ...(b.style ?? {}), ...patch }, edited: true } : b)));
   };
   const pick = (id: string, add: boolean) => {
     if (add && selected && selected !== id) {
@@ -202,6 +332,37 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   };
   const copyText = (text: string) => {
     void navigator.clipboard?.writeText(text).then(() => toast(tr('Скопировано')), () => toast(tr('Не удалось скопировать')));
+  };
+
+  /** Bring a block into the middle of the visible part of the stage. */
+  const scrollToBlock = (b: TextBlock) => {
+    const el = stageRef.current;
+    const inner = innerRef.current;
+    if (!el || !inner) return;
+    const box = targetBox(b, defaults);
+    el.scrollTo?.({ top: inner.offsetTop + (box[1] + box[3] / 2) * zoom - el.clientHeight / 2, left: inner.offsetLeft + (box[0] + box[2] / 2) * zoom - el.clientWidth / 2, behavior: 'smooth' });
+  };
+  const select = (b: TextBlock) => {
+    setMulti(new Set());
+    setSelected(b.id);
+    scrollToBlock(b);
+  };
+  /** Blocks with a remark, top to bottom. */
+  const remarks = useMemo(() => {
+    const list = blocks.filter((b) => hasRemark(b, overflow));
+    return list.sort((a, b) => targetBox(a, defaults)[1] - targetBox(b, defaults)[1] || targetBox(a, defaults)[0] - targetBox(b, defaults)[0]);
+  }, [blocks, overflow, defaults]);
+  /** Jump to the next (or previous) block with a remark, below (above) the selected one. */
+  const jumpRemark = (dir: 1 | -1) => {
+    if (!remarks.length) return toast(tr('Замечаний нет'));
+    const cur = blocks.find((b) => b.id === selected);
+    const y = cur ? targetBox(cur, defaults)[1] : dir === 1 ? -Infinity : Infinity;
+    const i = remarks.findIndex((b) => b.id === selected);
+    let target: TextBlock | undefined;
+    if (i >= 0) target = remarks[(i + dir + remarks.length) % remarks.length];
+    else target = dir === 1 ? remarks.find((b) => targetBox(b, defaults)[1] > y) ?? remarks[0] : [...remarks].reverse().find((b) => targetBox(b, defaults)[1] < y) ?? remarks[remarks.length - 1];
+    setTool('select');
+    select(target);
   };
 
   // User fonts saved earlier.
@@ -238,6 +399,28 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
+  // The visible rows, for the minimap (once per frame while scrolling).
+  const viewFrame = useRef(0);
+  const measureView = () => {
+    viewFrame.current = 0;
+    const el = stageRef.current;
+    const inner = innerRef.current;
+    if (!el || !inner) return;
+    const z = zoomRef.current;
+    const top = (el.scrollTop - inner.offsetTop) / z;
+    setView([Math.max(0, top), Math.min(page.height, top + el.clientHeight / z)]);
+  };
+  const onStageScroll = () => {
+    if (!viewFrame.current) viewFrame.current = requestAnimationFrame(measureView);
+  };
+  useEffect(() => {
+    measureView();
+    return () => cancelAnimationFrame(viewFrame.current);
+  }, [zoom]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Every window listener of a gesture is removed when the editor goes away mid-gesture.
+  useEffect(() => () => cancelGesture.current?.(), []);
+
   /** Hold the right button and move: the brush outline stays at the press point, its edge follows the pointer. */
   const resizeBrush = (e: RPointerEvent) => {
     e.preventDefault();
@@ -245,19 +428,25 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     if (!r) return;
     const cx = e.clientX;
     const cy = e.clientY;
+    const startSize = brush;
     setCursorAt([cx - r.left, cy - r.top]);
     const move = (ev: PointerEvent) => {
       const d = Math.hypot(ev.clientX - cx, ev.clientY - cy);
       setBrush(Math.max(1, Math.min(200, Math.round((d * 2) / zoomRef.current))));
     };
-    const up = () => {
+    const stop = () => {
       window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointerup', stop);
       resizing.current = false;
+      cancelGesture.current = null;
     };
     resizing.current = true;
+    cancelGesture.current = () => {
+      stop();
+      setBrush(startSize);
+    };
     window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
+    window.addEventListener('pointerup', stop);
   };
 
   /** Middle mouse button: drag the page around. */
@@ -278,49 +467,77 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       el.style.cursor = '';
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      cancelGesture.current = null;
     };
+    cancelGesture.current = up;
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
   };
 
+  /** Move every selected block by (dx, dy) as one step. */
+  const nudge = (dx: number, dy: number) => {
+    const ids = targets;
+    commitWith((prev) =>
+      prev.map((b) => {
+        if (!ids.has(b.id)) return b;
+        const box = targetBox(b, defaults);
+        return { ...b, textBox: [box[0] + dx, box[1] + dy, box[2], box[3]] as Box, edited: true };
+      }),
+    );
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.closest('input, textarea, select')) return;
       const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+      const key = e.key.toLowerCase();
+      // Save works everywhere, also while typing a translation.
+      if (mod && key === 's' && !e.altKey) {
+        e.preventDefault();
+        endTyping();
+        if (dirtyRef.current) void saveNow();
+        return;
+      }
+      if (e.key === 'Escape' && cancelGesture.current) {
+        e.preventDefault();
+        cancelGesture.current();
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
+      if (mod && key === 'z' && !e.shiftKey) {
         e.preventDefault();
         undo();
-      } else if (mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
+      } else if (mod && (key === 'y' || (key === 'z' && e.shiftKey))) {
         e.preventDefault();
         redo();
-      } else if (mod && e.key.toLowerCase() === 'a') {
+      } else if (mod && key === 'a') {
         e.preventDefault();
         setSelected(blocks[0]?.id ?? null);
         setMulti(new Set(blocks.slice(1).map((b) => b.id)));
+      } else if (mod || e.altKey) {
+        // Browser and system shortcuts (Ctrl+C, Ctrl+E…) are not tool keys.
       } else if (e.key === 'Escape') {
         setMulti(new Set());
       } else if (e.key === '[' || e.key === ']') {
         setBrush((b) => Math.max(1, Math.min(200, b + (e.key === ']' ? 4 : -4))));
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && targets.size) {
         e.preventDefault();
-        commitBlocks(blocks.filter((b) => !targets.has(b.id)));
+        const ids = targets;
+        commitWith((prev) => prev.filter((b) => !ids.has(b.id)));
         setSelected(null);
         setMulti(new Set());
-      } else if (selected && e.key.startsWith('Arrow')) {
+      } else if (targets.size && e.key.startsWith('Arrow')) {
         e.preventDefault();
-        const b = blocks.find((x) => x.id === selected);
-        if (!b) return;
         const step = e.shiftKey ? 10 : 1;
-        const box = targetBox(b, defaults);
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-        updateBlock(b.id, { textBox: [box[0] + dx, box[1] + dy, box[2], box[3]] });
-      } else if (e.key === 'v') setTool('select');
-      else if (e.key === 'b') setTool('brush');
-      else if (e.key === 'e') setTool('eraser');
-      else if (e.key === 'i') setTool('picker');
-      else if (e.key === 'c' && onCrop && !mod) setTool('crop');
+        nudge(dx, dy);
+      } else if (key === 'n') jumpRemark(e.shiftKey ? -1 : 1);
+      else if (key === 'v') setTool('select');
+      else if (key === 'b') setTool('brush');
+      else if (key === 'e') setTool('eraser');
+      else if (key === 'i') setTool('picker');
+      else if (key === 'c' && onCrop) setTool('crop');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -329,7 +546,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   // ---- pointer helpers ------------------------------------------------------------------
   const toPage = (clientX: number, clientY: number): [number, number] => {
     const r = innerRef.current!.getBoundingClientRect();
-    return [(clientX - r.left) / zoom, (clientY - r.top) / zoom];
+    return [(clientX - r.left) / zoomRef.current, (clientY - r.top) / zoomRef.current];
   };
 
   const startDrag = (e: RPointerEvent, b: TextBlock, mode: 'move' | 'resize' | 'rotate') => {
@@ -342,10 +559,11 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     }
     if (b.id !== selected) setMulti(new Set());
     setSelected(b.id);
-    const before = blocks;
+    endTyping();
+    const before = blocksRef.current;
     const box = targetBox(b, defaults);
     const [sx, sy] = toPage(e.clientX, e.clientY);
-    let latest = blocks;
+    let latest = before;
     const move = (ev: PointerEvent) => {
       const [px, py] = toPage(ev.clientX, ev.clientY);
       let patch: Partial<TextBlock>;
@@ -358,12 +576,21 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
         patch = { style: { ...(b.style ?? {}), rotation: ((angle + 540) % 360) - 180 } };
       }
       latest = before.map((x) => (x.id === b.id ? { ...x, ...patch, edited: true } : x));
-      setBlocks(latest);
+      setBlocksNow(latest);
     };
-    const up = () => {
+    const detach = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      cancelGesture.current = null;
+    };
+    const up = () => {
+      detach();
       if (latest !== before) push({ kind: 'blocks', before, after: latest });
+    };
+    // Esc: the block goes back where it was.
+    cancelGesture.current = () => {
+      detach();
+      setBlocksNow(before);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -384,12 +611,13 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       return { ...b, bubble: r.bubble };
     });
     const after = clonePixels(cleaned.getRegion(...region));
-    const next = [...blocks, ...added];
-    push({ kind: 'pixels', box: region, before, after, blocksBefore: blocks, blocksAfter: next });
-    setBlocks(next);
+    // The blocks as they are now: edits made while OCR was running stay.
+    const prev = blocksRef.current;
+    const next = [...prev, ...added];
+    push({ kind: 'pixels', box: region, before, after, blocksBefore: prev, blocksAfter: next });
+    setBlocksNow(next);
     setSelected(added[0].id);
-    setVersion((v) => v + 1);
-    setPixelsChanged(true);
+    markPixels(region);
     toast(tr('Добавлено блоков: {0}', added.length));
   });
 
@@ -427,66 +655,103 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       return;
     }
     e.preventDefault();
+    const gestureTool = tool;
+    const frameTool = gestureTool === 'ocr' || gestureTool === 'crop';
     const pts: [number, number][] = [toPage(e.clientX, e.clientY)];
-    const overlay = strokeCanvas.current!;
-    const octx = overlay.getContext('2d')!;
-    octx.clearRect(0, 0, overlay.width, overlay.height);
-    const drawPreview = () => {
-      octx.clearRect(0, 0, overlay.width, overlay.height);
-      if (tool === 'ocr' || tool === 'crop') {
-        // The frame being stretched is drawn on top of the page (see .ait-ocr-frame).
-        const [x0, y0] = pts[0];
-        const [x1, y1] = pts[pts.length - 1];
-        setOcrFrame([Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)]);
-        return;
+    // The preview of a stroke is drawn in screen pixels over the visible part of the stage, one new
+    // segment per move: no page-sized canvas, no redrawing the whole path.
+    const overlay = overlayRef.current;
+    const stage = stageRef.current;
+    const wrap = wrapRef.current;
+    let octx: CanvasRenderingContext2D | null = null;
+    let origin: [number, number] = [0, 0];
+    let last: [number, number] = [0, 0];
+    if (!frameTool && overlay && stage && wrap) {
+      const sr = stage.getBoundingClientRect();
+      const wr = wrap.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      origin = [sr.left, sr.top];
+      overlay.style.left = `${sr.left - wr.left}px`;
+      overlay.style.top = `${sr.top - wr.top}px`;
+      overlay.style.width = `${stage.clientWidth}px`;
+      overlay.style.height = `${stage.clientHeight}px`;
+      overlay.width = Math.max(1, Math.round(stage.clientWidth * dpr));
+      overlay.height = Math.max(1, Math.round(stage.clientHeight * dpr));
+      // Strokes are drawn opaque and the whole canvas is made see-through: overlapping segments stay even.
+      overlay.style.opacity = gestureTool === 'brush' ? '1' : '0.5';
+      overlay.style.display = 'block';
+      octx = overlay.getContext('2d');
+      if (octx) {
+        octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        octx.strokeStyle = gestureTool === 'brush' ? brushColor : OVERLAY_COLORS[gestureTool as 'eraser' | 'inpaint'];
+        octx.lineWidth = Math.max(1, brush * zoomRef.current);
+        octx.lineCap = 'round';
+        octx.lineJoin = 'round';
+        last = [e.clientX - origin[0], e.clientY - origin[1]];
+        octx.beginPath();
+        octx.moveTo(last[0], last[1]);
+        octx.lineTo(last[0] + 0.1, last[1]);
+        octx.stroke();
       }
-      octx.strokeStyle = tool === 'brush' ? brushColor : tool === 'eraser' ? 'rgba(28,110,216,0.5)' : 'rgba(200,32,95,0.5)';
-      octx.lineWidth = brush;
-      octx.lineCap = 'round';
-      octx.lineJoin = 'round';
-      octx.beginPath();
-      pts.forEach(([x, y], i) => (i ? octx.lineTo(x, y) : octx.moveTo(x, y)));
-      if (pts.length === 1) octx.lineTo(pts[0][0] + 0.1, pts[0][1]);
-      octx.stroke();
+    }
+    const frame = (): Box => {
+      const [x0, y0] = pts[0];
+      const [x1, y1] = pts[pts.length - 1];
+      return [Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)];
     };
-    drawPreview();
     const move = (ev: PointerEvent) => {
       pts.push(toPage(ev.clientX, ev.clientY));
-      drawPreview();
+      if (frameTool) {
+        // The frame being stretched is drawn on top of the page (see .ait-ocr-frame).
+        setOcrFrame(frame());
+        return;
+      }
+      if (!octx) return;
+      const cur: [number, number] = [ev.clientX - origin[0], ev.clientY - origin[1]];
+      octx.beginPath();
+      octx.moveTo(last[0], last[1]);
+      octx.lineTo(cur[0], cur[1]);
+      octx.stroke();
+      last = cur;
     };
-    const up = () => {
+    const finish = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      octx.clearRect(0, 0, overlay.width, overlay.height);
-      if (tool === 'crop') {
-        setOcrFrame(null);
-        const [x0, y0] = pts[0];
-        const [x1, y1] = pts[pts.length - 1];
-        const rect: Box = [Math.round(Math.min(x0, x1)), Math.round(Math.min(y0, y1)), Math.round(Math.abs(x1 - x0)), Math.round(Math.abs(y1 - y0))];
+      cancelGesture.current = null;
+      if (overlay) {
+        overlay.style.display = 'none';
+        octx?.clearRect(0, 0, overlay.width, overlay.height);
+      }
+      setOcrFrame(null);
+    };
+    const up = () => {
+      finish();
+      const f = frame();
+      const rect: Box = [Math.round(f[0]), Math.round(f[1]), Math.round(f[2]), Math.round(f[3])];
+      if (gestureTool === 'crop') {
         if (rect[2] > 16 && rect[3] > 16 && onCrop && (!dirty || confirm(tr('Несохранённые правки будут сохранены вместе с обрезкой. Продолжить?'))) && confirm(tr('Обрезать страницу по рамке {0}×{1}? Тексты за рамкой будут убраны.', rect[2], rect[3]))) {
-          void onCrop(rect, blocks).then(() => setTool('select'));
+          void onCrop(rect, blocksRef.current).then(() => setTool('select'));
         }
         return;
       }
-      if (tool === 'ocr') {
-        setOcrFrame(null);
-        const [x0, y0] = pts[0];
-        const [x1, y1] = pts[pts.length - 1];
-        const rect: Box = [Math.round(Math.min(x0, x1)), Math.round(Math.min(y0, y1)), Math.round(Math.abs(x1 - x0)), Math.round(Math.abs(y1 - y0))];
+      if (gestureTool === 'ocr') {
         if (rect[2] > 8 && rect[3] > 8) void ocr.run(rect);
         return;
       }
-      applyStroke(pts);
+      applyStroke(pts, gestureTool);
     };
+    // Esc: nothing is painted, no frame is taken.
+    cancelGesture.current = finish;
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
   };
 
-  const applyStroke = (pts: [number, number][]) => {
+  const applyStroke = (pts: [number, number][], strokeTool: Tool) => {
     const r = brush / 2;
     const xs = pts.map((p) => p[0]);
     const ys = pts.map((p) => p[1]);
     const box = clampBox([Math.min(...xs) - r - 2, Math.min(...ys) - r - 2, Math.max(...xs) - Math.min(...xs) + brush + 4, Math.max(...ys) - Math.min(...ys) + brush + 4], cleaned.width, cleaned.height);
+    if (box[2] <= 0 || box[3] <= 0) return;
     // Rasterise the stroke into a mask.
     const mc = platform.backend.createCanvas(box[2], box[3]);
     const mctx = mc.getContext('2d');
@@ -502,9 +767,9 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     const mask = new Uint8Array(box[2] * box[3]);
     for (let i = 0; i < mask.length; i++) mask[i] = md[i * 4 + 3] > 40 ? 1 : 0;
     const before = clonePixels(cleaned.getRegion(...box));
-    if (tool === 'brush') paintRegion(cleaned, box, mask, { kind: 'color', color: parseHex(brushColor) });
-    else if (tool === 'inpaint') paintRegion(cleaned, box, mask, { kind: 'inpaint' });
-    else if (tool === 'eraser') {
+    if (strokeTool === 'brush') paintRegion(cleaned, box, mask, { kind: 'color', color: parseHex(brushColor) });
+    else if (strokeTool === 'inpaint') paintRegion(cleaned, box, mask, { kind: 'inpaint' });
+    else if (strokeTool === 'eraser') {
       const orig = original.getRegion(...box);
       const cur = cleaned.getRegion(...box);
       for (let i = 0; i < mask.length; i++) if (mask[i]) for (let c = 0; c < 4; c++) cur.data[i * 4 + c] = orig.data[i * 4 + c];
@@ -512,16 +777,23 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     }
     const after = clonePixels(cleaned.getRegion(...box));
     push({ kind: 'pixels', box, before, after });
-    setPixelsChanged(true);
-    setVersion((v) => v + 1);
+    markPixels(box);
   };
 
   // ---- actions -----------------------------------------------------------------------------
   /** «Сверить страницу»: compare every block with the translators chosen in the settings. */
   const check = useAction(async () => {
-    const res = await platform.service.crossCheck(blocks, page.targetLang);
+    const sent = new Map(blocksRef.current.map((b) => [b.id, b.translatedText]));
+    const res = await platform.service.crossCheck(blocksRef.current, page.targetLang);
     const byId = new Map(res.blocks.map((b) => [b.id, b]));
-    commitBlocks(blocks.map((b) => (byId.get(b.id) ? { ...b, check: byId.get(b.id)!.check, translatedText: byId.get(b.id)!.translatedText } : b)));
+    // Only the result of the check is taken; a text the user changed while it ran is kept.
+    commitWith((prev) =>
+      prev.map((b) => {
+        const c = byId.get(b.id);
+        if (!c) return b;
+        return { ...b, check: c.check, translatedText: b.translatedText === sent.get(b.id) ? c.translatedText : b.translatedText };
+      }),
+    );
     const differs = res.blocks.filter((b) => b.check?.verdict === 'differs').length;
     toast(res.errors.length ? tr('Сверка: расхождений {0}. Не ответили: {1}', differs, res.errors.join('; ')) : tr('Сверка: расхождений {0}', differs));
   });
@@ -539,17 +811,66 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     updateBlock(sel.id, { translatedText: res.blocks[0].translatedText });
   });
 
-  const save = useAction(async () => {
-    await onSave({ ...page, blocks }, cleaned, pixelsChanged);
-    setDirty(false);
-    toast(tr('Сохранено'));
-  });
-
-  const endTextEdit = () => {
-    const start = editStart.current;
-    editStart.current = null;
-    if (start && start !== blocks) push({ kind: 'blocks', before: start, after: blocks });
+  // ---- saving and leaving --------------------------------------------------------------------------
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<unknown>(null);
+  const savePromise = useRef<Promise<boolean> | null>(null);
+  const saveNow = (): Promise<boolean> => {
+    if (savePromise.current) return savePromise.current;
+    const seq = editSeq.current;
+    const px = pixelsChanged.current;
+    pixelsChanged.current = false;
+    setSaving(true);
+    setSaveError(null);
+    const p = (async () => {
+      try {
+        await onSave({ ...page, blocks: blocksRef.current }, cleaned, px);
+        // Edits made while saving stay «unsaved».
+        if (editSeq.current === seq) setDirty(false);
+        toast(tr('Сохранено'));
+        return true;
+      } catch (e) {
+        if (px) pixelsChanged.current = true;
+        setSaveError(e);
+        return false;
+      } finally {
+        savePromise.current = null;
+        setSaving(false);
+      }
+    })();
+    savePromise.current = p;
+    return p;
   };
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const saveRef = useRef(saveNow);
+  saveRef.current = saveNow;
+  const guard = useMemo<EditorGuard>(() => ({ dirty: () => dirtyRef.current, save: () => saveRef.current() }), []);
+  useEffect(() => {
+    setActiveEditor(guard);
+    return () => setActiveEditor(null, guard);
+  }, [guard]);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    if (!dirty) return;
+    const onUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onDirtyChange?.(false), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const psd = useAction(async () => {
+    const big = psdTooBig(page.width, page.height);
+    if (big === 'side') return toast(tr('Страница длиннее 30 000 px — Photoshop такую не откроет'));
+    if (big === 'pixels') return toast(tr('Страница слишком большая, чтобы собрать PSD на этом устройстве ({0}×{1}). Сохраните её на компьютере.', page.width, page.height));
+    // Let the button show «PSD…» before the long synchronous work starts.
+    await new Promise((r) => setTimeout(r, 30));
+    const bytes = exportPsd(platform.backend, { ...page, blocks: blocksRef.current }, original, cleaned, defaults);
+    await platform.saveFile(`${(title || 'page').slice(0, 60)}.psd`, bytes, 'image/vnd.adobe.photoshop');
+  });
 
   const fitText = (b: TextBlock) => {
     const style = { ...(b.style ?? {}) };
@@ -558,13 +879,33 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   };
 
   const addFont = async (file: File) => {
-    const name = file.name.replace(/\.[^.]+$/, '').replace(/[^\w\- ]/g, '').slice(0, 40) || 'Custom';
+    const id = sel?.id;
+    const raw = file.name.replace(/\.[^.]+$/, '').replace(/[^\p{L}\p{N}\- ]/gu, '').trim().slice(0, 40);
+    // Names must not collide: a second «Custom» would replace the first one in the database.
+    let name = raw || 'Custom';
+    for (let n = 2; fonts.includes(`"${name}"`); n++) name = `${raw || 'Custom'} ${n}`;
     const bytes = await file.arrayBuffer();
     await registerUserFont(name, bytes);
     await saveUserFont(platform.db, name, bytes).catch(() => undefined);
     setFonts((f) => [...f, `"${name}"`]);
-    if (sel) updateStyle(sel.id, { fontFamily: `"${name}", sans-serif` });
+    if (id) updateStyle(id, { fontFamily: `"${name}", sans-serif` });
     toast(tr('Шрифт «{0}» добавлен', name));
+  };
+
+  /** Tab / Shift+Tab in the translation: the next / previous block, the cursor stays in the field. */
+  const onTextKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Tab' || e.ctrlKey || e.metaKey || e.altKey || !blocks.length) return;
+    e.preventDefault();
+    endTyping();
+    const i = blocks.findIndex((b) => b.id === selected);
+    const next = blocks[(i + (e.shiftKey ? -1 : 1) + blocks.length) % blocks.length];
+    select(next);
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    });
   };
 
   const usage = page.usage.reduce((a, u) => ({ input: a.input + u.inputTokens, output: a.output + u.outputTokens, cost: a.cost + u.costUsd }), { input: 0, output: 0, cost: 0 });
@@ -575,29 +916,37 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     </button>
   );
   const painting = tool === 'brush' || tool === 'eraser' || tool === 'inpaint';
+  /** Long strips get a minimap: where the pictures meet, where the blocks and the remarks are. */
+  const showMinimap = page.height > page.width * 2.5 || (marks?.length ?? 0) > 0;
+  const minimapJump = (clientY: number, el: HTMLElement) => {
+    const stage = stageRef.current;
+    const inner = innerRef.current;
+    if (!stage || !inner) return;
+    const r = el.getBoundingClientRect();
+    const y = Math.max(0, Math.min(1, (clientY - r.top) / r.height)) * page.height;
+    stage.scrollTop = inner.offsetTop + y * zoom - stage.clientHeight / 2;
+  };
 
   return (
     <div>
       <div className="ait-toolbar ait-toolbar-sticky">
-        {onClose ? <button className="ait-btn small ghost" onClick={() => (!dirty || confirm(tr('Есть несохранённые правки. Закрыть без сохранения?'))) && onClose()}>{tr('← Назад')}</button> : null}
+        {onClose ? <button className="ait-btn small ghost" onClick={() => void confirmLeave(guard).then((ok) => ok && onClose())}>{tr('← Назад')}</button> : null}
         {title ? <strong style={{ marginRight: 8 }}>{title}</strong> : null}
         {toolbarExtra}
         <button
           className="ait-btn small"
           title={tr('Сохранить страницу для Photoshop: оригинал, очищенная картинка и каждый текст отдельным слоем')}
-          onClick={() => {
-            if (page.height > 30000 || page.width > 30000) return toast(tr('Страница длиннее 30 000 px — Photoshop такую не откроет'));
-            void platform.saveFile(`${(title || 'page').slice(0, 60)}.psd`, exportPsd(platform.backend, { ...page, blocks }, original, cleaned, defaults), 'image/vnd.adobe.photoshop');
-          }}
+          onClick={() => void psd.run()}
+          disabled={psd.busy}
         >
-          PSD
+          {psd.busy ? 'PSD…' : 'PSD'}
         </button>
         <span style={{ flex: 1 }} />
-        <button className="ait-bubble-btn" style={{ fontSize: 16, minHeight: 36, padding: '4px 18px' }} onClick={() => void save.run()} disabled={save.busy || !dirty}>
-          {save.busy ? tr('Сохраняю…') : dirty ? tr('Сохранить') : tr('Сохранено')}
+        <button className="ait-bubble-btn" style={{ fontSize: 16, minHeight: 36, padding: '4px 18px' }} onClick={() => void saveNow()} disabled={saving || !dirty} title={tr('Сохранить (Ctrl+S)')}>
+          {saving ? tr('Сохраняю…') : dirty ? tr('Сохранить') : tr('Сохранено')}
         </button>
       </div>
-      <ErrorBox error={save.error || ocr.error} />
+      <ErrorBox error={saveError || ocr.error || psd.error} />
       <div className="ait-editor">
         <div className="ait-stage-wrap" ref={wrapRef}>
         {/* The tools live on the page itself, always in reach while scrolling. */}
@@ -619,8 +968,8 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
             </div>
           ) : null}
           <span className="ait-pal-sep" />
-          <button className="ait-pal-btn" onClick={undo} disabled={!undoStack.current.length} title={`${tr('Отменить')} (Ctrl+Z)`} aria-label={tr('Отменить')}>↶</button>
-          <button className="ait-pal-btn" onClick={redo} disabled={!redoStack.current.length} title={`${tr('Повторить')} (Ctrl+Shift+Z)`} aria-label={tr('Повторить')}>↷</button>
+          <button className="ait-pal-btn" onClick={undo} disabled={!history.canUndo} title={`${tr('Отменить')} (Ctrl+Z)`} aria-label={tr('Отменить')}>↶</button>
+          <button className="ait-pal-btn" onClick={redo} disabled={!history.canRedo} title={`${tr('Повторить')} (Ctrl+Shift+Z)`} aria-label={tr('Повторить')}>↷</button>
           <span className="ait-pal-sep" />
           <button className="ait-pal-btn" onClick={() => setZoom((z) => Math.min(6, +(z * 1.25).toFixed(3)))} title={tr('Увеличить (Ctrl+колесо)')} aria-label={tr('Увеличить')}>+</button>
           <span className="ait-pal-val">{Math.round(zoom * 100)}%</span>
@@ -628,6 +977,47 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           <button className="ait-pal-btn" onClick={() => setZoom(fitZoom())} title={tr('По ширине')} aria-label={tr('По ширине')}>↔</button>
           <button className={`ait-pal-btn ${compare ? 'active' : ''}`} onClick={() => setCompare((c) => !c)} aria-pressed={compare} title={tr('Сравнить с оригиналом')} aria-label={tr('Сравнить')}>◐</button>
         </div>
+        <canvas ref={overlayRef} className="ait-stroke-overlay" aria-hidden style={{ display: 'none' }} />
+        {showMinimap ? (
+          <div
+            className="ait-minimap"
+            data-testid="minimap"
+            aria-hidden
+            title={tr('Карта ленты: щёлкните, чтобы перейти')}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              const el = e.currentTarget;
+              minimapJump(e.clientY, el);
+              const move = (ev: PointerEvent) => minimapJump(ev.clientY, el);
+              const up = () => {
+                window.removeEventListener('pointermove', move);
+                window.removeEventListener('pointerup', up);
+              };
+              window.addEventListener('pointermove', move);
+              window.addEventListener('pointerup', up);
+            }}
+          >
+            <div className="ait-minimap-view" style={{ top: `${(view[0] / page.height) * 100}%`, height: `${Math.max(1, ((view[1] - view[0]) / page.height) * 100)}%` }} />
+            {marks?.map((y) => <div key={`mm${y}`} className="ait-minimap-mark" style={{ top: `${(y / page.height) * 100}%` }} />)}
+            {blocks.map((b) => {
+              const box = targetBox(b, defaults);
+              const remark = hasRemark(b, overflow);
+              return (
+                <div
+                  key={b.id}
+                  className={`ait-minimap-dot ${remark ? 'remark' : ''} ${b.id === selected || multi.has(b.id) ? 'selected' : ''}`}
+                  style={{ top: `${((box[1] + box[3] / 2) / page.height) * 100}%` }}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setTool('select');
+                    select(b);
+                  }}
+                />
+              );
+            })}
+          </div>
+        ) : null}
         {painting && cursorAt ? (
           <div
             className={`ait-brush-cursor ${tool}`}
@@ -639,6 +1029,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           ref={stageRef}
           className={`ait-stage ${tool === 'select' ? '' : 'drawing'}`}
           onPointerDown={onStagePointerDown}
+          onScroll={onStageScroll}
           onPointerMove={(e) => {
             const r = wrapRef.current?.getBoundingClientRect();
             if (r && painting && !resizing.current) setCursorAt([e.clientX - r.left, e.clientY - r.top]);
@@ -681,7 +1072,6 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                     />
                   ))
                 : null}
-              <canvas ref={strokeCanvas} width={page.width} height={Math.min(page.height, 32000)} style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }} />
               {!compare && tool === 'select'
                 ? blocks.map((b) => {
                     // Keep the frame on the picture: a box sticking out above the page cannot be grabbed.
@@ -785,7 +1175,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                   {sel.qa.before !== undefined ? (
                     <small>
                       {tr('Исправлено автоматически. Было: «{0}»', sel.qa.before)}{' '}
-                      <button className="pp-link" onClick={() => commitBlocks(blocks.map((b) => (b.id === sel.id ? { ...b, translatedText: sel.qa!.before!, qa: { ...sel.qa!, before: undefined }, edited: true } : b)))}>
+                      <button className="pp-link" onClick={() => commitWith((prev) => prev.map((b) => (b.id === sel.id ? { ...b, translatedText: sel.qa!.before!, qa: { ...sel.qa!, before: undefined }, edited: true } : b)))}>
                         {tr('Вернуть')}
                       </button>
                     </small>
@@ -795,12 +1185,12 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
               {multi.size ? <p className="ait-notice" data-testid="multi-note">{tr('Выбрано блоков: {0}. Стиль меняется у всех выбранных (Esc — снять выбор).', multi.size + 1)}</p> : null}
               <Field label={tr('Перевод')}>
                 <button className="ait-copy" onClick={() => copyText(sel.translatedText)} title={tr('Копировать перевод')} aria-label={tr('Копировать перевод')}>⧉</button>
-                <textarea className="ait-textarea" value={sel.translatedText} onFocus={() => (editStart.current = blocks)} onChange={(e) => setBlocks(blocks.map((b) => (b.id === sel.id ? { ...b, translatedText: e.target.value, edited: true } : b)))} onBlur={endTextEdit} />
+                <textarea ref={textareaRef} className="ait-textarea" value={sel.translatedText} onChange={(e) => typeText(sel.id, 'translatedText', e.target.value)} onBlur={endTyping} onKeyDown={onTextKey} title={tr('Tab / Shift+Tab — следующий / предыдущий блок')} />
               </Field>
               <div style={{ marginTop: 8 }}>
                 <Field label={tr('Оригинал')}>
                   <button className="ait-copy" onClick={() => copyText(sel.originalText)} title={tr('Копировать оригинал')} aria-label={tr('Копировать оригинал')}>⧉</button>
-                  <input className="ait-input" value={sel.originalText} onFocus={() => (editStart.current = blocks)} onChange={(e) => setBlocks(blocks.map((b) => (b.id === sel.id ? { ...b, originalText: e.target.value } : b)))} onBlur={endTextEdit} />
+                  <input className="ait-input" value={sel.originalText} onChange={(e) => typeText(sel.id, 'originalText', e.target.value)} onBlur={endTyping} />
                 </Field>
               </div>
               <div className="ait-row" style={{ marginTop: 8 }}>
@@ -816,8 +1206,8 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
               <ErrorBox error={backTr.error} />
               <div className="ait-row" style={{ marginTop: 6, flexWrap: 'wrap' }}>
                 <button className="ait-btn small" onClick={() => { setStyleClip({ ...(sel.style ?? {}) }); toast(tr('Стиль скопирован')); }}>{tr('Копировать стиль')}</button>
-                <button className="ait-btn small" disabled={!styleClip} onClick={() => styleClip && commitBlocks(blocks.map((b) => (targets.has(b.id) ? { ...b, style: { ...(b.style ?? {}), ...styleClip }, edited: true } : b)))}>{tr('Вставить стиль')}</button>
-                <button className="ait-btn small" title={tr('Применить стиль этого блока ко всем блокам того же типа')} onClick={() => commitBlocks(blocks.map((b) => (b.textType === sel.textType && b.id !== sel.id ? { ...b, style: { ...(b.style ?? {}), ...(sel.style ?? {}), fontSize: b.style?.fontSize ?? null }, edited: true } : b)))}>
+                <button className="ait-btn small" disabled={!styleClip} onClick={() => styleClip && commitWith((prev) => prev.map((b) => (targets.has(b.id) ? { ...b, style: { ...(b.style ?? {}), ...styleClip }, edited: true } : b)))}>{tr('Вставить стиль')}</button>
+                <button className="ait-btn small" title={tr('Применить стиль этого блока ко всем блокам того же типа')} onClick={() => commitWith((prev) => prev.map((b) => (b.textType === sel.textType && b.id !== sel.id ? { ...b, style: { ...(b.style ?? {}), ...(sel.style ?? {}), fontSize: b.style?.fontSize ?? null }, edited: true } : b)))}>
                   {tr('Стиль ко всем {0}', sel.textType)}
                 </button>
               </div>
@@ -901,7 +1291,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                 </Field>
                 <Switch checked={sel.translate} onChange={(v) => updateBlock(sel.id, { translate: v })} label={tr('Показывать перевод')} />
               </div>
-              <button className="ait-btn small danger" style={{ marginTop: 12 }} onClick={() => { commitBlocks(blocks.filter((b) => b.id !== sel.id)); setSelected(null); }}>
+              <button className="ait-btn small danger" style={{ marginTop: 12 }} onClick={() => { const id = sel.id; commitWith((prev) => prev.filter((b) => b.id !== id)); setSelected(null); setMulti(new Set()); }}>
                 {tr('Удалить блок')}
               </button>
             </div>
@@ -915,6 +1305,13 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
               <button className="ait-btn small" data-testid="check-page" onClick={() => void check.run()} disabled={check.busy || !blocks.length} title={tr('Сравнить перевод страницы с другими переводчиками (Настройки → Сверка)')}>
                 {check.busy ? tr('Сверяю…') : tr('⚖ Сверить страницу')}
               </button>
+            </div>
+            <div className="ait-row" style={{ flexWrap: 'wrap', marginBottom: 6, alignItems: 'center' }} data-testid="remark-nav">
+              <button className="ait-btn small" onClick={() => jumpRemark(-1)} disabled={!remarks.length} title={tr('Предыдущее замечание (Shift+N)')}>↑</button>
+              <button className="ait-btn small" onClick={() => jumpRemark(1)} disabled={!remarks.length} title={tr('Следующее замечание: ⚖ сверка, 🔍 проверка или текст не помещается (N)')}>
+                {tr('Следующее замечание')}
+              </button>
+              <small className="ait-muted">{remarks.length ? tr('Замечаний: {0}', remarks.length) : tr('Замечаний нет')}</small>
             </div>
             <ErrorBox error={check.error} />
             <div className="ait-row" style={{ flexWrap: 'wrap', marginBottom: 6 }} data-testid="texts-io">
@@ -942,7 +1339,8 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                     const f = e.target.files?.[0];
                     e.target.value = '';
                     if (!f) return;
-                    const { blocks: next, changed } = importTexts(blocks, await f.text());
+                    const text = await f.text();
+                    const { blocks: next, changed } = importTexts(blocksRef.current, text);
                     if (changed) commitBlocks(next);
                     toast(tr('Обновлено переводов: {0}', changed));
                   }}
@@ -951,7 +1349,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
             </div>
             <div className="ait-blocklist">
               {blocks.map((b, i) => (
-                <button key={b.id} aria-pressed={b.id === selected || multi.has(b.id)} onClick={(e) => { pick(b.id, e.ctrlKey || e.shiftKey || e.metaKey); setTool('select'); }}>
+                <button key={b.id} aria-pressed={b.id === selected || multi.has(b.id)} onClick={(e) => { const add = e.ctrlKey || e.shiftKey || e.metaKey; pick(b.id, add); if (!add) scrollToBlock(b); setTool('select'); }}>
                   {i + 1}. {b.translatedText.slice(0, 40) || <em className="ait-muted">{tr('пусто')}</em>} {overflow.has(b.id) ? '⚠' : ''}
                   {b.check?.verdict === 'differs' ? <span title={b.check.note ?? tr('Расходится с другими переводчиками')}> ⚖</span> : null}
                   {b.qa?.issues.length ? <span title={b.qa.issues.map((q) => `${QA_LABELS[q.kind]}: ${qaNote(q)}`).join('\n')}> 🔍{b.qa.issues.length}</span> : null}

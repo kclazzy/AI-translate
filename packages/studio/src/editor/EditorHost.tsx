@@ -4,6 +4,7 @@ import { usePlatform } from '../platform';
 import { cropProjectPage, loadOriginalImage, rerenderProjectPage, type ProjectStore } from '../projects';
 import { ErrorBox } from '../ui';
 import { Editor } from './Editor';
+import { confirmLeave } from './guard';
 import { tr } from '@ait/core/i18n';
 
 interface Loaded {
@@ -26,16 +27,30 @@ async function editableKey(service: ReturnType<typeof usePlatform>['service'], k
   return r?.strip?.parent ?? key;
 }
 
-/** Stack several cached pages of one width into one tall page (whole-chapter editing). */
-async function loadStack(platform: ReturnType<typeof usePlatform>, keys: string[]): Promise<Loaded & { segments: Segment[]; title: string }> {
-  const results = [];
-  for (const k of keys) {
+/** A picture of the chapter that is not in the whole-chapter strip, and why. */
+export interface Skipped {
+  /** Its number in the chapter (1-based). */
+  n: number;
+  why: 'missing' | 'width';
+}
+
+/**
+ * Stack several cached pages of one width into one tall page (whole-chapter editing). The width is
+ * the one of `mainKey` (the page the user opened), so that page is always in the strip.
+ */
+async function loadStack(platform: ReturnType<typeof usePlatform>, keys: string[], mainKey = keys[0]): Promise<Loaded & { segments: Segment[]; title: string; skipped: Skipped[] }> {
+  const found: { r: NonNullable<Awaited<ReturnType<typeof platform.service.getResult>>>; n: number }[] = [];
+  const skipped: Skipped[] = [];
+  for (const [i, k] of keys.entries()) {
     const r = await platform.service.getResult(k);
-    if (r) results.push(r);
+    if (r) found.push({ r, n: i + 1 });
+    else skipped.push({ n: i + 1, why: 'missing' });
   }
-  if (!results.length) throw new Error(tr('Перевод не найден в кэше — переведите страницу ещё раз'));
-  const width = results[0].page.width;
-  const same = results.filter((r) => r.page.width === width);
+  if (!found.length) throw new Error(tr('Перевод не найден в кэше — переведите страницу ещё раз'));
+  const width = (found.find((x) => x.r.key === mainKey) ?? found[0]).r.page.width;
+  for (const x of found) if (x.r.page.width !== width) skipped.push({ n: x.n, why: 'width' });
+  skipped.sort((a, b) => a.n - b.n);
+  const same = found.filter((x) => x.r.page.width === width).map((x) => x.r);
   const segments: Segment[] = [];
   let y = 0;
   for (const r of same) {
@@ -55,10 +70,12 @@ async function loadStack(platform: ReturnType<typeof usePlatform>, keys: string[
       for (const t of cleaned.tiles) if (t.y < s.y + c.y + c.h && t.y + t.h > s.y + c.y) t.canvas.getContext('2d').drawImage(img.source, 0, s.y + c.y - t.y);
       img.close?.();
     }
-    blocks.push(...r.page.blocks.map((b) => ({ ...shiftBlock(b, -s.y), id: `${i}:${b.id}` })));
+    // A block repeated in this picture only because its text crosses the seam belongs to its neighbour:
+    // in the strip the neighbour's own block is there, so the copy is left out.
+    blocks.push(...r.page.blocks.filter((b) => same.length === 1 || !(b as TextBlock & { continued?: boolean }).continued).map((b) => ({ ...shiftBlock(b, -s.y), id: `${i}:${b.id}` })));
   }
   const page: PageResult = { ...same[0].page, height: y, blocks, usage: same.flatMap((r) => r.page.usage) };
-  return { page, original, cleaned, segments, title: same[0].title || same[0].sourceUrl || '' };
+  return { page, original, cleaned, segments, skipped, title: same[0].title || same[0].sourceUrl || '' };
 }
 
 /**
@@ -68,15 +85,17 @@ async function loadStack(platform: ReturnType<typeof usePlatform>, keys: string[
  */
 export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose }: { resultKey: string; chapterKeys?: string[]; settings: AppSettings; onClose?: () => void }) {
   const platform = usePlatform();
-  const [data, setData] = useState<(Loaded & { segments: Segment[] }) | null>(null);
+  const [data, setData] = useState<(Loaded & { segments: Segment[]; skipped: Skipped[] }) | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [title, setTitle] = useState('');
   const [whole, setWhole] = useState(false);
   useEffect(() => {
     let cancelled = false;
     setData(null);
+    setError(null);
     (async () => {
-      let keys = [await editableKey(platform.service, resultKey)];
+      const main = await editableKey(platform.service, resultKey);
+      let keys = [main];
       if (whole && chapterKeys?.length) {
         keys = [];
         for (const k of chapterKeys) {
@@ -84,7 +103,7 @@ export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose }: 
           if (!keys.includes(e)) keys.push(e);
         }
       }
-      const loaded = await loadStack(platform, keys);
+      const loaded = await loadStack(platform, keys, main);
       if (!cancelled) {
         setData(loaded);
         setTitle(loaded.title);
@@ -128,9 +147,21 @@ export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose }: 
       }
       toolbarExtra={
         chapterKeys && chapterKeys.length > 1 ? (
-          <button className={`ait-btn small ${whole ? 'active' : ''}`} aria-pressed={whole} onClick={() => setWhole(!whole)} title={tr('Все переведённые картинки главы одной лентой')}>
-            {tr('Глава целиком')}
-          </button>
+          <>
+            <button
+              className={`ait-btn small ${whole ? 'active' : ''}`}
+              aria-pressed={whole}
+              onClick={() => void confirmLeave().then((ok) => ok && setWhole(!whole))}
+              title={tr('Все переведённые картинки главы одной лентой')}
+            >
+              {tr('Глава целиком')}
+            </button>
+            {whole && data.skipped.length ? (
+              <span className="ait-notice ait-stack-skipped" data-testid="stack-skipped" role="status">
+                {tr('Не вошли в ленту: {0}', data.skipped.map((x) => (x.why === 'width' ? tr('№{0} (другая ширина)', x.n) : tr('№{0} (не переведена)', x.n))).join(', '))}
+              </span>
+            ) : null}
+          </>
         ) : null
       }
       onSave={async (page, cleaned, pixels) => {
@@ -146,12 +177,17 @@ export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose }: 
 }
 
 /** Edit one page of a project. */
-export function ProjectPageEditor({ store, project, page, settings, onClose, onSaved }: { store: ProjectStore; project: Project; page: ProjectPage; settings: AppSettings; onClose: () => void; onSaved: (p: Project) => void }) {
+export function ProjectPageEditor({ store, project, page, settings, onClose, onSaved, onDirtyChange }: { store: ProjectStore; project: Project; page: ProjectPage; settings: AppSettings; onClose: () => void; onSaved: (p: Project) => void; onDirtyChange?: (dirty: boolean) => void }) {
   const platform = usePlatform();
   const [data, setData] = useState<Loaded | null>(null);
   const [error, setError] = useState<unknown>(null);
+  /** Bumped after a crop: the page has new pictures and a new size. A plain save does not reload. */
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     let cancelled = false;
+    // Never show the previous page's pictures under this page's name (a save would mix them up).
+    setData(null);
+    setError(null);
     (async () => {
       const a = await store.assets(project.id, page.id);
       if (!a || !page.result) throw new Error(tr('Страница ещё не переведена'));
@@ -162,7 +198,8 @@ export function ProjectPageEditor({ store, project, page, settings, onClose, onS
     return () => {
       cancelled = true;
     };
-  }, [platform, store, project.id, page]);
+    // Only another page or a crop reloads: after a save the editor keeps its own (newer) state.
+  }, [platform, store, project.id, page.id, reload]); // eslint-disable-line react-hooks/exhaustive-deps
   if (error) return <ErrorBox error={error} />;
   if (!data) return <p className="ait-muted">{tr('Загрузка страницы…')}</p>;
   return (
@@ -174,10 +211,12 @@ export function ProjectPageEditor({ store, project, page, settings, onClose, onS
       cleaned={data.cleaned}
       settings={settings}
       onClose={onClose}
+      onDirtyChange={onDirtyChange}
       chapterTexts={async (current) => project.pages.map((p) => (p.id === page.id ? current : p.result?.blocks ?? []))}
       onCrop={async (rect, blocks) => {
         const fresh = (await store.get(project.id)) ?? project;
         onSaved(await cropProjectPage(store, platform.backend, settings, fresh, page, { ...data.page, blocks }, data.original, data.cleaned, rect));
+        setReload((n) => n + 1);
       }}
       onSave={async (result, cleaned, pixels) => {
         const fresh = (await store.get(project.id)) ?? project;

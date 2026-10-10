@@ -1,5 +1,5 @@
 export { StudioApp, type StudioAppProps, type View } from './StudioApp';
-export { PlatformContext, usePlatform, downloadFile, type StudioPlatform } from './platform';
+export { PlatformContext, usePlatform, downloadFile, safeFileName, type StudioPlatform } from './platform';
 export { loadBundledFonts, registerUserFont } from './fonts';
 export { Editor } from './editor/Editor';
 export { CachedPageEditor, ProjectPageEditor } from './editor/EditorHost';

@@ -22,7 +22,7 @@ import {
   type ProviderConfig,
 } from '@ait/core';
 import { buildReport } from '../report';
-import { settingsFromFile, settingsToFile } from '../settingsFile';
+import { readSettingsFile, settingsToFile } from '../settingsFile';
 import { LocalModels, LocalSetup, ModelCheckCard, ModelPicker, UpdateCheck } from '../ModelPicker';
 import { usePlatform } from '../platform';
 import { ErrorBox, Field, FoldPanel, NumberInput, Segmented, Switch, toast, useAction } from '../ui';
@@ -798,14 +798,19 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
                   const f = e.target.files?.[0];
                   e.target.value = '';
                   if (!f) return;
+                  let imported: ReturnType<typeof readSettingsFile>;
                   try {
-                    const next = settingsFromFile(await f.text(), s);
-                    if (!confirm(tr('Заменить текущие настройки настройками из файла?'))) return;
-                    update(next);
-                    toast(tr('Настройки загружены. Введите ключи API, если они нужны.'));
+                    imported = readSettingsFile(await f.text(), s);
                   } catch {
                     toast(tr('Это не файл настроек AI Translate'));
+                    return;
                   }
+                  const list = imported.changed.length ? `\n\n${tr('Новые или другие адреса (сохранённые ключи к ним не перейдут):')}\n${imported.changed.map((c) => `• ${c}`).join('\n')}` : '';
+                  if (!confirm(tr('Заменить текущие настройки настройками из файла?') + list)) return;
+                  // A key must never follow an address that came from someone else's file.
+                  await Promise.all(imported.dropSecrets.map((n) => platform.secrets.delete(n)));
+                  update(imported.settings);
+                  toast(tr('Настройки загружены. Введите ключи API, если они нужны.'));
                 }}
               />
             </label>

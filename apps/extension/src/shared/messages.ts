@@ -21,6 +21,18 @@ export interface RenderedTiles {
   tiles: { y: number; h: number; dataUrl: string }[];
   page: Pick<PageResult, 'blocks' | 'timings' | 'usage' | 'pipeline' | 'stripLang'>;
   cached: boolean;
+  /**
+   * The tiles were too big for one message (browsers refuse messages over 64 MiB): `tiles` is
+   * empty and this many tiles are fetched one by one with 'get-tile'.
+   */
+  tilesOmitted?: number;
+}
+
+/** One tile of a stored result (for results whose tiles do not fit in one message). */
+export interface RenderedTile {
+  y: number;
+  h: number;
+  dataUrl: string;
 }
 
 // content → background
@@ -35,7 +47,9 @@ export type ContentToBackground =
   | { type: 'status'; ids: string[] }
   | { type: 'open-setup' }
   | { type: 'free-memory' }
+  /** Pictures translated before: picture address → result key (results are fetched one by one). */
   | { type: 'lookup-cached'; srcs: string[] }
+  | { type: 'get-tile'; key: string; index: number }
   | { type: 'build-download'; keys: string[]; title: string; format: ChapterFormat };
 
 /** Time per translated page (kv 'speed'), written by the worker, shown in the popup. */
@@ -59,6 +73,9 @@ export type BackgroundToContent =
   | { type: 'translate-src'; src: string }
   | { type: 'result-changed'; key: string }
   | { type: 'get-langs' }
+  /** Right before a screenshot: hide our overlays over the picture and measure it again (null: not fully on screen). */
+  | { type: 'prepare-capture'; id: string }
+  | { type: 'end-capture'; id: string }
   | { type: 'state'; autoTranslate: boolean; minImageSize: number; enabled: boolean; targetLang: string; stitch?: boolean; ui?: UiStrings };
 
 /** Interface language for the page overlays: the content script has no dictionaries of its own. */
@@ -83,14 +100,19 @@ export type JobStatus =
 
 // background ↔ offscreen
 export type ToOffscreen =
-  | { target: 'offscreen'; type: 'run'; jobId: string; tabId: number; bytesB64: string; mime?: string; pageUrl: string; title: string; priority: number; generic?: boolean; force?: boolean; imageSrc?: string }
-  | { target: 'offscreen'; type: 'crop-run'; jobId: string; tabId: number; screenshot: string; rect: { x: number; y: number; width: number; height: number }; dpr: number; pageUrl: string; title: string; generic?: boolean; priority?: number }
-  | { target: 'offscreen'; type: 'run-strip'; jobIds: string[]; tabId: number; parts: { bytesB64: string; mime?: string; src?: string }[]; pageUrl: string; title: string; priority: number; force?: boolean }
+  // Picture bytes do not travel in messages (64 MiB limit, memory held by waiting jobs): the
+  // background puts them into the job store (shared/jobstore.ts) and passes their id. `hash` is the
+  // SHA-256 of the bytes: the same picture asked for twice (two tabs, a resend) is one queue job.
+  | { target: 'offscreen'; type: 'run'; jobId: string; tabId: number; doc?: string; blobId: string; hash: string; mime?: string; pageUrl: string; title: string; priority: number; generic?: boolean; force?: boolean; imageSrc?: string }
+  | { target: 'offscreen'; type: 'crop-run'; jobId: string; tabId: number; doc?: string; screenshot: string; rect: { x: number; y: number; width: number; height: number }; dpr: number; pageUrl: string; title: string; generic?: boolean; priority?: number }
+  | { target: 'offscreen'; type: 'run-strip'; jobIds: string[]; tabId: number; doc?: string; parts: { blobId: string; hash: string; mime?: string; src?: string }[]; pageUrl: string; title: string; priority: number; force?: boolean }
   | { target: 'offscreen'; type: 'cancel'; jobId: string }
-  | { target: 'offscreen'; type: 'cancel-tab'; tabId?: number }
+  /** Stop every job of a tab (or of one page shown in it: `doc`), or of all tabs. */
+  | { target: 'offscreen'; type: 'cancel-tab'; tabId?: number; doc?: string }
   | { target: 'offscreen'; type: 'status'; jobIds: string[] }
   | { target: 'offscreen'; type: 'build-file'; keys: string[]; title: string; format: ChapterFormat; lang: string }
   | { target: 'offscreen'; type: 'get-result'; key: string }
+  | { target: 'offscreen'; type: 'get-tile'; key: string; index: number }
   | { target: 'offscreen'; type: 'lookup-cached'; srcs: string[] };
 
 export type FromOffscreen =
@@ -98,6 +120,17 @@ export type FromOffscreen =
   | { source: 'offscreen'; type: 'done'; jobId: string; tabId: number; result: RenderedTiles }
   | { source: 'offscreen'; type: 'error'; jobId: string; tabId: number; error: SerializedError }
   | { source: 'offscreen'; type: 'save'; tabId: number; url: string; filename: string };
+
+/** An error thrown in the offscreen document, sent back as the response (not a normal result). */
+export interface OffscreenFailure {
+  __aitError: SerializedError;
+}
+
+/** Detail of the CANCELLED error sent when a whole tab was stopped (popup, switching off, page closed). */
+export const CANCELLED_ALL = 'all';
+
+/** Name of the port a page keeps open while it has pictures in work (liveness, cancel on close). */
+export const PAGE_PORT = 'ait-page';
 
 // UI pages → background
 export type UiToBackground =

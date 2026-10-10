@@ -93,6 +93,12 @@ export interface TextBlock {
   overflow?: boolean;
   /** Set when the user edited this block by hand. */
   edited?: boolean;
+  /**
+   * A picture cut out of a glued strip: this block belongs to a neighbouring picture and is only
+   * repeated here because its text crosses the seam (see image/strip.ts pageForSpan). Skip it when
+   * gluing the pictures back together or counting blocks.
+   */
+  continued?: boolean;
 }
 
 export interface Usage {

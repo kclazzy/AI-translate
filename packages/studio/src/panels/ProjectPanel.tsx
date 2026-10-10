@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { replaceInText, toAppError, errorMessage, type AppSettings, type ImageMime, type Project, type ProjectPage, type TextStyle } from '@ait/core';
 import { ProjectPageEditor } from '../editor/EditorHost';
+import { confirmLeave } from '../editor/guard';
 import { exportCbz, exportEpub, exportPdf, exportZip, importFiles, type ExportPage } from '../files';
 import { usePlatform } from '../platform';
 import { rerenderProjectPage, translateProjectPage, ProjectStore } from '../projects';
@@ -56,6 +57,8 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project | null>(null);
   const [editing, setEditing] = useState<ProjectPage | null>(null);
+  /** The page open in the editor has unsaved edits (marked in the page list). */
+  const [editorDirty, setEditorDirty] = useState(false);
   const [tab, setTab] = useState<'pages' | 'glossary' | 'context' | 'replace'>('pages');
   const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
@@ -173,14 +176,22 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
     return (
       <div className={`ait-editor-with-pages ${side ? 'side' : ''}`}>
         <div style={{ minWidth: 0 }}>
-          <ProjectPageEditor store={store} project={project} page={fresh} settings={settings} onClose={() => setEditing(null)} onSaved={(p) => setProject(p)} />
+          <ProjectPageEditor store={store} project={project} page={fresh} settings={settings} onClose={() => setEditing(null)} onSaved={(p) => setProject(p)} onDirtyChange={setEditorDirty} />
         </div>
         {done.length > 1 ? (
           <nav className="ait-filmstrip" aria-label={tr('Страницы главы')} data-testid="filmstrip">
             {done.map((p) => (
-              <button key={p.id} aria-current={p.id === fresh.id ? 'page' : undefined} title={p.name} onClick={() => p.id !== fresh.id && setEditing(p)}>
+              <button
+                key={p.id}
+                aria-current={p.id === fresh.id ? 'page' : undefined}
+                title={p.id === fresh.id && editorDirty ? `${p.name} — ${tr('есть несохранённые правки')}` : p.name}
+                onClick={() => p.id !== fresh.id && void confirmLeave().then((ok) => ok && setEditing(p))}
+              >
                 <Thumb store={store} project={project} page={p} />
-                <span>{p.index + 1}</span>
+                <span>
+                  {p.index + 1}
+                  {p.id === fresh.id && editorDirty ? <span className="ait-unsaved" data-testid="unsaved-mark" aria-label={tr('есть несохранённые правки')}>•</span> : null}
+                </span>
               </button>
             ))}
           </nav>

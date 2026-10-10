@@ -31,8 +31,30 @@ export function usePlatform(): StudioPlatform {
   return p;
 }
 
+/**
+ * A file name that is safe everywhere: titles and page addresses ("https://site/ch/1.png") become
+ * names without path separators or characters Windows / Android refuse.
+ */
+export function safeFileName(name: string, fallback = 'file'): string {
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 && dot >= name.length - 8 && /^\.[\w-]+$/.test(name.slice(dot)) ? name.slice(dot) : '';
+  const base = (ext ? name.slice(0, dot) : name)
+    .replace(/^[a-z][\w+.-]*:\/\//i, '')
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s._]+|[\s.]+$/g, '')
+    .slice(0, 100);
+  return (base || fallback) + ext;
+}
+
+/** The platform with every saved file name made safe. */
+export function withSafeFileNames(p: StudioPlatform): StudioPlatform {
+  return { ...p, saveFile: (name, bytes, mime) => p.saveFile(safeFileName(name), bytes, mime) };
+}
+
 /** Browser download used by extension and web builds. */
 export async function downloadFile(name: string, bytes: Uint8Array, mime: string): Promise<void> {
+  name = safeFileName(name);
   const blob = new Blob([bytes as BlobPart], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

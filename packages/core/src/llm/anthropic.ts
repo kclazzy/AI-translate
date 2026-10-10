@@ -33,11 +33,11 @@ export class AnthropicProvider implements LlmProvider {
     try {
       const res = await safeFetch(this.fetchImpl, joinUrl(this.config.baseUrl || 'https://api.anthropic.com/v1', 'messages'), { method: 'POST', headers, body: JSON.stringify(body), signal }, this.config.label);
       if (!res.ok) throw await httpError(res, this.config.label, this.config.baseUrl, this.config.model);
-      const json = (await res.json()) as { content?: { type: string; text?: string }[]; usage?: { input_tokens?: number; output_tokens?: number }; model?: string };
+      const json = (await res.json()) as { content?: { type: string; text?: string }[]; usage?: { input_tokens?: number; output_tokens?: number }; model?: string; stop_reason?: string };
       let text = (json.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('');
       if (req.json) text = '{' + text;
       if (!text.trim()) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: 'Empty completion' });
-      return { text, inputTokens: json.usage?.input_tokens ?? 0, outputTokens: json.usage?.output_tokens ?? 0, model: json.model ?? this.config.model };
+      return { text, inputTokens: json.usage?.input_tokens ?? 0, outputTokens: json.usage?.output_tokens ?? 0, model: json.model ?? this.config.model, ...(json.stop_reason === 'max_tokens' ? { truncated: true } : {}) };
     } finally {
       dispose();
     }

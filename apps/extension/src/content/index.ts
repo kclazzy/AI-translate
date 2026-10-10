@@ -1,6 +1,7 @@
 import { errorMessage } from '@ait/core/errors';
 import { dominantLanguage, nativeName } from '@ait/core/languages';
-import type { BackgroundToContent, ChapterFormat, ContentToBackground, ImageRef, JobStatus, PageLangs, RenderedTiles, UiStrings } from '../shared/messages';
+import type { SerializedError } from '@ait/core/errors';
+import { CANCELLED_ALL, PAGE_PORT, type BackgroundToContent, type ChapterFormat, type ContentToBackground, type ImageRef, type JobStatus, type PageLangs, type RenderedTile, type RenderedTiles, type UiStrings } from '../shared/messages';
 import { Overlay } from './overlay';
 import { asCandidate, candidateAt, chapterColumn, imgSrc, inlineData, lazySrc, markUi, scanPage, viewportRect, type Candidate } from './scanner';
 import { fmtNumber, fmtUsd, registerDictionary, setUiLang, tr } from '@ait/core/i18n';
@@ -57,11 +58,32 @@ function main() {
   };
   let targetLang = 'ru';
   let stitch = true;
+  /** Set once the extension context is gone: everything of this copy is stopped and removed. */
+  let dead = false;
   const langsOf = (r: RenderedTiles) => ({ source: nativeName(dominantLanguage(r.page.blocks.map((b) => b.language)) ?? r.page.stripLang ?? 'auto') || tr('Оригинал'), target: nativeName(targetLang) });
   let originalsShown = false;
   let seq = 0;
 
-  const send = <T = unknown>(msg: ContentToBackground): Promise<T> => chrome.runtime.sendMessage(msg) as Promise<T>;
+  /**
+   * Ask the background. Rejects when it answers with an error, and shuts this copy of the script
+   * down for good once the extension was updated or removed ("Extension context invalidated").
+   */
+  const send = async <T = unknown>(msg: ContentToBackground): Promise<T> => {
+    if (!alive()) {
+      teardown();
+      throw new Error('Extension context invalidated');
+    }
+    let r: unknown;
+    try {
+      r = await chrome.runtime.sendMessage(msg);
+    } catch (e) {
+      if (!alive() || /context invalidated/i.test(String(e))) teardown();
+      throw e;
+    }
+    const err = r && typeof r === 'object' && 'error' in r ? (r as { error?: SerializedError }).error : undefined;
+    if (err && typeof err === 'object' && typeof err.code === 'string') throw new Error(err.detail ?? (err.code === 'UNKNOWN' ? err.message : errorMessage(err)));
+    return r as T;
+  };
   /** Overlays speak the interface language chosen in the extension (not remembered in the site's storage). */
   let relabelHover = () => {};
   const applyUi = (ui: UiStrings | undefined) => {
@@ -89,7 +111,31 @@ function main() {
     return id;
   };
 
+  /** Tiles of a result too big for one message come one by one. */
+  async function tilesOf(r: RenderedTiles): Promise<RenderedTile[]> {
+    if (!r.tilesOmitted) return r.tiles;
+    const out: RenderedTile[] = [];
+    for (let i = 0; i < r.tilesOmitted; i++) {
+      const t = await send<RenderedTile | null>({ type: 'get-tile', key: r.key, index: i });
+      if (!t) throw new Error('tile');
+      out.push(t);
+    }
+    return out;
+  }
+
   function showResult(it: Item, result: RenderedTiles) {
+    if (result.tilesOmitted) {
+      it.status = 'working';
+      void tilesOf(result).then(
+        (tiles) => items.get(it.id) === it && showResult(it, { ...result, tiles, tilesOmitted: undefined }),
+        (e) => {
+          if (items.get(it.id) !== it) return;
+          it.status = 'error';
+          it.overlay.error(tr('Не удалось показать перевод'), e instanceof Error ? e.message : String(e));
+        },
+      );
+      return;
+    }
     it.status = 'done';
     it.overlay.setTiles(result.tiles, langsOf(result));
     // The overlay keeps its own copies of the pictures; holding the base64 tiles too would
@@ -150,16 +196,21 @@ function main() {
     const fresh = scanPage(minSize).filter((c) => c.kind === 'img' && c.src && !c.src.startsWith('data:') && !looked.has(c.el) && !dismissed.has(c.el) && !items.has(byElement.get(c.el) ?? ''));
     if (!fresh.length) return;
     for (const c of fresh) looked.add(c.el);
-    let found: Record<string, RenderedTiles> = {};
+    let found: Record<string, string> = {};
     try {
-      found = (await send<Record<string, RenderedTiles>>({ type: 'lookup-cached', srcs: fresh.map((c) => c.src!) })) ?? {};
+      found = (await send<Record<string, string>>({ type: 'lookup-cached', srcs: fresh.map((c) => c.src!) })) ?? {};
     } catch {
+      // Not answered (the worker was restarting): look again on the next scan.
+      for (const c of fresh) looked.delete(c.el);
       return;
     }
+    // One result per message: a whole chapter at once could pass the browser's message size limit.
     for (const c of fresh) {
-      const r = found[c.src!];
+      const key = found[c.src!];
+      if (!key || dead) continue;
+      const r = await send<RenderedTiles | null>({ type: 'get-result', key }).catch(() => null);
       const id = idFor(c.el);
-      if (!r || items.has(id)) continue;
+      if (!r || items.has(id) || !c.el.isConnected || dismissed.has(c.el)) continue;
       const overlay = makeOverlay(c, id);
       const item: Item = { id, cand: c, src: c.src, status: 'done', overlay };
       watchEl(c.el);
@@ -287,6 +338,55 @@ function main() {
   const resent = new Map<string, number>();
   function startWatch() {
     watchTimer ??= setInterval(() => void pollStatus(), 3000);
+    ensurePort();
+  }
+
+  // ---- the page port: open while pictures are in work ---------------------------------------
+  // It keeps the background awake (a ping every 20 s), and when this page goes away (reload,
+  // another page, tab closed) the background sees the port close and drops this page's jobs.
+  let port: chrome.runtime.Port | null = null;
+  let pingTimer: ReturnType<typeof setInterval> | null = null;
+  const hasActive = () => [...items.values()].some((it) => it.status === 'queued' || it.status === 'working');
+  function ensurePort() {
+    if (port || dead || !alive()) return;
+    try {
+      port = chrome.runtime.connect({ name: PAGE_PORT });
+    } catch {
+      teardown();
+      return;
+    }
+    const p = port;
+    p.onDisconnect.addListener(() => {
+      void chrome.runtime.lastError;
+      if (port !== p) return;
+      port = null;
+      if (pingTimer) clearInterval(pingTimer);
+      pingTimer = null;
+      if (!alive()) return teardown();
+      // The background was stopped (or restarted): connect again while there is work.
+      if (hasActive()) setTimeout(ensurePort, 500);
+    });
+    if (pingTimer) clearInterval(pingTimer);
+    pingTimer = setInterval(() => {
+      try {
+        port?.postMessage({ type: 'ping' });
+      } catch {
+        /* closed; onDisconnect follows */
+      }
+    }, 20_000);
+  }
+  function releasePort() {
+    const p = port;
+    if (!p) return;
+    port = null;
+    if (pingTimer) clearInterval(pingTimer);
+    pingTimer = null;
+    try {
+      p.postMessage({ type: 'idle' });
+      p.disconnect();
+    } catch {
+      /* already closed */
+    }
   }
   const fmt = (ms: number) => {
     const sec = Math.floor(ms / 1000);
@@ -297,6 +397,7 @@ function main() {
     if (!active.length) {
       if (watchTimer) clearInterval(watchTimer);
       watchTimer = null;
+      releasePort();
       return;
     }
     let res: Record<string, JobStatus>;
@@ -363,8 +464,55 @@ function main() {
   }
 
   // ---- messages from the background --------------------------------------------------------
+  // ---- screenshots: our overlays must not be in the picture ---------------------------------
+  let captureHidden: HTMLElement[] = [];
+  let captureRestore: ReturnType<typeof setTimeout> | null = null;
+  const endCapture = () => {
+    for (const h of captureHidden) h.style.visibility = '';
+    captureHidden = [];
+    if (captureRestore) clearTimeout(captureRestore);
+    captureRestore = null;
+  };
+  const overlaps = (a: { x: number; y: number; width: number; height: number }, b: DOMRect) => a.x < b.right && a.x + a.width > b.left && a.y < b.bottom && a.y + a.height > b.top;
+  /** Where the picture is on screen now (null: not fully visible), with our UI over it hidden. */
+  function prepareCapture(id: string): { rect: { x: number; y: number; width: number; height: number }; dpr: number } | null {
+    const it = itemFor(id) ?? items.get(id);
+    if (!it) return null;
+    let rect: { x: number; y: number; width: number; height: number } | undefined;
+    if (it.docRect) {
+      const r = { x: it.docRect.x - scrollX, y: it.docRect.y - scrollY, width: it.docRect.width, height: it.docRect.height };
+      if (r.x >= 0 && r.y >= 0 && r.x + r.width <= innerWidth && r.y + r.height <= innerHeight) rect = r;
+    } else if (it.cand.el.isConnected) rect = viewportRect(it.cand.el);
+    if (!rect) return null;
+    endCapture();
+    const r = rect;
+    for (const x of items.values()) {
+      const box = x.docRect ? new DOMRect(x.docRect.x - scrollX, x.docRect.y - scrollY, x.docRect.width, x.docRect.height) : x.cand.el.isConnected ? x.cand.el.getBoundingClientRect() : null;
+      if (box && overlaps(r, box)) captureHidden.push(x.overlay.host);
+    }
+    for (const h of [hoverHost, progress?.host, chapter?.panel]) if (h) captureHidden.push(h);
+    for (const h of captureHidden) h.style.visibility = 'hidden';
+    // Never leave the page with hidden translations if the background does not come back.
+    captureRestore = setTimeout(endCapture, 4000);
+    return { rect, dpr: devicePixelRatio };
+  }
+
   chrome.runtime.onMessage.addListener((msg: BackgroundToContent, _sender, sendResponse) => {
+    if (dead) return false;
     switch (msg.type) {
+      case 'prepare-capture': {
+        const prep = prepareCapture(msg.id);
+        if (!prep) {
+          sendResponse(null);
+          return false;
+        }
+        // Two frames: the hidden overlays are gone from the screen before the shot.
+        requestAnimationFrame(() => requestAnimationFrame(() => sendResponse(prep)));
+        return true;
+      }
+      case 'end-capture':
+        endCapture();
+        break;
       case 'get-langs': {
         const done = [...items.values()].filter((it) => it.status === 'done' && it.result);
         const langs: PageLangs = {
@@ -394,9 +542,10 @@ function main() {
         const it = itemFor(msg.id);
         if (!it) break;
         if (msg.error.code === 'CANCELLED') {
-          // Stopped from the popup or by switching off: do not start it again by itself.
+          // Stopped from the popup or by switching off: do not start it again by itself, and the
+          // whole-page mode ends too. A single picture stopped leaves the rest of the page going.
           if (!it.docRect) dismissed.add(it.cand.el);
-          pageMode = false;
+          if (msg.error.detail === CANCELLED_ALL) pageMode = false;
           it.overlay.destroy();
           items.delete(it.id);
           break;
@@ -453,12 +602,14 @@ function main() {
       case 'result-changed':
         for (const it of items.values()) {
           if (it.result?.key !== msg.key) continue;
-          void send<RenderedTiles | null>({ type: 'get-result', key: msg.key }).then((r) => {
-            if (r) {
-              it.result = r;
-              it.overlay.setTiles(r.tiles, langsOf(r));
-            }
-          });
+          void send<RenderedTiles | null>({ type: 'get-result', key: msg.key })
+            .then(async (r) => {
+              if (!r) return;
+              const tiles = await tilesOf(r);
+              it.result = { ...r, tiles: [], tilesOmitted: undefined };
+              it.overlay.setTiles(tiles, langsOf(r));
+            })
+            .catch(() => undefined);
         }
         break;
       case 'state':
@@ -705,6 +856,13 @@ ${chapterStats(list)}`;
   const observed = new WeakSet<Element>();
   let rescanTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** Remove a picture's overlay; a job still in work for it is stopped (nobody will see it). */
+  function dropItem(it: Item) {
+    if (it.status === 'queued' || it.status === 'working') void send({ type: 'cancel', id: it.req ?? it.id }).catch(() => undefined);
+    it.overlay.destroy();
+    items.delete(it.id);
+  }
+
   function rescan() {
     if (rescanTimer) clearTimeout(rescanTimer);
     rescanTimer = setTimeout(() => {
@@ -712,18 +870,14 @@ ${chapterStats(list)}`;
       for (const [id, it] of items) {
         if (it.docRect) continue; // screen-area results are not tied to an element
         if (!it.cand.el.isConnected) {
-          it.overlay.destroy();
-          items.delete(id);
+          dropItem(it);
           continue;
         }
         if (it.cand.kind === 'img') {
           const el = it.cand.el as HTMLImageElement;
           const now = imgSrc(el);
           // A lazy picture still showing its placeholder is the same picture.
-          if (it.src && now && now !== it.src && !lazySrc(el)) {
-            it.overlay.destroy();
-            items.delete(id);
-          }
+          if (it.src && now && now !== it.src && !lazySrc(el)) dropItem(it);
         }
       }
       if (enabled) void applyCached();
@@ -759,7 +913,8 @@ ${chapterStats(list)}`;
     }
   });
   mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset', 'style', 'data-src'] });
-  document.addEventListener('load', (e) => e.target instanceof HTMLImageElement && rescan(), true);
+  const onLoad = (e: Event) => e.target instanceof HTMLImageElement && rescan();
+  document.addEventListener('load', onLoad, true);
 
   function setAuto(on: boolean) {
     autoTranslate = on && enabled;
@@ -777,7 +932,10 @@ ${chapterStats(list)}`;
   };
   addEventListener('scroll', reposition, { capture: true, passive: true });
   addEventListener('resize', reposition, { passive: true });
-  setInterval(reposition, 500);
+  const tickTimer = setInterval(() => {
+    reposition();
+    checkUrl();
+  }, 500);
   // Pictures above loading (webtoons) move everything below without a scroll event: follow at once,
   // otherwise the original shows from under a translation that lags behind for a moment.
   const ro = new ResizeObserver(reposition);
@@ -808,9 +966,7 @@ ${chapterStats(list)}`;
   let hoverCand: Candidate | null = null;
   let lastMove = 0;
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
-  addEventListener(
-    'mousemove',
-    (e) => {
+  const onMouseMove = (e: MouseEvent) => {
       const now = performance.now();
       if (now - lastMove < 120) return;
       lastMove = now;
@@ -818,7 +974,7 @@ ${chapterStats(list)}`;
         // Switched off, or this script belongs to an old version of the extension: nothing to offer.
         if (hoverBtn.style.display !== 'none') hoverBtn.style.display = 'none';
         hoverCand = null;
-        if (!alive()) hoverHost.remove();
+        if (!alive()) teardown();
         return;
       }
       if (e.composedPath().includes(hoverHost)) return;
@@ -837,9 +993,8 @@ ${chapterStats(list)}`;
       hoverBtn.style.display = 'block';
       hoverBtn.style.top = `${Math.max(8, r.top + 10)}px`;
       hoverBtn.style.left = `${Math.min(innerWidth - 120, r.right - 120)}px`;
-    },
-    { passive: true },
-  );
+  };
+  addEventListener('mousemove', onMouseMove, { passive: true });
   hoverBtn.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -938,6 +1093,84 @@ ${chapterStats(list)}`;
     root.innerHTML = `<div style="position:fixed;z-index:2147483603;bottom:20px;left:50%;transform:translateX(-50%);background:#1c2230;color:#fff;font:14px system-ui,sans-serif;padding:10px 14px;border-radius:8px">${text.replace(/[<>&]/g, '')}</div>`;
     document.documentElement.appendChild(host);
     setTimeout(() => host.remove(), 3000);
+  }
+
+  // ---- a new chapter in a single-page reader (no page load) ---------------------------------
+  // The address changes, and the pictures of the old chapter leave the page or get new addresses.
+  // Readers that only write the page number into the address keep their pictures: not a new chapter.
+  const pageKey = () => location.origin + location.pathname + location.search;
+  let lastPage = pageKey();
+  let pageCheck: ReturnType<typeof setTimeout> | null = null;
+  function checkUrl() {
+    if (dead) return;
+    const now = pageKey();
+    if (now === lastPage) return;
+    lastPage = now;
+    if (pageCheck) clearTimeout(pageCheck);
+    // Give the reader a moment to swap the pictures.
+    pageCheck = setTimeout(() => {
+      pageCheck = null;
+      const list = [...items.values()].filter((it) => !it.docRect);
+      const stale = list.filter((it) => !it.cand.el.isConnected || (it.cand.kind === 'img' && it.src && imgSrc(it.cand.el as HTMLImageElement) !== it.src));
+      if (list.length && stale.length * 2 < list.length) return;
+      onNewChapter();
+    }, 1200);
+  }
+  addEventListener('popstate', checkUrl);
+  (window as unknown as { navigation?: EventTarget }).navigation?.addEventListener('navigatesuccess', checkUrl);
+
+  function onNewChapter() {
+    pageMode = false;
+    dismissed = new WeakSet();
+    strip = [];
+    if (stripTimer) clearTimeout(stripTimer);
+    stripTimer = null;
+    if (chapter) {
+      clearInterval(chapter.timer);
+      chapter.panel.remove();
+      chapter = null;
+    }
+    hidePageProgress();
+    // Pictures of the old chapter still in the queue: stop them (the finished ones stay while their
+    // pictures are on the page; rescan removes the rest).
+    for (const it of [...items.values()]) if (it.status === 'queued' || it.status === 'working') dropItem(it);
+    rescan();
+  }
+
+  /** The extension was updated or removed: stop everything this copy runs and remove its UI. */
+  function teardown() {
+    if (dead) return;
+    dead = true;
+    const safe = (f: () => void) => {
+      try {
+        f();
+      } catch {
+        /* keep going */
+      }
+    };
+    safe(() => mo.disconnect());
+    safe(() => io.disconnect());
+    safe(() => ro.disconnect());
+    for (const t of [tickTimer, watchTimer, pingTimer]) if (t) clearInterval(t);
+    for (const t of [rescanTimer, stripTimer, pageCheck, captureRestore]) if (t) clearTimeout(t);
+    safe(() => removeEventListener('scroll', reposition, { capture: true }));
+    safe(() => removeEventListener('resize', reposition));
+    safe(() => removeEventListener('mousemove', onMouseMove));
+    safe(() => removeEventListener('popstate', checkUrl));
+    safe(() => (window as unknown as { navigation?: EventTarget }).navigation?.removeEventListener('navigatesuccess', checkUrl));
+    safe(() => document.removeEventListener('load', onLoad, true));
+    safe(() => hidePageProgress());
+    safe(() => {
+      if (chapter) {
+        clearInterval(chapter.timer);
+        chapter.panel.remove();
+        chapter = null;
+      }
+    });
+    for (const it of items.values()) safe(() => it.overlay.destroy());
+    items.clear();
+    safe(() => hoverHost.remove());
+    window.__aitContentLoaded = false;
   }
 
   // Ask for the state; the service worker may be waking up, so try a few times.

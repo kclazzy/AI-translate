@@ -62,11 +62,11 @@ export class TaskQueue {
     const e = this.entries.get(key);
     if (!e) return false;
     e.controller.abort();
-    if (!e.started) {
-      this.entries.delete(key);
-      e.reject(new AppError('CANCELLED'));
-      this.emit();
-    }
+    // Forget it at once, running or not: adding the same key again starts a fresh task instead of
+    // handing back the promise that is about to reject with CANCELLED.
+    this.entries.delete(key);
+    if (!e.started) e.reject(new AppError('CANCELLED'));
+    this.emit();
     return true;
   }
 
@@ -141,7 +141,8 @@ export class TaskQueue {
         )
         .finally(() => {
           this.running--;
-          this.entries.delete(e.key);
+          // A cancelled task may already have been replaced by a new one with the same key.
+          if (this.entries.get(e.key) === e) this.entries.delete(e.key);
           this.emit();
           this.pump();
         });
@@ -149,14 +150,23 @@ export class TaskQueue {
   }
 }
 
-/** Run async work over items with bounded parallelism, preserving order of results. */
+/**
+ * Run async work over items with bounded parallelism, preserving order of results. After the first
+ * failure no new item is started (each one may be a paid request); the failure is thrown.
+ */
 export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let i = 0;
+  let failed = false;
   const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
-    while (i < items.length) {
+    while (i < items.length && !failed) {
       const idx = i++;
-      out[idx] = await fn(items[idx], idx);
+      try {
+        out[idx] = await fn(items[idx], idx);
+      } catch (e) {
+        failed = true;
+        throw e;
+      }
     }
   });
   await Promise.all(workers);

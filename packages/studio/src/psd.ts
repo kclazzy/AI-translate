@@ -1,6 +1,28 @@
 import { writePsdUint8Array, type Layer } from 'ag-psd';
 import { ctxMeasurer, drawBlock, layoutBlock, resolveStyle, shouldDraw, targetBox, type ImageBackend, type PageResult, type StyleDefaults, type TiledImage } from '@ait/core';
 
+/** Photoshop does not open files longer or wider than this. */
+export const PSD_MAX_SIDE = 30000;
+
+/**
+ * The biggest canvas this device draws reliably. iPhone / iPad Safari gives up above 16.7 Mpx
+ * (the canvas silently stays blank); phones run out of memory long before desktop browsers do.
+ */
+export function maxCanvasPixels(ua = typeof navigator !== 'undefined' ? navigator.userAgent : '', touchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints ?? 0 : 0): number {
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && touchPoints > 1);
+  if (ios) return 16_777_216;
+  if (/Android|Mobile/.test(ua)) return 50_000_000;
+  return 120_000_000;
+}
+
+/** Why this page cannot be saved as PSD here, or null when it can. */
+export function psdTooBig(width: number, height: number, limit = maxCanvasPixels()): 'side' | 'pixels' | null {
+  if (width > PSD_MAX_SIDE || height > PSD_MAX_SIDE) return 'side';
+  // The original and the cleaned picture are each drawn on one canvas of the full page.
+  if (width * height > limit) return 'pixels';
+  return null;
+}
+
 /**
  * A page as a Photoshop file: the original (hidden), the cleaned picture and one layer per
  * translated text — a picture of the letters plus the text itself, so it can be retyped there.
@@ -8,6 +30,7 @@ import { ctxMeasurer, drawBlock, layoutBlock, resolveStyle, shouldDraw, targetBo
 export function exportPsd(backend: ImageBackend, page: PageResult, original: TiledImage, cleaned: TiledImage, d: StyleDefaults): Uint8Array {
   const W = page.width;
   const H = page.height;
+  if (psdTooBig(W, H)) throw new Error(`Page ${W}×${H} is too big for PSD on this device`);
   const whole = (img: TiledImage) => {
     const c = backend.createCanvas(W, H);
     img.drawRegion(c.getContext('2d'), 0, 0, W, H, W, H);

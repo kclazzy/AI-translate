@@ -52,7 +52,7 @@ export class OpenAICompatibleProvider implements LlmProvider {
       const res = await safeFetch(this.fetchImpl, joinUrl(this.config.baseUrl, 'chat/completions'), { method: 'POST', headers, body: JSON.stringify(body), signal }, this.config.label);
       if (!res.ok) throw await httpError(res, this.config.label, this.config.baseUrl, this.config.model);
       const json = (await res.json()) as {
-        choices?: { message?: { content?: string | { type: string; text?: string }[] } }[];
+        choices?: { message?: { content?: string | { type: string; text?: string }[] }; finish_reason?: string }[];
         usage?: { prompt_tokens?: number; completion_tokens?: number };
         model?: string;
       };
@@ -64,6 +64,7 @@ export class OpenAICompatibleProvider implements LlmProvider {
         inputTokens: json.usage?.prompt_tokens ?? 0,
         outputTokens: json.usage?.completion_tokens ?? 0,
         model: json.model ?? this.config.model,
+        ...(json.choices?.[0]?.finish_reason === 'length' ? { truncated: true } : {}),
       };
     } finally {
       dispose();
@@ -116,7 +117,7 @@ export class OpenAICompatibleProvider implements LlmProvider {
       const text = stripThinking(json.message?.content ?? '');
       if (!text) throw new AppError('TRANSLATION_INVALID_OUTPUT', { detail: tr('Модель вернула пустой ответ') });
       const tps = json.eval_count && json.eval_duration ? json.eval_count / (json.eval_duration / 1e9) : undefined;
-      return { text, inputTokens: json.prompt_eval_count ?? 0, outputTokens: json.eval_count ?? 0, model: json.model ?? this.config.model, tokensPerSecond: tps };
+      return { text, inputTokens: json.prompt_eval_count ?? 0, outputTokens: json.eval_count ?? 0, model: json.model ?? this.config.model, tokensPerSecond: tps, ...(json.done_reason === 'length' ? { truncated: true } : {}) };
     } finally {
       dispose();
     }

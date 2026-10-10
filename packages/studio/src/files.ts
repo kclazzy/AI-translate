@@ -20,7 +20,8 @@ export async function pdfToImages(bytes: Uint8Array, name: string, onProgress?: 
   const pdfjs = await import('pdfjs-dist');
   const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
   pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
-  const doc = await pdfjs.getDocument({ data: bytes, enableXfa: false }).promise;
+  const task = pdfjs.getDocument({ data: bytes, enableXfa: false });
+  const doc = await task.promise;
   if (doc.numPages > MAX_PDF_PAGES) throw new AppError('IMAGE_TOO_LARGE', { retryable: false, detail: `PDF has ${doc.numPages} pages (max ${MAX_PDF_PAGES})` });
   const out: ImportedImage[] = [];
   for (let i = 1; i <= doc.numPages; i++) {
@@ -37,7 +38,7 @@ export async function pdfToImages(bytes: Uint8Array, name: string, onProgress?: 
     onProgress?.(i, doc.numPages);
     page.cleanup();
   }
-  await doc.destroy();
+  await task.destroy();
   return out;
 }
 

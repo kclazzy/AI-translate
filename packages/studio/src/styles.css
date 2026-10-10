@@ -376,3 +376,19 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ait-panel-soft { padding: 8px 10px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper); }
 .ait-ocr-frame.crop { border-color: #c8205f; background: transparent; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .45); }
 .ait-ocr-frame.crop span { background: #c8205f; }
+
+/* Brush preview: a canvas over the visible part of the stage only. */
+.ait-stroke-overlay { position: absolute; z-index: 4; pointer-events: none; }
+/* Minimap of a long strip: picture seams, blocks, remarks and the part in view. */
+.ait-minimap {
+  position: absolute; right: 18px; top: 8px; bottom: 8px; width: 22px; z-index: 6; cursor: pointer; touch-action: none;
+  background: color-mix(in srgb, var(--paper) 88%, transparent); border: 1px solid var(--rule); border-radius: 6px;
+}
+.ait-minimap-view { position: absolute; left: 1px; right: 1px; background: color-mix(in srgb, var(--magenta) 14%, transparent); border: 1px solid color-mix(in srgb, var(--magenta) 55%, transparent); border-radius: 3px; pointer-events: none; }
+.ait-minimap-mark { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--rule); pointer-events: none; }
+.ait-minimap-dot { position: absolute; left: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: color-mix(in srgb, currentColor 45%, transparent); }
+.ait-minimap-dot.remark { width: 10px; height: 10px; margin: -5px 0 0 -5px; background: #e0a100; box-shadow: 0 0 0 1px var(--paper); }
+.ait-minimap-dot.selected { background: var(--magenta); }
+/* Unsaved edits on a page of the page list. */
+.ait-unsaved { color: var(--magenta); font-weight: 700; margin-left: 2px; }
+.ait-stack-skipped { font-size: 12px; padding: 2px 8px; }

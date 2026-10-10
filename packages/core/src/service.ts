@@ -7,7 +7,7 @@ import { renderOutput, runCrossCheck, runPipeline, styleDefaultsFor, type Render
 import type { AppSettings } from './settings';
 import type { IdbStore } from './storage/idb';
 import type { SecretStore } from './storage/secrets';
-import { emptyContext, type TranslationContext } from './translate/context';
+import { emptyContext, mergeContext, type TranslationContext } from './translate/context';
 import type { PageResult, StageEvent, TextBlock, Usage } from './types';
 import { sha256Hex, sniffImageMime } from './util/bytes';
 import { tr } from './i18n';
@@ -15,10 +15,11 @@ import type { Inpainter } from './pipeline/standalone';
 import { CHECKER_LABELS, checkerIsCloud, machineTranslate } from './translate/crosscheck';
 import { translateBlocks } from './translate/translator';
 import { createProvider } from './llm/presets';
-import { isLocalProvider } from './llm/privacy';
+import { assertPrivacy, isLocalProvider } from './llm/privacy';
 import { isOllama } from './llm/openai';
 import { ollamaUnloadAll } from './llm/discover';
-import { cropRows, pageForSpan, planChunks, stitchParts, type StripPart } from './image/strip';
+import { cropRows, pageForSpan, planChunks, planStrip, shiftBlock, stitchChunk, type StripPart } from './image/strip';
+import { KeyedMutex } from './util/mutex';
 
 export interface StoredResult {
   key: string;
@@ -38,6 +39,11 @@ export interface StoredResult {
   parts?: string[];
   /** Text size scale the picture was drawn with (settings → fonts.scale). */
   fontScale?: number;
+  /**
+   * Made with lighter settings after the model ran out of video memory (smaller context / picture):
+   * stored under its own key, so the full-quality key is tried again next time.
+   */
+  degraded?: boolean;
 }
 
 /** Fonts that change the cached result: the text size scale only re-draws, so it is left out. */
@@ -91,6 +97,8 @@ export function seriesKeyFromUrl(url: string | undefined): string | undefined {
 export class TranslateService {
   /** LaMa in this browser (set by the extension when the model is downloaded). */
   inpainter?: Inpainter;
+  /** Read-modify-write of series contexts and usage totals by pages translated at the same time. */
+  private locks = new KeyedMutex();
   constructor(
     private db: IdbStore,
     private secrets: SecretStore,
@@ -138,25 +146,28 @@ export class TranslateService {
         if (p) config[k] = { ...p, keepAliveMin: Math.max(p.keepAliveMin ?? 0, opts.keepAliveMin) };
       }
     }
-    const key = await this.cacheKey(bytes, config, { generic: opts.generic, fonts: lookOf(settings.fonts) });
+    const baseKey = await this.cacheKey(bytes, config, { generic: opts.generic, fonts: lookOf(settings.fonts) });
     if (!opts.force) {
-      const hit = await this.db.get<StoredResult>('results', key);
+      const hit = await this.db.get<StoredResult>('results', baseKey);
       if (hit) {
         // Only the text size changed in the settings: draw the text again, no model needed.
         if ((hit.fontScale ?? 1) !== (settings.fonts.scale ?? 1) && !hit.strip) {
-          const again = await this.saveEdited(key, hit.page);
+          const again = await this.saveEdited(baseKey, hit.page);
           opts.onStage?.({ stage: 'done', progress: 1, message: 'cache' });
           return { result: again, cached: true };
         }
         hit.lastHitAt = new Date().toISOString();
-        void this.db.put('results', key, hit);
+        void this.db.put('results', baseKey, hit);
         opts.onStage?.({ stage: 'done', progress: 1, message: 'cache' });
         return { result: hit, cached: true };
       }
     }
     const context = opts.generic ? undefined : await this.getContext(seriesKey);
+    let key = baseKey;
     try {
-      const out = await this.runFitting(config, opts, (cfg) => runPipeline({ bytes, mime: realMime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter }));
+      const { value: out, lighter } = await this.runFitting(config, opts, (cfg) => runPipeline({ bytes, mime: realMime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter }));
+      // A result made with lighter settings must not answer for the full-quality key.
+      if (lighter) key = `${baseKey}:lite`;
       opts.onStage?.({ stage: 'rendering' });
       const rendered = await renderOutput(this.backend, out, styleDefaultsFor(config, settings.fonts));
       const cleanedTiles = await Promise.all(out.cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') })));
@@ -174,9 +185,19 @@ export class TranslateService {
         createdAt: now,
         lastHitAt: now,
         fontScale: settings.fonts.scale,
+        ...(lighter ? { degraded: true } : {}),
       };
       await this.db.put('results', key, result);
-      if (out.context && seriesKey) await this.db.put('contexts', seriesKey, out.context);
+      if (seriesKey && !opts.generic) {
+        if (out.contextUpdate) {
+          // Merge into the latest stored context: another page of the series may have finished meanwhile.
+          const update = out.contextUpdate;
+          await this.locks.run(`context:${seriesKey}`, async () => {
+            const latest = (await this.getContext(seriesKey)) ?? emptyContext(seriesKey, seriesKey);
+            await this.db.put('contexts', seriesKey, mergeContext(latest, update));
+          });
+        } else if (out.context) await this.db.put('contexts', seriesKey, out.context);
+      }
       await this.recordUsage(rendered.page.usage);
       if (settings.saveHistory) await this.addHistory({ key, url: opts.sourceUrl, title: opts.title, date: now, pages: 1, targetLang: config.targetLang, model: (config.translator ?? config.vision)?.model ?? 'engine', status: 'done' });
       return { result, cached: false };
@@ -208,6 +229,15 @@ export class TranslateService {
         return ref ? this.getResult(ref) : undefined;
       }),
     );
+    // Used again: keep the pieces and their glued parent out of the cache pruning.
+    const touched = new Set<string>();
+    for (const r of known) {
+      if (!r) continue;
+      for (const k of [r.key, r.strip?.parent]) if (k && !touched.has(k)) {
+        touched.add(k);
+        await this.touch(k);
+      }
+    }
     // Text size changed since: draw the strips again (each parent once), then take the pieces.
     const redrawn = new Set<string>();
     for (const [i, r] of known.entries()) {
@@ -223,20 +253,25 @@ export class TranslateService {
     const todo = parts.map((_, i) => i).filter((i) => !known[i]);
     for (const [i, r] of known.entries()) if (r) opts.onPart(i, r, true);
     if (!todo.length) return;
-    const stitched = await stitchParts(this.backend, todo.map((i) => parts[i]));
-    const chunks = planChunks(stitched.spans.map((s) => s.h), stitched.calmAfter);
+    // Sizes and seams first (one picture in memory at a time), then each chunk is glued on its own:
+    // a whole chapter is never held in memory at once.
+    const todoParts = todo.map((i) => parts[i]);
+    const plan = await planStrip(this.backend, todoParts);
+    const chunks = planChunks(plan.spans.map((s) => s.h), plan.calmAfter);
     for (const chunk of chunks) {
       opts.onChunk?.(chunk.map((j) => todo[j]));
-      const top = stitched.spans[chunk[0]].y;
-      const last = stitched.spans[chunk[chunk.length - 1]];
-      const band = this.backend.createCanvas(stitched.image.width, last.y + last.h - top);
-      stitched.image.drawRegion(band.getContext('2d'), 0, top, stitched.image.width, last.y + last.h - top, stitched.image.width, last.y + last.h - top);
+      const top = plan.spans[chunk[0]].y;
+      const glued = await stitchChunk(this.backend, todoParts, plan, chunk);
+      const band = this.backend.createCanvas(glued.width, glued.height);
+      const bctx = band.getContext('2d');
+      for (const t of glued.tiles) bctx.drawImage(t.canvas, 0, t.y);
       const bytes = await this.backend.encode(band, 'image/png');
       const { result } = await this.translate(bytes, 'image/png', opts);
-      const spans = chunk.map((j) => ({ y: stitched.spans[j].y - top, h: stitched.spans[j].h }));
-      const derived = await this.deriveParts(result, spans, chunk.map((j) => parts[todo[j]]));
+      const spans = chunk.map((j) => ({ y: plan.spans[j].y - top, h: plan.spans[j].h }));
+      const derived = await this.deriveParts(result, spans, chunk.map((j) => todoParts[j]));
       for (const [n, j] of chunk.entries()) {
-        await this.db.put('kv', `strip:${partKeys[todo[j]]}`, derived[n].key);
+        // A lighter (out-of-memory) result is shown but not remembered: next time try full quality.
+        if (!result.degraded) await this.db.put('kv', `strip:${partKeys[todo[j]]}`, derived[n].key);
         opts.onPart(todo[j], derived[n], false);
       }
     }
@@ -273,11 +308,11 @@ export class TranslateService {
    * A local model that ran out of video memory gets three more tries, each lighter than the last:
    * other models unloaded, then a smaller context, then a smaller context and picture.
    */
-  private async runFitting<T>(config: PipelineConfig, opts: TranslateOptions, run: (cfg: PipelineConfig) => Promise<T>): Promise<T> {
+  private async runFitting<T>(config: PipelineConfig, opts: TranslateOptions, run: (cfg: PipelineConfig) => Promise<T>): Promise<{ value: T; lighter: boolean }> {
     let cfg = config;
     for (let attempt = 0; ; attempt++) {
       try {
-        return await run(cfg);
+        return { value: await run(cfg), lighter: cfg !== config };
       } catch (e) {
         const err = toAppError(e);
         const vision = cfg.vision;
@@ -327,6 +362,8 @@ export class TranslateService {
     }
     const cfg = config.translator ?? config.vision;
     if (!cfg) throw new AppError('NOT_CONFIGURED', { retryable: false });
+    // The texts leave the device only where the privacy mode allows.
+    assertPrivacy(config.privacy, cfg, 'text');
     const provider = createProvider(cfg, this.fetchImpl);
     const res = await translateBlocks(provider, { sourceLang: from, targetLang: target, profile: { ...config.profile, customPrompt: 'Translate literally, keep the meaning exactly.' }, glossary: [], translateSfx: true }, texts.map((text, i) => ({ id: `t${i}`, type: 'DIALOGUE', text })), { signal });
     await this.recordUsage(res.usage);
@@ -341,6 +378,12 @@ export class TranslateService {
   async saveEdited(key: string, page: PageResult, cleaned?: TiledImage): Promise<StoredResult> {
     const stored = await this.getResult(key);
     if (!stored) throw new AppError('UNKNOWN', { message: 'Result not found', retryable: false });
+    // A picture cut out of a glued strip: the edit goes into the strip, which is cut again, so a
+    // later re-cut (another picture edited, text size changed) keeps it.
+    if (stored.strip) {
+      const synced = await this.saveIntoParent(stored, page, cleaned);
+      if (synced) return synced;
+    }
     const settings = await this.getSettings();
     let image = cleaned;
     if (!image) image = await tilesToImage(this.backend, stored.page.width, stored.page.height, stored.cleaned);
@@ -360,6 +403,51 @@ export class TranslateService {
     return next;
   }
 
+  /** Put the edits of one picture of a strip into its glued parent and cut the parent again. */
+  private async saveIntoParent(part: StoredResult, page: PageResult, cleaned?: TiledImage): Promise<StoredResult | undefined> {
+    const parent = part.strip ? await this.getResult(part.strip.parent) : undefined;
+    if (!part.strip || !parent?.parts?.includes(part.key)) return undefined;
+    const dy = part.strip.y;
+    const toParent = (b: TextBlock): TextBlock => {
+      const { continued: _continued, ...rest } = b;
+      return shiftBlock(rest, -dy);
+    };
+    const before = new Set(part.page.blocks.map((b) => b.id));
+    const after = new Map(page.blocks.map((b) => [b.id, b]));
+    const blocks: TextBlock[] = [];
+    for (const b of parent.page.blocks) {
+      const edited = after.get(b.id);
+      if (edited) {
+        blocks.push(toParent(edited));
+        after.delete(b.id);
+      } else if (!before.has(b.id)) blocks.push(b); // another picture's block
+      // else: removed in this picture
+    }
+    for (const b of after.values()) blocks.push(toParent(b)); // added in this picture
+    let parentCleaned: TiledImage | undefined;
+    if (cleaned) {
+      parentCleaned = await tilesToImage(this.backend, parent.page.width, parent.page.height, parent.cleaned);
+      for (const t of parentCleaned.tiles) {
+        const ctx = t.canvas.getContext('2d');
+        for (const s of cleaned.tiles) {
+          const y = dy + s.y;
+          if (y + s.h <= t.y || y >= t.y + t.h) continue;
+          ctx.drawImage(s.canvas, 0, y - t.y);
+        }
+      }
+    }
+    await this.saveEdited(parent.key, { ...parent.page, blocks, targetLang: page.targetLang }, parentCleaned);
+    return this.getResult(part.key);
+  }
+
+  /** Mark a cached result as used now (cache pruning drops results not used for a while). */
+  private async touch(key: string): Promise<void> {
+    const r = await this.getResult(key);
+    if (!r) return;
+    r.lastHitAt = new Date().toISOString();
+    await this.db.put('results', key, r);
+  }
+
   async addHistory(e: HistoryEntry): Promise<void> {
     await this.db.put('history', `${e.date}:${e.key}`, e);
   }
@@ -371,14 +459,17 @@ export class TranslateService {
 
   async recordUsage(usage: Usage[]): Promise<void> {
     if (!usage.length) return;
-    const totals = (await this.db.get<UsageTotals>('usage', 'totals')) ?? { pages: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
-    totals.pages++;
-    for (const u of usage) {
-      totals.inputTokens += u.inputTokens;
-      totals.outputTokens += u.outputTokens;
-      totals.costUsd += u.costUsd;
-    }
-    await this.db.put('usage', 'totals', totals);
+    // One update at a time: pages finishing together must not lose each other's counts.
+    await this.locks.run('usage', async () => {
+      const totals = (await this.db.get<UsageTotals>('usage', 'totals')) ?? { pages: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
+      totals.pages++;
+      for (const u of usage) {
+        totals.inputTokens += u.inputTokens;
+        totals.outputTokens += u.outputTokens;
+        totals.costUsd += u.costUsd;
+      }
+      await this.db.put('usage', 'totals', totals);
+    });
   }
 
   async usage(): Promise<UsageTotals> {
@@ -412,11 +503,16 @@ export class TranslateService {
   async pruneCache(days: number): Promise<number> {
     const cutoff = Date.now() - days * 86_400_000;
     let n = 0;
+    const kept = new Set<string>();
     for (const [key, v] of await this.db.entries<StoredResult>('results')) {
       if (Date.parse(v.lastHitAt) < cutoff) {
         await this.db.delete('results', key);
         n++;
-      }
+      } else kept.add(key);
+    }
+    // Links from a strip picture to its cut-out result: drop those whose result is gone.
+    for (const [key, ref] of await this.db.entries<string>('kv')) {
+      if (key.startsWith('strip:') && !kept.has(ref)) await this.db.delete('kv', key);
     }
     return n;
   }

@@ -30,7 +30,10 @@ function shortBody(body: string): string {
   return body.slice(0, 200);
 }
 
-export const OUT_OF_MEMORY_RE = /out of memory|cudaMalloc|failed to allocate|requires more system memory|insufficient memory|not enough memory|unable to allocate|memory allocation|OOM\b/i;
+/** «OOM» only as a word of its own: not inside «bloom», «room», «zoom». */
+export const OUT_OF_MEMORY_RE = /out of memory|cudaMalloc|failed to allocate|requires more system memory|insufficient memory|not enough memory|unable to allocate|memory allocation|\bOOM\b/i;
+
+const MODEL_NOT_FOUND_RE = /model .*not found|no such model|model_not_found/i;
 
 /** Map an HTTP failure from any provider to a stable error code with a hint the user can act on. */
 export async function httpError(res: Response, providerLabel: string, url = '', model = ''): Promise<AppError> {
@@ -54,7 +57,8 @@ export async function httpError(res: Response, providerLabel: string, url = '', 
     });
   }
   // Ollama / LM Studio / llama.cpp: the model did not fit (CUDA, Metal or system memory).
-  if (res.status >= 400 && OUT_OF_MEMORY_RE.test(msg)) {
+  // A missing model is reported as such even when its name happens to look like a memory word.
+  if (res.status >= 400 && res.status !== 404 && !MODEL_NOT_FOUND_RE.test(msg) && OUT_OF_MEMORY_RE.test(msg)) {
     return new AppError('OUT_OF_MEMORY', { retryable: true, detail: tr('{0}: {1}. Закройте другие модели и программы, занимающие видеокарту, или выберите модель поменьше.', provider, msg) });
   }
   if (res.status === 401 || res.status === 403) return new AppError('INVALID_API_KEY', { detail: `${provider}: ${msg || `HTTP ${res.status}`}` });
@@ -64,7 +68,7 @@ export async function httpError(res: Response, providerLabel: string, url = '', 
   }
   if (res.status === 413) return new AppError('IMAGE_TOO_LARGE', { detail: `${provider}: ${msg}` });
   if (res.status === 408 || res.status === 504) return new AppError('TIMEOUT', { detail: `${provider}: ${msg}` });
-  if (res.status === 404 || /model .*not found|no such model|model_not_found/i.test(msg)) {
+  if (res.status === 404 || MODEL_NOT_FOUND_RE.test(msg)) {
     const pull = name === 'Ollama' && model ? tr(' Скачайте её в Настройки → Локальные модели или выполните: ollama pull {0}', model) : name === 'LM Studio' ? tr(' Загрузите модель в LM Studio и проверьте её имя в настройках.') : tr(' Проверьте адрес API и имя модели в настройках.');
     return new AppError('PROVIDER_UNAVAILABLE', { retryable: false, detail: tr('Модель «{0}» не найдена на сервере ({1}).{2}', model || '?', provider, pull) });
   }

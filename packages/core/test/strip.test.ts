@@ -77,8 +77,10 @@ describe('pictures of one strip translated together', () => {
     await svc.translateStrip(parts.map((bytes) => ({ bytes, mime: 'image/png' })), { generic: true, onPart: (i, r) => (got[i] = r) });
     expect(mock.calls.length).toBe(1);
     expect(got.map((r) => r.page.height)).toEqual([H, H]);
-    // The block belongs to one picture only, in that picture's coordinates.
-    expect(got[0].page.blocks.length + got[1].page.blocks.length).toBe(1);
+    // The block belongs to one picture (the one holding the centre of its text) and, as its text
+    // crosses the seam, the other picture carries a copy marked `continued`.
+    expect(got.map((r) => r.page.blocks.length)).toEqual([1, 1]);
+    expect(got.map((r) => !!r.page.blocks[0].continued).sort()).toEqual([false, true]);
     // Both halves of the bubble lost the English lettering (the second half was not "missed").
     for (const [i, r] of got.entries()) {
       const img = await napiBackend.decode(r.cleaned[0].bytes, 'image/png');
@@ -104,5 +106,16 @@ describe('pictures of one strip translated together', () => {
     await svc.translateStrip(parts.map((bytes) => ({ bytes, mime: 'image/png' })), { generic: true, onPart: (i, _r, cached) => (again[i] = cached) });
     expect(again).toEqual([true, true]);
     expect(mock.calls.length).toBe(1);
+
+    // An edit of one picture is kept when the strip is cut again (another picture edited).
+    const own = got.findIndex((r) => !r.page.blocks[0].continued);
+    const other = 1 - own;
+    const edited = { ...got[own].page, blocks: got[own].page.blocks.map((b) => ({ ...b, translatedText: 'ПРАВКА', edited: true })) };
+    await svc.saveEdited(got[own].key, edited);
+    await svc.saveEdited(got[other].key, (await svc.getResult(got[other].key))!.page);
+    for (const r of got) {
+      const now = (await svc.getResult(r.key))!;
+      expect(now.page.blocks.map((b) => b.translatedText)).toEqual(['ПРАВКА']);
+    }
   });
 });
