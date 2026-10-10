@@ -2,7 +2,7 @@ import { deleteLama, downloadLama, lamaDownloaded, lamaInpainter } from '../offs
 import { browserBackend, TranslateService } from '@ait/core';
 import { downloadFile, type StudioPlatform } from '@ait/studio';
 import { db, loadSettings, saveSettings, secrets } from '../shared/store';
-import { installExtensionUpdate } from './updater';
+import { installExtensionUpdate, pickUpdateFolder } from './updater';
 
 /** LaMa needs WebAssembly and the Cache API (where the model is kept). */
 const lamaHere = typeof caches !== 'undefined' && typeof WebAssembly !== 'undefined';
@@ -21,6 +21,7 @@ export function extensionPlatform(): StudioPlatform {
     notifyResultChanged: (key) => void chrome.runtime.sendMessage({ type: 'result-changed', key }).catch(() => undefined),
     version: chrome.runtime.getManifest().version,
     installUpdate: installExtensionUpdate,
+    pickUpdateFolder,
     setupReady: (params) => {
       // Continue the translation the user started before the helper opened.
       const tabId = Number(params.get('resume'));

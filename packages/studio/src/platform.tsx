@@ -17,6 +17,8 @@ export interface StudioPlatform {
   version: string;
   /** Optional: install an update from inside the app (reports progress as text + percent). */
   installUpdate?(info: UpdateInfo, progress: (text: string, pct?: number) => void): Promise<void>;
+  /** Choose (or allow again) the folder the update writes to; call it first thing in a click handler. */
+  pickUpdateFolder?(): Promise<void>;
   /** Optional: the setup helper finished; continue what the user started (params of the page URL). */
   setupReady?(params: URLSearchParams): void;
   /** Optional: LaMa running in this browser (download the model once, then it redraws art under text). */

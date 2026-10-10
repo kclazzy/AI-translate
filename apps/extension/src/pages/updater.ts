@@ -52,17 +52,40 @@ async function resolveExtensionDir(picked: FileSystemDirectoryHandle): Promise<F
   return dir;
 }
 
-async function ensurePermission(dir: DirHandle): Promise<boolean> {
+/** Only checks: asking for permission needs a click (a user gesture), see pickUpdateFolder. */
+async function hasPermission(dir: DirHandle): Promise<boolean> {
   if (!dir.queryPermission) return true;
-  if ((await dir.queryPermission({ mode: 'readwrite' })) === 'granted') return true;
-  return (await dir.requestPermission?.({ mode: 'readwrite' })) === 'granted';
+  return (await dir.queryPermission({ mode: 'readwrite' })) === 'granted';
 }
 
-async function pickDir(): Promise<FileSystemDirectoryHandle> {
+/** Thrown when the extension folder must be chosen (or allowed again) with a click. */
+export class NeedFolderError extends Error {
+  override name = 'NeedFolder';
+}
+
+/** The remembered folder whose permission the browser forgot: allowed again on the next click. */
+let pendingDir: DirHandle | null = null;
+
+/**
+ * Choose the extension folder (or allow the remembered one again). Must be the FIRST thing a click
+ * handler calls: the browser shows the folder dialog only right after a click, before any await.
+ */
+export async function pickUpdateFolder(): Promise<void> {
+  const remembered = pendingDir;
+  if (remembered?.requestPermission) {
+    // Called synchronously from the click: the permission prompt is allowed.
+    const p = remembered.requestPermission({ mode: 'readwrite' });
+    if ((await p) === 'granted') {
+      pendingDir = null;
+      return;
+    }
+  }
   const picker = (window as unknown as { showDirectoryPicker?: (o: object) => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker;
   if (!picker) throw new Error(tr('Этот браузер не умеет обновлять расширение сам. Скачайте новую версию со страницы релизов.'));
-  alert(tr('Выберите папку, в которую распаковано расширение (ту, что указана в chrome://extensions). Это нужно один раз: дальше обновления будут ставиться одной кнопкой.'));
-  return picker({ mode: 'readwrite', id: 'ait-extension' });
+  const picked = await picker({ mode: 'readwrite', id: 'ait-extension' });
+  const dir = await resolveExtensionDir(picked);
+  await db.put('kv', HANDLE_KEY, dir);
+  pendingDir = null;
 }
 
 async function writeFile(root: FileSystemDirectoryHandle, path: string, data: Uint8Array): Promise<void> {
@@ -92,8 +115,13 @@ export async function installExtensionUpdate(info: UpdateInfo, progress: (text: 
   if (!asset) throw new Error(tr('Не удалось найти файл новой версии. Скачайте его со страницы релизов.'));
 
   // 1. The extension folder (asked once, then remembered).
+  // The folder dialog and the permission prompt need a click, so they are not shown from here:
+  // the settings page shows a button that calls pickUpdateFolder and then starts the update again.
   let dir = (await db.get<FileSystemDirectoryHandle>('kv', HANDLE_KEY)) ?? null;
-  if (dir && !(await ensurePermission(dir as DirHandle))) dir = null;
+  if (dir && !(await hasPermission(dir as DirHandle))) {
+    pendingDir = dir as DirHandle;
+    throw new NeedFolderError(tr('Браузер просит заново разрешить запись в папку расширения.'));
+  }
   if (dir) {
     try {
       dir = await resolveExtensionDir(dir);
@@ -102,9 +130,8 @@ export async function installExtensionUpdate(info: UpdateInfo, progress: (text: 
     }
   }
   if (!dir) {
-    dir = await resolveExtensionDir(await pickDir());
-    if (!(await ensurePermission(dir as DirHandle))) throw new Error(tr('Нет разрешения на запись в папку расширения.'));
-    await db.put('kv', HANDLE_KEY, dir);
+    pendingDir = null;
+    throw new NeedFolderError(tr('Выберите папку, в которую распаковано расширение (ту, что указана в chrome://extensions). Это нужно один раз: дальше обновления будут ставиться одной кнопкой.'));
   }
 
   // 2. Download and check the archive before touching anything.

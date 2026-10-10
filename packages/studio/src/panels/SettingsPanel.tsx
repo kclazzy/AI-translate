@@ -791,7 +791,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
         </div>
         <StorageLine />
         <div style={{ marginTop: 14 }}>
-          <span id="ait-update"><UpdateCheck current={platform.version} install={platform.installUpdate} autoCheck={params.get('update') === '1'} /></span>
+          <span id="ait-update"><UpdateCheck current={platform.version} install={platform.installUpdate} pickFolder={platform.pickUpdateFolder} autoCheck={params.get('update') === '1'} /></span>
         </div>
         <div style={{ marginTop: 14, display: 'grid', gap: 6 }} data-testid="settings-file">
           <b>{tr('Настройки в файл')}</b>

@@ -656,8 +656,8 @@ function ModelsFolder({ settings, update, needGb, onRecheck }: { settings: AppSe
  * "Check for updates" with an in-app install when the host supports it
  * (the extension rewrites its own folder and reloads; Android downloads the APK).
  */
-export function UpdateCheck({ current, compact, install, autoCheck }: { current: string; compact?: boolean; install?: (info: UpdateInfo, progress: (text: string, pct?: number) => void) => Promise<void>; autoCheck?: boolean }) {
-  const [state, setState] = useState<{ busy: boolean; info?: UpdateInfo; error?: string }>({ busy: false });
+export function UpdateCheck({ current, compact, install, pickFolder, autoCheck }: { current: string; compact?: boolean; install?: (info: UpdateInfo, progress: (text: string, pct?: number) => void) => Promise<void>; pickFolder?: () => Promise<void>; autoCheck?: boolean }) {
+  const [state, setState] = useState<{ busy: boolean; info?: UpdateInfo; error?: string; needFolder?: string }>({ busy: false });
   const [inst, setInst] = useState<{ text: string; pct?: number } | null>(null);
   const run = async () => {
     setState({ busy: true });
@@ -673,12 +673,25 @@ export function UpdateCheck({ current, compact, install, autoCheck }: { current:
   const doInstall = async () => {
     if (!install || !state.info) return;
     setInst({ text: tr('начинаю…') });
+    setState((s) => ({ ...s, error: undefined, needFolder: undefined }));
     try {
       await install(state.info, (text, pct) => setInst({ text, pct }));
     } catch (e) {
       setInst(null);
-      if ((e as Error).name !== 'AbortError') setState((s) => ({ ...s, error: (e as Error).message }));
+      const err = e as Error;
+      if (err.name === 'NeedFolder' && pickFolder) setState((s) => ({ ...s, needFolder: err.message }));
+      else if (err.name !== 'AbortError') setState((s) => ({ ...s, error: err.message }));
     }
+  };
+  // The folder dialog opens only straight from a click: pickFolder must be the first call here.
+  const chooseFolder = () => {
+    if (!pickFolder) return;
+    pickFolder().then(
+      () => void doInstall(),
+      (e: Error) => {
+        if (e.name !== 'AbortError') setState((s) => ({ ...s, error: e.message }));
+      },
+    );
   };
   const i = state.info;
   return (
@@ -711,6 +724,14 @@ export function UpdateCheck({ current, compact, install, autoCheck }: { current:
               <i style={{ width: `${inst.pct}%` }} />
             </span>
           ) : null}
+        </span>
+      ) : null}
+      {state.needFolder ? (
+        <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }} data-testid="update-folder">
+          <small>{state.needFolder}</small>
+          <button type="button" className="ait-btn small" onClick={chooseFolder}>
+            {tr('Выбрать папку расширения')}
+          </button>
         </span>
       ) : null}
       {state.error ? <span style={{ color: 'var(--err)' }}>{state.error}</span> : null}

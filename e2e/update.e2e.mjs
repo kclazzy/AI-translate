@@ -91,7 +91,12 @@ try {
     await put(dir, 'manifest.json', JSON.stringify(m));
     await put(await dir.getDirectoryHandle('assets', { create: true }), 'old.js', 'old');
     await put(dir, 'notes.txt', 'mine');
-    window.showDirectoryPicker = async () => dir;
+    // Like the real dialog: only straight from a click (user activation), else the browser refuses.
+    window.__gesture = (fn) => () => {
+      if (!navigator.userActivation.isActive) return Promise.reject(new DOMException("Failed to execute 'showDirectoryPicker' on 'Window': Must be handling a user gesture to show a file picker.", 'SecurityError'));
+      return fn();
+    };
+    window.showDirectoryPicker = window.__gesture(async () => dir);
     window.__reloaded = false;
     chrome.runtime.reload = () => {
       window.__reloaded = true;
@@ -99,7 +104,16 @@ try {
   }, manifest);
   await page.waitForFunction(() => document.body.innerText.includes('Есть версия 9.9.9'), { timeout: 15000 });
   check('update check finds the new release', true);
-  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Обновить сейчас')?.click());
+  /** A real click (a user gesture), as the folder dialog needs. */
+  const clickText = async (text) => {
+    const h = await page.evaluateHandle((t) => [...document.querySelectorAll('button')].find((b) => b.textContent === t), text);
+    await h.asElement().click();
+  };
+  await clickText('Обновить сейчас');
+  await page.waitForSelector('[data-testid="update-folder"]', { timeout: 10000 }).catch(() => {});
+  const ask = await page.$eval('[data-testid="update-check"]', (e) => e.innerText);
+  check('the first update asks for the extension folder with a button (no gesture error)', ask.includes('Выбрать папку расширения') && !ask.includes('user gesture'), ask);
+  await clickText('Выбрать папку расширения');
   await page.waitForFunction(() => window.__reloaded === true, { timeout: 20000 }).catch(() => {});
   const state = await page.evaluate(async () => {
     const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('ext');
@@ -144,7 +158,9 @@ try {
     window.showDirectoryPicker = async () => navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('other'));
   });
   await page.waitForFunction(() => document.body.innerText.includes('Есть версия 9.9.9'), { timeout: 15000 });
-  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Обновить сейчас')?.click());
+  await clickText('Обновить сейчас');
+  await page.waitForSelector('[data-testid="update-folder"]', { timeout: 10000 }).catch(() => {});
+  await clickText('Выбрать папку расширения');
   await page.waitForFunction(() => document.querySelector('[data-testid="update-check"]')?.innerText.includes('нет расширения'), { timeout: 10000 }).catch(() => {});
   const err = await page.$eval('[data-testid="update-check"]', (e) => e.innerText);
   check('a wrong folder is refused with an explanation', err.includes('нет расширения'), err);
