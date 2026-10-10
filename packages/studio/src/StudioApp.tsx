@@ -3,7 +3,7 @@ import { emptyContext, type AppSettings, type TranslationContext } from '@ait/co
 import { CachedPageEditor } from './editor/EditorHost';
 import { WelcomePanel } from './panels/WelcomePanel';
 import { loadBundledFonts } from './fonts';
-import { PlatformContext, usePlatform, withSafeFileNames, type StudioPlatform } from './platform';
+import { PlatformContext, UpdateSettingsContext, usePlatform, withSafeFileNames, type StudioPlatform } from './platform';
 import { confirmLeave } from './editor/guard';
 import { ContextEditor, GlossaryEditor } from './panels/GlossaryPanel';
 import { HistoryPanel, PrivacyPanel } from './panels/InfoPanels';
@@ -153,6 +153,7 @@ export function StudioApp({ platform: hostPlatform, initialView, resultKey, chap
 
   return (
     <PlatformContext.Provider value={platform}>
+      <UpdateSettingsContext.Provider value={update}>
       <div className="ait-app">
         <nav className="ait-side" aria-label={tr('Разделы')}>
           <div className="ait-mark">
@@ -192,6 +193,8 @@ export function StudioApp({ platform: hostPlatform, initialView, resultKey, chap
             ) : null}
             {view === 'welcome' ? (
               <WelcomePanel
+                settings={settings}
+                update={update}
                 onSetup={() => {
                   history.replaceState(null, '', '?view=settings&setup=1');
                   location.reload();
@@ -207,6 +210,7 @@ export function StudioApp({ platform: hostPlatform, initialView, resultKey, chap
         </main>
         <ToastHost />
       </div>
+      </UpdateSettingsContext.Provider>
     </PlatformContext.Provider>
   );
 }

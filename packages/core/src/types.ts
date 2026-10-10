@@ -133,6 +133,10 @@ export interface PageResult {
   summary?: string;
   /** A picture cut out of a glued strip: the language of the whole strip (its own part may have no text). */
   stripLang?: string;
+  /** Places where text stood over artwork (not a bubble): the background there was painted over simply. */
+  artText?: number;
+  /** LaMa redrew those places (in the engine or in the browser). */
+  artRedrawn?: boolean;
   createdAt: string;
 }
 

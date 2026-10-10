@@ -139,6 +139,8 @@ export interface AppSettings {
   lamaEngine?: boolean;
   /** Text over artwork redrawn by LaMa: in the local engine or right in the browser (model downloaded once). */
   lamaMode?: 'off' | 'engine' | 'browser';
+  /** The user said «Не предлагать» to the LaMa offer shown after a page with text over artwork. */
+  lamaOfferDismissed?: boolean;
   /** models.json fetched from the repository (recommended local models, family settings). */
   modelCatalog?: import('./llm/catalog').ModelCatalog;
   modelCatalogCheckedAt?: string;
@@ -350,6 +352,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     inpaintExpand: 'number',
     lamaEngine: 'boolean',
     lamaMode: 'string',
+    lamaOfferDismissed: 'boolean',
     modelCatalog: 'object',
     modelCatalogCheckedAt: 'string',
     interfaceLang: 'string',

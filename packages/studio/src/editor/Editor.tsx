@@ -32,7 +32,8 @@ import { exportChapterTexts, exportTexts, importTexts } from './texts';
 import { EditHistory, type HistoryItem } from './history';
 import { confirmLeave, setActiveEditor, type EditorGuard } from './guard';
 import { exportPsd, psdTooBig } from '../psd';
-import { usePlatform } from '../platform';
+import { usePlatform, useUpdateSettings } from '../platform';
+import { LamaGetButton, lamaModeOf, useLamaDownloaded } from '../lama';
 import { ErrorBox, Field, Switch, toast, useAction } from '../ui';
 import { tr } from '@ait/core/i18n';
 
@@ -105,6 +106,12 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   const [multi, setMulti] = useState<Set<string>>(new Set());
   const [styleClip, setStyleClip] = useState<Partial<TextStyle> | null>(null);
   const [fontQuery, setFontQuery] = useState('');
+  const updateSettings = useUpdateSettings();
+  /** ◍ redraws with LaMa when it runs here and the model is downloaded; otherwise a simple fill. */
+  const [lamaHave, setLamaHave] = useLamaDownloaded();
+  const lamaReady = !!platform.inpaint && lamaHave === true;
+  /** LaMa strokes being redrawn right now. */
+  const [lamaBusy, setLamaBusy] = useState(0);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
   const toolRef = useRef(tool);
@@ -766,6 +773,10 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     const md = mctx.getImageData(0, 0, box[2], box[3]).data as Uint8ClampedArray;
     const mask = new Uint8Array(box[2] * box[3]);
     for (let i = 0; i < mask.length; i++) mask[i] = md[i * 4 + 3] > 40 ? 1 : 0;
+    if (strokeTool === 'inpaint' && lamaReady) {
+      void redrawWithLama(box, mask);
+      return;
+    }
     const before = clonePixels(cleaned.getRegion(...box));
     if (strokeTool === 'brush') paintRegion(cleaned, box, mask, { kind: 'color', color: parseHex(brushColor) });
     else if (strokeTool === 'inpaint') paintRegion(cleaned, box, mask, { kind: 'inpaint' });
@@ -778,6 +789,52 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     const after = clonePixels(cleaned.getRegion(...box));
     push({ kind: 'pixels', box, before, after });
     markPixels(box);
+  };
+
+  /**
+   * ◍ with LaMa: the stroke's box plus a wide margin of context goes to the model; only the pixels
+   * under the stroke change. A failure falls back to the simple fill and says why.
+   */
+  const redrawWithLama = async (box: Box, mask: Uint8Array) => {
+    const inpaint = platform.inpaint!;
+    const pad = Math.round(Math.max(64, Math.max(box[2], box[3]) * 0.5));
+    const area = clampBox([box[0] - pad, box[1] - pad, box[2] + pad * 2, box[3] + pad * 2], cleaned.width, cleaned.height);
+    const [ax, ay, aw, ah] = area;
+    const areaMask = new Uint8Array(aw * ah);
+    for (let y = 0; y < box[3]; y++) {
+      for (let x = 0; x < box[2]; x++) {
+        if (!mask[y * box[2] + x]) continue;
+        const px = box[0] - ax + x;
+        const py = box[1] - ay + y;
+        if (px >= 0 && py >= 0 && px < aw && py < ah) areaMask[py * aw + px] = 1;
+      }
+    }
+    setLamaBusy((n) => n + 1);
+    try {
+      let res: PixelData | null = null;
+      let failure: unknown = null;
+      try {
+        res = await inpaint(clonePixels(cleaned.getRegion(ax, ay, aw, ah)), areaMask);
+        if (res.width !== aw || res.height !== ah) throw new Error(`${res.width}×${res.height} ≠ ${aw}×${ah}`);
+      } catch (e) {
+        failure = e;
+      }
+      // The pixels as they are now: strokes made while LaMa worked stay.
+      const before = clonePixels(cleaned.getRegion(...area));
+      if (res) {
+        const cur = cleaned.getRegion(...area);
+        for (let i = 0; i < areaMask.length; i++) if (areaMask[i]) for (let k = 0; k < 3; k++) cur.data[i * 4 + k] = res.data[i * 4 + k];
+        cleaned.putRegion(cur, ax, ay);
+      } else {
+        paintRegion(cleaned, box, mask, { kind: 'inpaint' });
+        toast(tr('LaMa не сработала, фон залит упрощённо: {0}', failure instanceof Error ? failure.message : String(failure)));
+      }
+      const after = clonePixels(cleaned.getRegion(...area));
+      push({ kind: 'pixels', box: area, before, after });
+      markPixels(area);
+    } finally {
+      setLamaBusy((n) => n - 1);
+    }
   };
 
   // ---- actions -----------------------------------------------------------------------------
@@ -916,6 +973,8 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     </button>
   );
   const painting = tool === 'brush' || tool === 'eraser' || tool === 'inpaint';
+  /** Text over artwork was painted over simply and LaMa is not set up here: offer it. */
+  const artHint = (page.artText ?? 0) > 0 && !page.artRedrawn && !!platform.lama && !!platform.inpaint && !!updateSettings && lamaHave !== null && !(lamaHave && lamaModeOf(settings) === 'browser');
   /** Long strips get a minimap: where the pictures meet, where the blocks and the remarks are. */
   const showMinimap = page.height > page.width * 2.5 || (marks?.length ?? 0) > 0;
   const minimapJump = (clientY: number, el: HTMLElement) => {
@@ -954,7 +1013,8 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           {toolBtn('select', '↖', tr('Выбор'), 'V')}
           {toolBtn('brush', '🖌', tr('Кисть'), 'B')}
           {toolBtn('eraser', '⌫', tr('Ластик'), 'E')}
-          {toolBtn('inpaint', '◍', tr('Заливка фона'))}
+          {toolBtn('inpaint', '◍', lamaReady ? tr('Дорисовать фон (LaMa)') : tr('Заливка фона'))}
+          {lamaBusy ? <span className="ait-pal-val" role="status" aria-live="polite" data-testid="lama-busy" title={tr('LaMa дорисовывает фон…')}>…</span> : null}
           {toolBtn('ocr', 'OCR', tr('Ручной OCR'))}
           {onCrop ? toolBtn('crop', '⛶', tr('Обрезать страницу: обведите, что оставить'), 'C') : null}
           {toolBtn('picker', '⊙', tr('Пипетка: взять цвет для кисти с картинки (Alt+щелчок кистью)'), 'I')}
@@ -1138,6 +1198,12 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
 
         </div>
         <div className="ait-props">
+          {artHint ? (
+            <div className="ait-notice" data-testid="lama-hint" style={{ display: 'grid', gap: 6, marginBottom: 8 }}>
+              <small>{tr('Текст поверх рисунка ({0}) стёрт простой заливкой. С нейросетью LaMa фон дорисуется аккуратнее: инструмент ◍ и новый перевод страницы (⟳).', page.artText)}</small>
+              <LamaGetButton update={updateSettings!} small downloaded={lamaHave} label={lamaHave ? tr('Включить LaMa') : tr('Включить LaMa (~200 МБ)')} onDone={() => setLamaHave(true)} />
+            </div>
+          ) : null}
           {sel && st ? (
             <div className="ait-panel">
               {sel.check?.refs.length ? (

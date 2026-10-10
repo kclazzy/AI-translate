@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   applyPreset,
   CHECKER_KEY_URL,
@@ -25,6 +25,7 @@ import { buildReport } from '../report';
 import { readSettingsFile, settingsToFile } from '../settingsFile';
 import { LocalModels, LocalSetup, ModelCheckCard, ModelPicker, UpdateCheck } from '../ModelPicker';
 import { usePlatform } from '../platform';
+import { LamaGetButton, lamaModeOf, useLamaDownloaded } from '../lama';
 import { ErrorBox, Field, FoldPanel, NumberInput, Segmented, Switch, toast, useAction } from '../ui';
 import { resolveUiLang, tr, UI_LANGS } from '@ait/core/i18n';
 
@@ -194,17 +195,21 @@ function ProfileEditor({ p, onChange }: { p: PromptProfile; onChange: (p: Prompt
 
 /** How much space the app takes on this device, with buttons to free it. */
 /** Text over artwork: redraw the background with LaMa — off, in the local engine, or in this browser. */
-function LamaChoice({ settings: s, update }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void }) {
+function LamaChoice({ settings: s, update, offer }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; offer?: boolean }) {
   const platform = usePlatform();
-  const mode = s.lamaMode ?? (s.lamaEngine ? 'engine' : 'off');
-  const [have, setHave] = useState<boolean | null>(null);
+  const mode = lamaModeOf(s);
+  const [have, setHave] = useLamaDownloaded();
   const [pct, setPct] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  // Came from the offer on a page (?offer=lama): show this setting right away.
+  const highlight = !!offer && !!platform.lama;
   useEffect(() => {
-    void platform.lama?.downloaded().then(setHave);
-  }, [platform]);
+    if (highlight) ref.current?.scrollIntoView({ block: 'center' });
+  }, [highlight]);
+  const ready = mode === 'browser' && have;
   return (
-    <div style={{ display: 'grid', gap: 6 }} data-testid="lama">
+    <div ref={ref} className={highlight ? 'ait-offer' : undefined} style={{ display: 'grid', gap: 6 }} data-testid="lama">
       <label className="ait-field">
         <span>{tr('Дорисовка фона под текстом на рисунке (нейросеть LaMa)')}</span>
         <select className="ait-select" value={mode} onChange={(e) => update({ lamaMode: e.target.value as AppSettings['lamaMode'], lamaEngine: undefined })}>
@@ -213,6 +218,13 @@ function LamaChoice({ settings: s, update }: { settings: AppSettings; update: (p
           {platform.lama ? <option value="browser">{tr('Прямо в браузере (видеокарта, модель ~200 МБ)')}</option> : null}
         </select>
       </label>
+      {highlight && !ready ? (
+        <div style={{ display: 'grid', gap: 6 }}>
+          <small className="ait-muted">{tr('Текст поверх рисунка стирается простой заливкой. LaMa дорисует фон под ним: волосы, одежду, пейзаж. Модель скачивается один раз и работает прямо в браузере.')}</small>
+          <LamaGetButton update={update} primary downloaded={have} label={tr('Скачать и включить')} onDone={() => setHave(true)} testId="lama-offer" />
+        </div>
+      ) : null}
+      {highlight && ready ? <span className="ait-badge ok" data-testid="lama-ready">{tr('LaMa включена — переведите страницу заново (⟳), чтобы дорисовать фон')}</span> : null}
       {mode === 'browser' && platform.lama ? (
         <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {have ? <span className="ait-badge ok">{tr('Модель скачана')}</span> : <span className="ait-badge">{tr('Модель не скачана — пока работает простая заливка')}</span>}
@@ -567,7 +579,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               </label>
             </div>
             <div style={{ marginTop: 8 }}>
-              <LamaChoice settings={s} update={update} />
+              <LamaChoice settings={s} update={update} offer={params.get('offer') === 'lama'} />
             </div>
             <div style={{ marginTop: 8 }}>
               <Segmented label={tr('Страницы главы в редакторе')} value={s.editorPageList ?? 'bottom'} onChange={(editorPageList) => update({ editorPageList })} options={[{ value: 'bottom', label: tr('Снизу') }, { value: 'right', label: tr('Справа') }]} />

@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { AppSettings, IdbStore, ImageBackend, SecretStore, TranslateService, UpdateInfo } from '@ait/core';
+import type { AppSettings, IdbStore, ImageBackend, Inpainter, SecretStore, TranslateService, UpdateInfo } from '@ait/core';
 
 /** What the studio needs from its host (extension page, mobile app, web app). */
 export interface StudioPlatform {
@@ -21,9 +21,18 @@ export interface StudioPlatform {
   setupReady?(params: URLSearchParams): void;
   /** Optional: LaMa running in this browser (download the model once, then it redraws art under text). */
   lama?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void> };
+  /** Optional: LaMa itself (needs the downloaded model), for the editor's «Дорисовать фон». */
+  inpaint?: Inpainter;
 }
 
 export const PlatformContext = createContext<StudioPlatform | null>(null);
+
+/** Change the app settings from anywhere inside the studio (saved at once, like the settings page does). */
+export const UpdateSettingsContext = createContext<((patch: Partial<AppSettings>) => void) | null>(null);
+
+export function useUpdateSettings(): ((patch: Partial<AppSettings>) => void) | null {
+  return useContext(UpdateSettingsContext);
+}
 
 export function usePlatform(): StudioPlatform {
   const p = useContext(PlatformContext);

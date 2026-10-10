@@ -526,6 +526,21 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       for (const u of urls) await ollamaUnloadAll(u).catch(() => undefined);
       return { ok: true };
     }
+    case 'lama-offer': {
+      // Offered only where LaMa can run in this browser, while it is off and the user did not refuse it.
+      const s = await loadSettings();
+      const mode = s.lamaMode ?? (s.lamaEngine ? 'engine' : 'off');
+      return { offer: lamaSupported() && mode === 'off' && !s.lamaOfferDismissed };
+    }
+    case 'lama-offer-answer': {
+      if (msg.accept) {
+        await chrome.tabs.create({ url: chrome.runtime.getURL('studio.html?view=settings&offer=lama'), index: (sender.tab?.index ?? 0) + 1 });
+      } else {
+        const s = await loadSettings();
+        await saveSettings({ ...s, lamaOfferDismissed: true });
+      }
+      return null;
+    }
     case 'open-editor':
       await chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?key=${encodeURIComponent(msg.key)}${msg.chapter?.length ? `&chapter=${msg.chapter.map(encodeURIComponent).join(',')}` : ''}`), index: (sender.tab?.index ?? 0) + 1 });
       return null;
@@ -534,6 +549,11 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
     case 'get-tile':
       return toOffscreen({ target: 'offscreen', type: 'get-tile', key: msg.key, index: msg.index });
   }
+}
+
+/** LaMa runs in the extension pages (ONNX Runtime on WebAssembly / WebGPU, model kept in the Cache API). */
+function lamaSupported(): boolean {
+  return typeof caches !== 'undefined' && typeof WebAssembly !== 'undefined';
 }
 
 /** The interface dictionary for content scripts (they carry none to stay small). */

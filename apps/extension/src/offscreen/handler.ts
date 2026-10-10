@@ -170,7 +170,7 @@ export function toRendered(r: StoredResult, cached: boolean): RenderedTiles {
     height: r.page.height,
     tiles: omit ? [] : r.rendered.map((_, i) => tileOf(r, i)),
     tilesOmitted: omit ? r.rendered.length : undefined,
-    page: { blocks: r.page.blocks, timings: r.page.timings, usage: r.page.usage, pipeline: r.page.pipeline, stripLang: r.page.stripLang },
+    page: { blocks: r.page.blocks, timings: r.page.timings, usage: r.page.usage, pipeline: r.page.pipeline, stripLang: r.page.stripLang, artText: r.page.artText, artRedrawn: r.page.artRedrawn },
     cached,
   };
 }

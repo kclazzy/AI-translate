@@ -1,7 +1,13 @@
+import type { AppSettings } from '@ait/core';
 import { tr } from '@ait/core/i18n';
+import { LamaGetButton, lamaModeOf, useLamaDownloaded } from '../lama';
+import { usePlatform } from '../platform';
 
-/** Shown once after installing: what to do first, in four steps. */
-export function WelcomePanel({ onSetup, onCloud }: { onSetup: () => void; onCloud: () => void }) {
+/** Shown once after installing: what to do first, in four steps (and one optional). */
+export function WelcomePanel({ settings, update, onSetup, onCloud }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; onSetup: () => void; onCloud: () => void }) {
+  const platform = usePlatform();
+  const [have, setHave] = useLamaDownloaded();
+  const lamaOn = have && lamaModeOf(settings) === 'browser';
   return (
     <div className="ait-panel" data-testid="welcome" style={{ display: 'grid', gap: 14, maxWidth: 680 }}>
       <h2 style={{ margin: 0 }}>{tr('Добро пожаловать в AI Translate')}</h2>
@@ -24,6 +30,15 @@ export function WelcomePanel({ onSetup, onCloud }: { onSetup: () => void; onClou
         <li>
           <b>{tr('Правьте, если нужно.')}</b> {tr('Кнопка ✎ на переведённой картинке открывает редактор: текст, шрифт, размер, кисть.')}
         </li>
+        {platform.lama ? (
+          <li data-testid="welcome-lama">
+            <b>{tr('Дорисовка фона (по желанию).')}</b>{' '}
+            {tr('Когда текст написан прямо на рисунке, а не в бабле, фон под ним закрашивается упрощённо. Нейросеть LaMa дорисует его аккуратно: волосы, одежду, пейзаж. Модель скачивается один раз и работает прямо в браузере.')}
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {lamaOn ? <span className="ait-badge ok">{tr('Готово')}</span> : <LamaGetButton update={update} downloaded={have} label={have ? tr('Включить LaMa') : tr('Скачать LaMa (~200 МБ)')} onDone={() => setHave(true)} />}
+            </div>
+          </li>
+        ) : null}
       </ol>
       <p className="ait-muted" style={{ margin: 0 }}>
         {tr('Горячие клавиши: Alt+Shift+T — перевести страницу, Alt+Shift+A — перевести область, Alt+Shift+O — оригинал/перевод.')}

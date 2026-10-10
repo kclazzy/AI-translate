@@ -148,6 +148,47 @@ function main() {
     it.overlay.setQa(qa.length, qa.slice(0, 8).join('\n'));
     it.overlay.setInfo(pageInfo(result));
     it.overlay.position();
+    if (artPlain(result)) void offerLama();
+  }
+
+  /** Text stood over artwork and the background there was only painted over (no LaMa). */
+  const artPlain = (r: RenderedTiles) => (r.page.artText ?? 0) > 0 && !r.page.artRedrawn;
+
+  // ---- LaMa offer: once per tab, after a page where text over artwork was painted over simply ----
+  let lamaOffered = false;
+  let lamaCard: HTMLElement | null = null;
+  async function offerLama() {
+    if (lamaOffered || dead) return;
+    lamaOffered = true;
+    const r = await send<{ offer: boolean } | null>({ type: 'lama-offer' }).catch(() => null);
+    if (!r?.offer || dead) return;
+    const host = document.createElement('div');
+    markUi(host);
+    const root = host.attachShadow({ mode: 'closed' });
+    const esc = (t: string) => t.replace(/[<>&]/g, '');
+    root.innerHTML = `<style>
+      .p { position: fixed; z-index: 2147483602; left: 16px; bottom: 16px; background: #1c2230; color: #fff; font: 14px/1.35 system-ui, sans-serif;
+        padding: 10px 12px; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.3); display: grid; gap: 8px; width: 330px; max-width: calc(100vw - 32px); box-sizing: border-box; }
+      .row { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+      button { all: initial; cursor: pointer; color: #fff; font: inherit; border: 1px solid #fff6; border-radius: 6px; padding: 2px 8px; }
+      button.main { background: #e2558f; border-color: #e2558f; }
+      button.x { border: none; padding: 0 4px; opacity: .7; }
+    </style><div class="p" role="status" data-ait="lama-offer"><span class="t">${esc(tr('Фон под текстом на рисунке закрашен упрощённо. Нейросеть LaMa дорисует его аккуратнее (скачать ~200 МБ один раз).'))}</span><div class="row"><button type="button" class="x" aria-label="${esc(tr('Закрыть'))}">✕</button><button type="button" class="no">${esc(tr('Не предлагать'))}</button><button type="button" class="main">${esc(tr('Включить'))}</button></div></div>`;
+    const close = () => {
+      host.remove();
+      if (lamaCard === host) lamaCard = null;
+    };
+    (root.querySelector('.main') as HTMLButtonElement).addEventListener('click', () => {
+      close();
+      void send({ type: 'lama-offer-answer', accept: true }).catch(() => undefined);
+    });
+    (root.querySelector('.no') as HTMLButtonElement).addEventListener('click', () => {
+      close();
+      void send({ type: 'lama-offer-answer', accept: false }).catch(() => undefined);
+    });
+    (root.querySelector('.x') as HTMLButtonElement).addEventListener('click', close);
+    document.documentElement.appendChild(host);
+    lamaCard = host;
   }
 
   /** The whole chapter (or page): pictures, model time, tokens and cost — shown when it is done. */
@@ -184,6 +225,7 @@ function main() {
       tr('Стоимость: {0}', fmtUsd(cost, 4)),
       models ? tr('Модель: {0}', models) : '',
       tr('Текстов на картинке: {0}', r.page.blocks.length),
+      artPlain(r) ? tr('Текст поверх рисунка: {0} — фон без LaMa', r.page.artText) : '',
       r.cached ? tr('Взято из кэша') : '',
     ];
     return lines.filter(Boolean).join('\n');
@@ -1160,6 +1202,7 @@ ${chapterStats(list)}`;
     safe(() => (window as unknown as { navigation?: EventTarget }).navigation?.removeEventListener('navigatesuccess', checkUrl));
     safe(() => document.removeEventListener('load', onLoad, true));
     safe(() => hidePageProgress());
+    safe(() => lamaCard?.remove());
     safe(() => {
       if (chapter) {
         clearInterval(chapter.timer);

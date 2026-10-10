@@ -474,6 +474,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   let cleaned: TiledImage | null = null;
   let tTranslated = 0;
   let tCleaned = 0;
+  const artMasks: { box: Box; mask: Uint8Array }[] = [];
+  let artRedrawn = false;
 
   stage('detecting');
   const views = planViews(original.width, original.height);
@@ -581,7 +583,6 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   cleaned = original.clone();
   const closedBubble = new Map<string, boolean>();
   const letterHeight = new Map<string, number>();
-  const artMasks: { box: Box; mask: Uint8Array }[] = [];
   const cleanOne = (b: TextBlock) => {
     const erase = b.translate && !(b.textType === 'SFX' && config.sfxStyle === 'original');
     if (req.generic) {
@@ -662,7 +663,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     // The engine gets the picture only on this computer / network, unless the cloud is allowed.
     const viaEngine = config.lama === 'engine' && config.engine?.url && (config.privacy === 'cloud' || isLocalUrl(config.engine.url));
     const inpaint = viaEngine ? engineInpainter(config.engine!, deps) : config.lama === 'browser' ? deps.inpaint : undefined;
-    if (inpaint) await redrawArt(original, cleaned, artMasks, inpaint, signal);
+    if (inpaint) artRedrawn = (await redrawArt(original, cleaned, artMasks, inpaint, signal)) > 0;
   }
   tCleaned = performance.now();
   return finish();
@@ -689,6 +690,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       usage,
       pipeline: { version: 1, hash: await pipelineHash(config), mode: 'standalone' },
       summary,
+      ...(artMasks.length ? { artText: artMasks.length, artRedrawn } : {}),
       createdAt: new Date().toISOString(),
     };
     const contextUpdate: ContextUpdate = {

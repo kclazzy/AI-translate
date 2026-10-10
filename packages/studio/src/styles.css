@@ -216,6 +216,8 @@ a { color: var(--magenta); }
 .ait-badge.local { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 
 .ait-error { border-left: 3px solid var(--err); background: color-mix(in srgb, var(--err) 8%, var(--sheet)); padding: 10px 12px; border-radius: 4px; }
+.ait-offer { outline: 2px solid var(--magenta); outline-offset: 6px; border-radius: 6px; animation: ait-offer 1.6s ease-out 2; }
+@keyframes ait-offer { 0% { outline-color: transparent; } 40% { outline-color: var(--magenta); } }
 .ait-notice { border-left: 3px solid var(--yellow); background: color-mix(in srgb, var(--yellow) 12%, var(--sheet)); padding: 10px 12px; border-radius: 4px; }
 
 table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }

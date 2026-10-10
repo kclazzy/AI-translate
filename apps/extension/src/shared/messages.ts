@@ -19,7 +19,7 @@ export interface RenderedTiles {
   width: number;
   height: number;
   tiles: { y: number; h: number; dataUrl: string }[];
-  page: Pick<PageResult, 'blocks' | 'timings' | 'usage' | 'pipeline' | 'stripLang'>;
+  page: Pick<PageResult, 'blocks' | 'timings' | 'usage' | 'pipeline' | 'stripLang' | 'artText' | 'artRedrawn'>;
   cached: boolean;
   /**
    * The tiles were too big for one message (browsers refuse messages over 64 MiB): `tiles` is
@@ -46,6 +46,10 @@ export type ContentToBackground =
   | { type: 'get-result'; key: string }
   | { type: 'status'; ids: string[] }
   | { type: 'open-setup' }
+  /** Should the page offer LaMa (text over artwork was painted over simply)? */
+  | { type: 'lama-offer' }
+  /** The LaMa offer: «Включить» opens the settings, «Не предлагать» remembers the choice. */
+  | { type: 'lama-offer-answer'; accept: boolean }
   | { type: 'free-memory' }
   /** Pictures translated before: picture address → result key (results are fetched one by one). */
   | { type: 'lookup-cached'; srcs: string[] }

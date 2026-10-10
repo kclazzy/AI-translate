@@ -1,8 +1,11 @@
-import { deleteLama, downloadLama, lamaDownloaded } from '../offscreen/lama';
+import { deleteLama, downloadLama, lamaDownloaded, lamaInpainter } from '../offscreen/lama';
 import { browserBackend, TranslateService } from '@ait/core';
 import { downloadFile, type StudioPlatform } from '@ait/studio';
 import { db, loadSettings, saveSettings, secrets } from '../shared/store';
 import { installExtensionUpdate } from './updater';
+
+/** LaMa needs WebAssembly and the Cache API (where the model is kept). */
+const lamaHere = typeof caches !== 'undefined' && typeof WebAssembly !== 'undefined';
 
 export function extensionPlatform(): StudioPlatform {
   return {
@@ -14,7 +17,7 @@ export function extensionPlatform(): StudioPlatform {
     loadSettings,
     saveSettings,
     saveFile: downloadFile,
-    lama: { downloaded: lamaDownloaded, download: (p) => downloadLama(p), remove: deleteLama },
+    ...(lamaHere ? { lama: { downloaded: lamaDownloaded, download: (p: (share: number) => void) => downloadLama(p), remove: deleteLama }, inpaint: lamaInpainter } : {}),
     notifyResultChanged: (key) => void chrome.runtime.sendMessage({ type: 'result-changed', key }).catch(() => undefined),
     version: chrome.runtime.getManifest().version,
     installUpdate: installExtensionUpdate,
