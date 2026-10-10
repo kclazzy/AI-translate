@@ -1,12 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   applyPreset,
-  CHECKER_KEY_URL,
-  CHECKER_LABELS,
-  checkerIsCloud,
-  type CheckerConfig,
-  type CheckerKind,
-  type CrossCheckSettings,
   configFromPreset,
   presetFrom,
   createProvider,
@@ -260,87 +254,6 @@ function LamaChoice({ settings: s, update, offer }: { settings: AppSettings; upd
   );
 }
 
-const CHECKER_KINDS: CheckerKind[] = ['deepl', 'google', 'yandex', 'libre', 'llm'];
-
-/** «Сверка»: which translators to compare with, their keys, who judges, what to do with mistakes. */
-function CrossCheckSettingsBox({ settings: s, update }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void }) {
-  const platform = usePlatform();
-  const cc: CrossCheckSettings = s.crossCheck ?? { enabled: false, checkers: [], judge: 'main', mode: 'report' };
-  const set = (patch: Partial<CrossCheckSettings>) => update({ crossCheck: { ...cc, ...patch } });
-  const setChecker = (id: string, patch: Partial<CheckerConfig>) => set({ checkers: cc.checkers.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
-  const [keys, setKeys] = useState<Record<string, boolean>>({});
-  useEffect(() => {
-    void Promise.all(cc.checkers.map(async (c) => [c.id, !!(await platform.secrets.get(`checker:${c.id}`))] as const)).then((x) => setKeys(Object.fromEntries(x)));
-  }, [cc.checkers.length]); // eslint-disable-line react-hooks/exhaustive-deps
-  const add = (kind: CheckerKind) => set({ checkers: [...cc.checkers, { id: shortId('c'), kind, enabled: true, ...(kind === 'libre' ? { url: 'http://127.0.0.1:5000' } : {}), ...(kind === 'llm' ? { providerId: s.providers[0]?.id } : {}) }] });
-  const local = s.privacy === 'local';
-  return (
-    <div style={{ display: 'grid', gap: 8 }} data-testid="crosscheck">
-      <Switch checked={cc.enabled} onChange={(enabled) => set({ enabled })} label={tr('Сверять каждую страницу после перевода')} />
-      {cc.checkers.map((c) => {
-        const cloud = checkerIsCloud(c, s.providers.find((p) => p.id === c.providerId));
-        return (
-          <div key={c.id} style={{ display: 'grid', gap: 4, padding: 8, border: '1px solid var(--rule)', borderRadius: 6 }}>
-            <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <input type="checkbox" checked={c.enabled} onChange={(e) => setChecker(c.id, { enabled: e.target.checked })} aria-label={tr('Использовать {0}', CHECKER_LABELS[c.kind])} />
-              <b style={{ flex: 1 }}>{c.kind === 'llm' ? tr('Модель') : CHECKER_LABELS[c.kind]}</b>
-              {CHECKER_KEY_URL[c.kind] ? <a className="pp-link" href={CHECKER_KEY_URL[c.kind]} target="_blank" rel="noreferrer">{tr('где взять ключ')}</a> : null}
-              <button className="ait-btn small danger" aria-label={tr('Убрать {0}', CHECKER_LABELS[c.kind])} onClick={() => set({ checkers: cc.checkers.filter((x) => x.id !== c.id) })}>✕</button>
-            </span>
-            {c.kind === 'llm' ? (
-              <select className="ait-select" value={c.providerId ?? ''} onChange={(e) => setChecker(c.id, { providerId: e.target.value })} aria-label={tr('Модель для сверки')}>
-                {s.providers.map((p) => <option key={p.id} value={p.id}>{tr(p.label)} — {p.model}</option>)}
-              </select>
-            ) : null}
-            {c.kind === 'libre' ? <input className="ait-input" value={c.url ?? ''} onChange={(e) => setChecker(c.id, { url: e.target.value })} placeholder="http://127.0.0.1:5000" aria-label={tr('Адрес LibreTranslate')} /> : null}
-            {c.kind === 'yandex' ? <input className="ait-input" value={c.folderId ?? ''} onChange={(e) => setChecker(c.id, { folderId: e.target.value || undefined })} placeholder={tr('ID каталога (нужен только для IAM-токена)')} aria-label={tr('ID каталога Yandex Cloud')} /> : null}
-            {c.kind !== 'llm' ? (
-              <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <input
-                  className="ait-input"
-                  type="password"
-                  placeholder={keys[c.id] ? tr('ключ сохранён — введите новый, чтобы заменить') : c.kind === 'libre' ? tr('ключ (если сервер требует)') : tr('ключ API')}
-                  aria-label={tr('Ключ {0}', CHECKER_LABELS[c.kind])}
-                  onBlur={async (e) => {
-                    const v = e.target.value.trim();
-                    if (!v) return;
-                    await platform.secrets.set(`checker:${c.id}`, v);
-                    e.target.value = '';
-                    setKeys((k) => ({ ...k, [c.id]: true }));
-                    toast(tr('Ключ сохранён'));
-                  }}
-                />
-              </span>
-            ) : null}
-            {cloud && local ? <small style={{ color: 'var(--err)' }}>{tr('Включён локальный режим: этот переводчик в облаке и спрашиваться не будет.')}</small> : null}
-          </div>
-        );
-      })}
-      <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {CHECKER_KINDS.map((k) => (
-          <button key={k} className="ait-btn small" onClick={() => add(k)}>+ {k === 'llm' ? tr('Модель') : CHECKER_LABELS[k]}</button>
-        ))}
-      </span>
-      <label className="ait-field">
-        <span>{tr('Кто сравнивает')}</span>
-        <select className="ait-select" value={cc.judge} onChange={(e) => set({ judge: e.target.value })}>
-          <option value="main">{tr('Модель, которая переводит')}</option>
-          {s.providers.map((p) => <option key={p.id} value={p.id}>{tr(p.label)} — {p.model}</option>)}
-          <option value="none">{tr('Никто — только показать другие варианты')}</option>
-        </select>
-      </label>
-      <label className="ait-field">
-        <span>{tr('Если найдена ошибка')}</span>
-        <select className="ait-select" value={cc.mode} onChange={(e) => set({ mode: e.target.value as CrossCheckSettings['mode'] })}>
-          <option value="report">{tr('Только показать в редакторе')}</option>
-          <option value="fix">{tr('Исправлять сразу (старый вариант можно вернуть)')}</option>
-        </select>
-      </label>
-      <small className="ait-muted">{tr('Без судьи строка помечается, если перевод почти не совпадает ни с одним другим. Сверить страницу можно и вручную — кнопкой «Сверить» в редакторе.')}</small>
-    </div>
-  );
-}
-
 type DirPicker = (o?: { mode?: string; id?: string }) => Promise<FileSystemDirectoryHandle>;
 type PermHandle = FileSystemDirectoryHandle & { queryPermission?: (o: { mode: string }) => Promise<string>; requestPermission?: (o: { mode: string }) => Promise<string> };
 
@@ -510,9 +423,6 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               <option value="report">{tr('Только показывать замечания')}</option>
               <option value="off">{tr('Выключена (быстрее)')}</option>
             </select>
-          </Field>
-          <Field label={tr('Сверка с другими переводчиками')} hint={tr('Перевод сравнивается с DeepL, Google, Яндексом, LibreTranslate или другой моделью; расхождения видны в редакторе')}>
-            <CrossCheckSettingsBox settings={s} update={update} />
           </Field>
           <Field label={tr('Наборы настроек')} hint={tr('Модель, качество и проверка — одним выбором (например «Быстро локально» и «Точно в облаке»)')}>
             <div style={{ display: 'grid', gap: 6 }} data-testid="presets">

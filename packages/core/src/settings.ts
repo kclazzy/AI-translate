@@ -131,8 +131,6 @@ export interface AppSettings {
   presets?: ModelPreset[];
   /** Where the editor shows the other pages of a chapter. */
   editorPageList?: 'bottom' | 'right';
-  /** «Сверка с другими переводчиками» (keys are in the secret store as checker:<id>). */
-  crossCheck?: import('./translate/crosscheck').CrossCheckSettings;
   /** How far past the letters the original text is erased, px (default 3). */
   inpaintExpand?: number;
   /** Text over artwork: redo the background with LaMa in the local engine when it is running. */
@@ -250,18 +248,6 @@ function cleanProfile(v: unknown): PromptProfile | null {
 }
 
 const SFX_STYLES = ['original', 'translated', 'small', 'large', 'artistic'] as const;
-const CHECKER_KINDS = ['deepl', 'google', 'yandex', 'libre', 'llm'] as const;
-
-function cleanCrossCheck(v: unknown): AppSettings['crossCheck'] {
-  if (!isObj(v)) return undefined;
-  const checkers = (Array.isArray(v.checkers) ? v.checkers : []).flatMap((c) => {
-    if (!isObj(c) || typeof c.id !== 'string' || !c.id || !CHECKER_KINDS.includes(c.kind as never)) return [];
-    const out: Obj = { id: c.id, kind: c.kind, enabled: c.enabled !== false };
-    pickTyped(c, out, { url: 'string', folderId: 'string', providerId: 'string' });
-    return [out as unknown as NonNullable<AppSettings['crossCheck']>['checkers'][number]];
-  });
-  return { enabled: v.enabled === true, checkers, judge: strOr(v.judge, 'main'), mode: oneOf(v.mode, ['report', 'fix'] as const, 'report') };
-}
 
 function cleanPreset(v: unknown): ModelPreset | null {
   if (!isObj(v) || typeof v.id !== 'string' || typeof v.name !== 'string') return null;
@@ -361,10 +347,6 @@ export function migrateSettings(raw: unknown): AppSettings {
   if (out.exportPageLength !== undefined && !['normal', 'long', 'whole'].includes(out.exportPageLength as string)) delete out.exportPageLength;
   if (out.editorPageList !== undefined && !['bottom', 'right'].includes(out.editorPageList as string)) delete out.editorPageList;
   if (out.lamaMode !== undefined && !['off', 'engine', 'browser'].includes(out.lamaMode as string)) delete out.lamaMode;
-  if (r.crossCheck !== undefined) {
-    const cc = cleanCrossCheck(r.crossCheck);
-    if (cc) out.crossCheck = cc;
-  }
   if (Array.isArray(r.presets)) out.presets = r.presets.map(cleanPreset).filter((p): p is ModelPreset => !!p);
   return out as unknown as AppSettings;
 }

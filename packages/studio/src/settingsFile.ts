@@ -14,23 +14,16 @@ export function sanitizeSettings(s: AppSettings): AppSettings {
   const clean = JSON.parse(JSON.stringify(s)) as AppSettings;
   clean.providers = (clean.providers ?? []).map(({ apiKey: _key, ...p }) => ({ ...p, baseUrl: sanitizeUrl(p.baseUrl) ?? '' }));
   if (clean.engine) clean.engine = { ...clean.engine, url: sanitizeUrl(clean.engine.url) ?? '', token: '' };
-  if (clean.crossCheck) {
-    clean.crossCheck = {
-      ...clean.crossCheck,
-      checkers: (clean.crossCheck.checkers ?? []).map((c) => {
-        const { apiKey: _key, ...rest } = c as typeof c & { apiKey?: string };
-        return rest.url !== undefined ? { ...rest, url: sanitizeUrl(rest.url) } : rest;
-      }),
-    };
-  }
+  // Left by an older version (the cross-check with other translators was removed).
+  delete (clean as { crossCheck?: unknown }).crossCheck;
   delete clean.modelCatalog;
   delete clean.modelChecks;
   return clean;
 }
 
 /**
- * Settings as a file, to move them to another computer: models, profiles, glossary, presets,
- * «Сверка»… Never the API keys or the engine token (they stay in this browser's secret store).
+ * Settings as a file, to move them to another computer: models, profiles, glossary, presets…
+ * Never the API keys or the engine token (they stay in this browser's secret store).
  */
 export function settingsToFile(s: AppSettings, version: string): string {
   return JSON.stringify({ app: 'AI Translate', kind: 'settings', version, date: new Date().toISOString(), settings: sanitizeSettings(s) }, null, 2);
@@ -48,7 +41,7 @@ const sameUrl = (a: string | undefined, b: string | undefined) => (a ?? '').trim
 
 /**
  * Read a settings file (untrusted: it may come from anyone). Keys are kept in the secret store by
- * provider / checker id, so a file that reuses an id with another address would send this
+ * provider id, so a file that reuses an id with another address would send this
  * computer's key there: such ids lose their stored key, and the engine token is kept only when the
  * engine address is the same.
  */
@@ -66,15 +59,6 @@ export function readSettingsFile(text: string, current: AppSettings): SettingsIm
     }
     return p;
   });
-  if (next.crossCheck) {
-    for (const c of next.crossCheck.checkers) {
-      const here = current.crossCheck?.checkers.find((x) => x.id === c.id);
-      if (!here || here.kind !== c.kind || !sameUrl(here.url, c.url) || here.providerId !== c.providerId) {
-        dropSecrets.push(`checker:${c.id}`);
-        changed.push(`${c.kind}${c.url ? `: ${sanitizeUrl(c.url)}` : ''}`);
-      }
-    }
-  }
   const sameEngine = sameUrl(current.engine.url, next.engine.url);
   if (!sameEngine) changed.push(`engine: ${sanitizeUrl(next.engine.url)}`);
   const settings: AppSettings = { ...next, engine: { ...next.engine, token: sameEngine ? current.engine.token : '' }, modelChecks: current.modelChecks, modelCatalog: current.modelCatalog };

@@ -11,13 +11,14 @@ function withSecrets(): AppSettings {
     { ...s.providers[0], id: 'openai', apiKey: 'sk-provider', baseUrl: 'https://user:pass@api.example.com/v1?key=q-secret#frag' },
   ];
   s.engine = { ...s.engine, url: 'http://admin:pw@192.168.1.5:8765/?token=e-secret', token: 'tok-engine' };
-  s.crossCheck = {
+  // Left by an older version (the cross-check with other translators was removed).
+  (s as unknown as { crossCheck: unknown }).crossCheck = {
     enabled: true,
     judge: 'main',
     mode: 'report',
     checkers: [
       { id: 'c1', kind: 'libre', enabled: true, url: 'https://lt:pw@libre.example.com/?api_key=l-secret' },
-      { id: 'c2', kind: 'deepl', enabled: true, apiKey: 'deepl-secret' } as never,
+      { id: 'c2', kind: 'deepl', enabled: true, apiKey: 'deepl-secret' },
     ],
   };
   return s;
@@ -33,7 +34,7 @@ describe('sanitizeSettings', () => {
     const clean = sanitizeSettings(withSecrets());
     expect(clean.providers[0].baseUrl).toBe('https://api.example.com/v1');
     expect(clean.engine.url).toBe('http://192.168.1.5:8765/');
-    expect(clean.crossCheck?.checkers[0].url).toBe('https://libre.example.com/');
+    expect('crossCheck' in clean).toBe(false);
   });
 
   it('leaves plain addresses alone', () => {
@@ -73,19 +74,18 @@ describe('settings file import', () => {
     expect(got.dropSecrets).not.toContain('provider:openai');
   });
 
-  it('checkers with another address or kind lose their key; the engine token stays only for the same engine', () => {
+  it('the engine token stays only for the same engine; an old cross-check section is dropped', () => {
     const here = defaultSettings();
     here.engine = { ...here.engine, url: 'http://127.0.0.1:8765', token: 'tok-here' };
-    here.crossCheck = { enabled: true, judge: 'main', mode: 'report', checkers: [{ id: 'c1', kind: 'libre', enabled: true, url: 'http://127.0.0.1:5000' }, { id: 'c2', kind: 'deepl', enabled: true }] };
     const got = readSettingsFile(
       file((s) => {
         s.engine = { ...s.engine, url: 'https://evil.example:8765' };
-        s.crossCheck = { enabled: true, judge: 'main', mode: 'report', checkers: [{ id: 'c1', kind: 'libre', enabled: true, url: 'https://evil.example' }, { id: 'c2', kind: 'deepl', enabled: true }] };
+        (s as unknown as { crossCheck: unknown }).crossCheck = { enabled: true, judge: 'main', mode: 'report', checkers: [{ id: 'c1', kind: 'libre', enabled: true, url: 'https://evil.example' }] };
       }),
       here,
     );
-    expect(got.dropSecrets).toContain('checker:c1');
-    expect(got.dropSecrets).not.toContain('checker:c2');
+    expect('crossCheck' in got.settings).toBe(false);
+    expect(got.dropSecrets.some((k) => k.startsWith('checker:'))).toBe(false);
     expect(got.settings.engine.token).toBe('');
     const same = readSettingsFile(file((s) => (s.engine = { ...s.engine, url: 'http://127.0.0.1:8765/' })), here);
     expect(same.settings.engine.token).toBe('tok-here');
@@ -118,8 +118,7 @@ describe('migrateSettings with untrusted input', () => {
     expect(s.providers[0].kind).toBe('openai-compatible');
     expect(s.providers[0].vision).toBe(false);
     expect(s.providers[0].timeoutMs).toBeUndefined();
-    expect(s.crossCheck?.checkers).toEqual([]);
-    expect(s.crossCheck?.mode).toBe('report');
+    expect('crossCheck' in s).toBe(false);
     expect(s.glossary).toHaveLength(1);
     expect(s.glossary[0].forbidden).toEqual(['c']);
     expect(s.profiles.length).toBeGreaterThan(0);
@@ -144,8 +143,8 @@ describe('migrateSettings with untrusted input', () => {
     expect(s.providers).toEqual(d.providers);
     expect(s.glossary[0].target).toBe('Танака');
     expect(s.historyDays).toBe(7);
-    expect(s.crossCheck?.mode).toBe('fix');
-    expect(s.crossCheck?.checkers[0].kind).toBe('deepl');
+    // The removed cross-check section of older versions is silently dropped.
+    expect('crossCheck' in s).toBe(false);
   });
 });
 

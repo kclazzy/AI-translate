@@ -1,4 +1,3 @@
-import type { CheckerConfig } from '../translate/crosscheck';
 import { familyFor, setCatalog } from '../llm/catalog';
 import type { PrivacyMode } from '../llm/privacy';
 import type { ProviderConfig } from '../llm/types';
@@ -41,12 +40,6 @@ export interface PipelineConfig {
   lamaEngine?: boolean;
   /** Where LaMa runs: the local engine, or the browser (needs `inpaint` in the pipeline deps). */
   lama?: 'engine' | 'browser';
-  /** «Сверка»: other translators to compare with and the judge (keys filled in memory only). */
-  crossCheck?: {
-    checkers: (CheckerConfig & { apiKey?: string; provider?: ProviderConfig })[];
-    judge: ProviderConfig | null;
-    mode: 'report' | 'fix';
-  };
 }
 
 function withKeepAlive(p: ProviderConfig | undefined, s: AppSettings): ProviderConfig | null {
@@ -65,18 +58,6 @@ export function fastLocalActive(s: AppSettings): boolean {
 
 /** How long a local model stays in video memory after the last page, unless the user changes it. */
 export const DEFAULT_KEEP_ALIVE_MIN = 5;
-
-function crossCheckConfig(s: AppSettings): PipelineConfig['crossCheck'] {
-  const cc = s.crossCheck;
-  if (!cc?.enabled) return undefined;
-  const checkers = cc.checkers
-    .filter((c) => c.enabled)
-    .map((c) => ({ ...c, apiKey: (c as { apiKey?: string }).apiKey, provider: c.kind === 'llm' ? providerById(s, c.providerId) : undefined }))
-    .filter((c) => c.kind !== 'llm' || c.provider);
-  if (!checkers.length) return undefined;
-  const judge = cc.judge === 'none' ? null : cc.judge === 'main' ? providerById(s, s.translationProviderId) ?? providerById(s, s.visionProviderId) ?? null : providerById(s, cc.judge) ?? null;
-  return { checkers, judge, mode: cc.mode };
-}
 
 export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): PipelineConfig {
   setCatalog(s.modelCatalog);
@@ -99,7 +80,6 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     onlySourceLang: (s.onlySourceLang && s.sourceLang !== 'auto') || undefined,
     inpaintExpand: s.inpaintExpand,
     lama: (s.lamaMode ?? (s.lamaEngine ? 'engine' : 'off')) === 'off' ? undefined : (s.lamaMode ?? 'engine') as 'engine' | 'browser',
-    crossCheck: crossCheckConfig(s),
   };
 }
 
@@ -109,7 +89,7 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
   const payload = {
     v: 1,
     mode: c.mode,
-    // Privacy decides which reviewers and cross-check translators may run, so it changes the result.
+    // Privacy decides whether the reviewer may run, so it changes the result.
     privacy: c.privacy,
     src: c.sourceLang,
     dst: c.targetLang,
@@ -126,7 +106,6 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     osl: c.onlySourceLang ? 1 : undefined,
     ie: c.inpaintExpand,
     lama: c.lama ?? (c.lamaEngine ? 'engine' : undefined),
-    cc: c.crossCheck ? [c.crossCheck.mode, c.crossCheck.judge?.model ?? null, c.crossCheck.checkers.map((x) => [x.kind, x.provider?.model ?? x.url ?? ''])] : undefined,
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);
 }

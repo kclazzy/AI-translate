@@ -5,7 +5,6 @@ import { httpError, OUT_OF_MEMORY_RE } from '../src/llm/http';
 import { OpenAICompatibleProvider } from '../src/llm/openai';
 import { EngineClient } from '../src/pipeline/engine';
 import { emptyContext, mergeContext } from '../src/translate/context';
-import { crossCheckPage } from '../src/translate/crosscheck';
 import { extractJson, extractJsonInfo, parseTranslationAnswer, parseVisionAnswer } from '../src/translate/parse';
 import { DEFAULT_PROFILES } from '../src/translate/profiles';
 import { contextData, textTranslateInstruction } from '../src/translate/prompt';
@@ -59,13 +58,6 @@ describe('cut-off and malformed answers', () => {
     const res = await translateBlocks(provider, { sourceLang: 'en', targetLang: 'ru', profile: DEFAULT_PROFILES[0], glossary: [], translateSfx: true }, exp, { retries: 0 });
     expect(res.translations.get('b1')!.lowConfidence).toBe(true);
     expect(res.translations.has('b4')).toBe(false);
-  });
-
-  it('a judge cut off mid-sentence does not replace our translation', async () => {
-    const blocks = [{ id: 'b1', textType: 'DIALOGUE', originalText: 'He is not here', translatedText: 'Его здесь нет', translate: true } as TextBlock];
-    const judge = { config: configFromPreset('lmstudio', 'j'), complete: async () => ({ text: '{"checks":[{"id":"b1","ok":false,"better":"Он не', inputTokens: 0, outputTokens: 0, model: 'j', truncated: true }) } as any;
-    await crossCheckPage(blocks, { references: [{ label: 'X', translate: async () => ['Он не здесь'] }], judge, mode: 'fix', targetLang: 'ru' });
-    expect(blocks[0].translatedText).toBe('Его здесь нет');
   });
 });
 

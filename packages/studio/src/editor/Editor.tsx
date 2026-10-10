@@ -65,9 +65,9 @@ function clonePixels(p: PixelData): PixelData {
   return { width: p.width, height: p.height, data: new Uint8ClampedArray(p.data) };
 }
 
-/** A block the proof-reader should look at: the translators disagree, the check found problems, or the text does not fit. */
+/** A block the proof-reader should look at: the check found problems, or the text does not fit. */
 function hasRemark(b: TextBlock, overflow: Set<string>): boolean {
-  return b.check?.verdict === 'differs' || !!b.qa?.issues.length || overflow.has(b.id);
+  return !!b.qa?.issues.length || overflow.has(b.id);
 }
 
 /** Rows a block's letters can reach (overflowing or rotated text runs past its box). */
@@ -838,22 +838,6 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   };
 
   // ---- actions -----------------------------------------------------------------------------
-  /** «Сверить страницу»: compare every block with the translators chosen in the settings. */
-  const check = useAction(async () => {
-    const sent = new Map(blocksRef.current.map((b) => [b.id, b.translatedText]));
-    const res = await platform.service.crossCheck(blocksRef.current, page.targetLang);
-    const byId = new Map(res.blocks.map((b) => [b.id, b]));
-    // Only the result of the check is taken; a text the user changed while it ran is kept.
-    commitWith((prev) =>
-      prev.map((b) => {
-        const c = byId.get(b.id);
-        if (!c) return b;
-        return { ...b, check: c.check, translatedText: b.translatedText === sent.get(b.id) ? c.translatedText : b.translatedText };
-      }),
-    );
-    const differs = res.blocks.filter((b) => b.check?.verdict === 'differs').length;
-    toast(res.errors.length ? tr('Сверка: расхождений {0}. Не ответили: {1}', differs, res.errors.join('; ')) : tr('Сверка: расхождений {0}', differs));
-  });
   const [back, setBack] = useState<{ id: string; text: string; by: string } | null>(null);
   const backTr = useAction(async () => {
     if (!sel) return;
@@ -1206,30 +1190,6 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           ) : null}
           {sel && st ? (
             <div className="ait-panel">
-              {sel.check?.refs.length ? (
-                <div className={sel.check.verdict === 'differs' ? 'ait-notice' : 'ait-panel-soft'} data-testid="check-report" style={{ display: 'grid', gap: 4, marginBottom: 8 }}>
-                  <b>{sel.check.verdict === 'differs' ? tr('⚖ Сверка: есть расхождение') : tr('⚖ Сверка: совпадает по смыслу')}</b>
-                  {sel.check.note ? <small>{sel.check.note}</small> : null}
-                  {sel.check.better ? (
-                    <small>
-                      {tr('Вариант судьи: «{0}»', sel.check.better)}{' '}
-                      {sel.check.better !== sel.translatedText ? <button className="pp-link" onClick={() => updateBlock(sel.id, { translatedText: sel.check!.better! })}>{tr('Взять')}</button> : null}
-                    </small>
-                  ) : null}
-                  {sel.check.refs.map((r) => (
-                    <small key={r.by}>
-                      <b>{r.by}:</b> {r.text}{' '}
-                      {r.text !== sel.translatedText ? <button className="pp-link" onClick={() => updateBlock(sel.id, { translatedText: r.text })}>{tr('Взять')}</button> : null}
-                    </small>
-                  ))}
-                  {sel.check.before !== undefined && sel.check.before !== sel.translatedText ? (
-                    <small>
-                      {tr('Исправлено сверкой. Было: «{0}»', sel.check.before)}{' '}
-                      <button className="pp-link" onClick={() => updateBlock(sel.id, { translatedText: sel.check!.before! })}>{tr('Вернуть')}</button>
-                    </small>
-                  ) : null}
-                </div>
-              ) : null}
               {sel.qa && (sel.qa.issues.length || sel.qa.before !== undefined) ? (
                 <div className="ait-notice" data-testid="qa-report" style={{ display: 'grid', gap: 4, marginBottom: 8 }}>
                   <b>{tr('Проверка перевода')}</b>
@@ -1367,19 +1327,13 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
 
           <div className="ait-panel">
             <h2 style={{ fontSize: 14 }}>{tr('Блоки (')}{blocks.length})</h2>
-            <div className="ait-row" style={{ flexWrap: 'wrap', marginBottom: 6 }}>
-              <button className="ait-btn small" data-testid="check-page" onClick={() => void check.run()} disabled={check.busy || !blocks.length} title={tr('Сравнить перевод страницы с другими переводчиками (Настройки → Сверка)')}>
-                {check.busy ? tr('Сверяю…') : tr('⚖ Сверить страницу')}
-              </button>
-            </div>
             <div className="ait-row" style={{ flexWrap: 'wrap', marginBottom: 6, alignItems: 'center' }} data-testid="remark-nav">
               <button className="ait-btn small" onClick={() => jumpRemark(-1)} disabled={!remarks.length} title={tr('Предыдущее замечание (Shift+N)')}>↑</button>
-              <button className="ait-btn small" onClick={() => jumpRemark(1)} disabled={!remarks.length} title={tr('Следующее замечание: ⚖ сверка, 🔍 проверка или текст не помещается (N)')}>
+              <button className="ait-btn small" onClick={() => jumpRemark(1)} disabled={!remarks.length} title={tr('Следующее замечание: 🔍 проверка или текст не помещается (N)')}>
                 {tr('Следующее замечание')}
               </button>
               <small className="ait-muted">{remarks.length ? tr('Замечаний: {0}', remarks.length) : tr('Замечаний нет')}</small>
             </div>
-            <ErrorBox error={check.error} />
             <div className="ait-row" style={{ flexWrap: 'wrap', marginBottom: 6 }} data-testid="texts-io">
               <button
                 className="ait-btn small"
@@ -1417,7 +1371,6 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
               {blocks.map((b, i) => (
                 <button key={b.id} aria-pressed={b.id === selected || multi.has(b.id)} onClick={(e) => { const add = e.ctrlKey || e.shiftKey || e.metaKey; pick(b.id, add); if (!add) scrollToBlock(b); setTool('select'); }}>
                   {i + 1}. {b.translatedText.slice(0, 40) || <em className="ait-muted">{tr('пусто')}</em>} {overflow.has(b.id) ? '⚠' : ''}
-                  {b.check?.verdict === 'differs' ? <span title={b.check.note ?? tr('Расходится с другими переводчиками')}> ⚖</span> : null}
                   {b.qa?.issues.length ? <span title={b.qa.issues.map((q) => `${QA_LABELS[q.kind]}: ${qaNote(q)}`).join('\n')}> 🔍{b.qa.issues.length}</span> : null}
                 </button>
               ))}

@@ -1,19 +1,13 @@
 import type { ImageBackend, ImageMime } from '../image/backend';
-import type { FetchLike } from '../llm/types';
 import { renderTiles, encodeTiles } from '../render/render';
 import { DEFAULT_STYLE_DEFAULTS, type StyleDefaults } from '../render/style';
-import type { PageResult, TextBlock, Usage } from '../types';
+import type { PageResult } from '../types';
 import type { PipelineConfig } from './config';
 import { runEnginePipeline } from './engine';
 import { runStandalonePipeline, type PipelineOutput, type PipelineRequest, type StandaloneDeps } from './standalone';
 import { createProvider } from '../llm/presets';
 import { assertPrivacy } from '../llm/privacy';
 import { qaPage } from '../translate/qa';
-import { CHECKER_LABELS, checkerIsCloud, crossCheckPage, machineTranslate, type Reference } from '../translate/crosscheck';
-import { translateBlocks } from '../translate/translator';
-import type { PromptInput } from '../translate/prompt';
-import type { TranslationContext } from '../translate/context';
-import type { LlmProvider } from '../llm/types';
 
 export async function runPipeline(req: PipelineRequest, deps: StandaloneDeps): Promise<PipelineOutput> {
   const out = req.config.mode === 'engine' ? await runEnginePipeline(req, deps) : await runStandalonePipeline(req, deps);
@@ -34,56 +28,7 @@ export async function runPipeline(req: PipelineRequest, deps: StandaloneDeps): P
     const usage = await qaPage(out.page.blocks, { provider, mode, targetLang: req.config.targetLang, glossary: req.config.glossary, context: out.context ?? req.context, signal: req.signal });
     out.page.usage = [...out.page.usage, ...usage];
   }
-  if (req.config.crossCheck && !req.generic && out.page.blocks.length) {
-    req.onStage?.({ stage: 'checking', message: 'crosscheck' });
-    const usage = await runCrossCheck(out.page.blocks, req.config, deps, { signal: req.signal, context: out.context ?? req.context });
-    out.page.usage = [...out.page.usage, ...usage];
-  }
   return out;
-}
-
-/**
- * «Сверка» of a page's blocks with the translators chosen in the settings. Text goes only where
- * the privacy mode allows: in «local» mode only translators on this computer / network are asked.
- */
-export async function runCrossCheck(
-  blocks: TextBlock[],
-  config: PipelineConfig,
-  deps: { fetchImpl?: FetchLike },
-  opts: { signal?: AbortSignal; context?: TranslationContext; onError?: (label: string, e: unknown) => void } = {},
-): Promise<Usage[]> {
-  const cc = config.crossCheck;
-  if (!cc) return [];
-  const fetchImpl: FetchLike = deps.fetchImpl ?? ((u, i) => fetch(u, i));
-  const usage: Usage[] = [];
-  const references: Reference[] = [];
-  for (const c of cc.checkers) {
-    if (config.privacy === 'local' && checkerIsCloud(c, c.provider)) continue;
-    if (c.kind === 'llm' && c.provider) {
-      const provider = createProvider(c.provider, deps.fetchImpl);
-      references.push({
-        label: c.provider.model || c.provider.label,
-        translate: async (texts) => {
-          const input: PromptInput = { sourceLang: config.sourceLang, targetLang: config.targetLang, profile: config.profile, glossary: config.glossary, context: opts.context, translateSfx: config.translateSfx };
-          const res = await translateBlocks(provider, input, texts.map((text, i) => ({ id: `r${i}`, type: 'DIALOGUE', text })), { signal: opts.signal, retries: 0 });
-          usage.push(...res.usage);
-          return texts.map((_, i) => res.translations.get(`r${i}`)?.text ?? '');
-        },
-      });
-    } else if (c.kind !== 'llm') {
-      references.push({ label: CHECKER_LABELS[c.kind], translate: (texts) => machineTranslate(c, c.apiKey, texts, config.sourceLang, config.targetLang, fetchImpl, opts.signal) });
-    }
-  }
-  let judge: LlmProvider | null = cc.judge ? createProvider(cc.judge, deps.fetchImpl) : null;
-  if (cc.judge) {
-    try {
-      assertPrivacy(config.privacy, cc.judge, 'text');
-    } catch {
-      judge = null;
-    }
-  }
-  usage.push(...(await crossCheckPage(blocks, { references, judge, mode: cc.mode, targetLang: config.targetLang, signal: opts.signal, onError: opts.onError })));
-  return usage;
 }
 
 export function styleDefaultsFor(config: Pick<PipelineConfig, 'targetLang' | 'sfxStyle'>, fonts?: { dialogue?: string; narration?: string; sfx?: string; scale?: number }): StyleDefaults {
