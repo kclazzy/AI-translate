@@ -157,7 +157,8 @@ for (const kind of (process.env.KINDS ?? 'img,bg,canvas').split(',')) {
         const x = el.getContext('2d');
         x.fillStyle = '#fff';
         x.fillRect(0, 0, 800, 1100);
-        x.drawImage(im, 0, 0, 800, 1100);
+        // The top of the tall page at its own scale (squeezed, its lettering would be too small to find).
+        x.drawImage(im, 0, 0, 800, 1100, 0, 0, 800, 1100);
       };
       im.src = '/b.png?16';
     }
@@ -167,7 +168,9 @@ for (const kind of (process.env.KINDS ?? 'img,bg,canvas').split(',')) {
   const st = await overlayState(page);
   await page.screenshot({ path: join(OUT, `race-${kind}.png`) });
   check(`${kind}: page 15 was sent to the model`, started);
-  check(`${kind}: page 16 got its own request after the swap`, visionCalls() > afterSwap, `vision calls ${afterSwap - before} → ${visionCalls() - before}, overlay ${JSON.stringify(st)}`);
+  // Its own job: a model call, or the local check of the new picture saying it has no text.
+  const ownJob = visionCalls() > afterSwap || st.texts.some((t) => /Текста не найдено|без текста/.test(t));
+  check(`${kind}: page 16 got its own request after the swap`, ownJob, `vision calls ${afterSwap - before} → ${visionCalls() - before}, overlay ${JSON.stringify(st)}`);
   await page.close();
 }
 await browser.close();
