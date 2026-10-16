@@ -5,6 +5,7 @@ import type { TextType, Usage } from '../types';
 import { withRetry } from '../util/retry';
 import { applyForbiddenFixes, findGlossaryHits, findViolations, type GlossaryHit } from './glossary';
 import { isDegenerate, parseTranslationAnswer, tameRuns } from './parse';
+import { completeFitted, CONTEXT_LEVELS, estimateTokens, fitRequest, growRoom, SAFETY, windowOf } from './budget';
 import { buildSystemPrompt, contextData, glossaryExtra, phrasebookData, repairInstruction, textTranslateInstruction, type BlockForTranslation, type PromptInput } from './prompt';
 
 export interface TranslateBlocksResult {
@@ -51,20 +52,41 @@ export async function translateBlocks(
 
   // Same system prompt for every page (cacheable prefix); this page's terms go into the message.
   const system = buildSystemPrompt(input);
-  const user = textTranslateInstruction(blocks, hintStrings, contextData(input), phrasebookData(input, blocks), glossaryExtra(input, [...allHits.values()]));
+  const texts = blocks.map((b) => b.text);
+  const userAt = (level: number) => {
+    const lv = CONTEXT_LEVELS[level];
+    return textTranslateInstruction(blocks, hintStrings, contextData(input, lv, texts), lv.phrasebook ? phrasebookData(input, blocks) : '', glossaryExtra(input, [...allHits.values()]));
+  };
+  const systemTokens = estimateTokens(system);
+  const inputAt = (level: number) => systemTokens + estimateTokens(userAt(level));
+  const win = windowOf(provider.config);
   const usage: Usage[] = [];
 
   const retries = opts.retries ?? 2;
   // After an answer cut off at the output limit, the next try gets twice the room.
   let room = Math.min(8192, 400 + blocks.length * 160);
+  // A page too long for the window even without the series context: translate it in two halves
+  // (in reading order, the first half's last lines go along as earlier lines of the scene).
+  if (win && blocks.length >= 4) {
+    const fit = fitRequest(win, room, inputAt);
+    if (!fit || fit.level >= CONTEXT_LEVELS.length - 1) return translateInHalves(provider, input, blocks, opts);
+  }
+  // Low and steady: the same term the same way on every page (a temperature set by the user wins).
+  const temperature = provider.config.temperature ?? 0.15;
+  let level = 0;
   return withRetry(
     async (attempt) => {
       const last = attempt >= retries;
+      const sent = await completeFitted(win, room, inputAt, (l, maxTokens) => provider.complete({ system, messages: [{ role: 'user', content: userAt(l) }], json: true, signal: opts.signal, maxTokens, temperature }), { from: level });
+      level = sent.level;
+      const user = userAt(level);
       const messages: ChatMessage[] = [{ role: 'user', content: user }];
-      const first = await provider.complete({ system, messages, json: true, signal: opts.signal, maxTokens: room });
+      const first = sent.res;
       usage.push(usageFrom(provider, first));
       if (first.truncated && !last) {
-        room = Math.min(16384, room * 2);
+        const more = growRoom(win, sent.maxTokens, sent.inputTokens);
+        if (more <= sent.maxTokens && level < CONTEXT_LEVELS.length - 1) level++;
+        room = win ? more : Math.min(16384, room * 2);
         throw new AppError('TRANSLATION_INVALID_OUTPUT', { retryable: true, detail: 'Answer cut off at the output limit' });
       }
       let answer = parseTranslationAnswer(first.text, blocks, last);
@@ -72,10 +94,12 @@ export async function translateBlocks(
       const low = new Set<string>(answer.repaired || first.truncated ? answer.translations.keys() : []);
       const sources = new Map(blocks.map((b) => [b.id, b.text]));
       let problems = collectProblems(answer.translations, hitsByBlock, answer.missing, sources);
-      if (problems.length) {
+      // The repair round re-sends the request and the first answer: only when that still fits the window.
+      const repairFits = !win || sent.inputTokens + estimateTokens(first.text) + 400 + sent.maxTokens <= win * (1 - SAFETY);
+      if (problems.length && repairFits) {
         messages.push({ role: 'assistant', content: first.text }, { role: 'user', content: repairInstruction(problems) });
         try {
-          const second = await provider.complete({ system, messages, json: true, signal: opts.signal, maxTokens: room });
+          const second = await provider.complete({ system, messages, json: true, signal: opts.signal, maxTokens: sent.maxTokens, temperature });
           usage.push(usageFrom(provider, second));
           const repaired = parseTranslationAnswer(second.text, blocks);
           const secondLow = !!(repaired.repaired || second.truncated);
@@ -106,6 +130,21 @@ export async function translateBlocks(
     },
     { retries, signal: opts.signal },
   );
+}
+
+/** Translate a long page in two halves; the second half sees the first half's last lines as earlier lines. */
+async function translateInHalves(provider: LlmProvider, input: PromptInput, blocks: BlockForTranslation[], opts: { signal?: AbortSignal; retries?: number }): Promise<TranslateBlocksResult> {
+  const mid = Math.ceil(blocks.length / 2);
+  const a = await translateBlocks(provider, input, blocks.slice(0, mid), opts);
+  const tail = blocks.slice(Math.max(0, mid - 2), mid).map((b) => ({ src: b.text, dst: a.translations.get(b.id)?.text ?? '' })).filter((l) => l.dst);
+  const ctx = input.context ? { ...input.context, recentLines: [...input.context.recentLines, ...tail] } : undefined;
+  const b = await translateBlocks(provider, { ...input, context: ctx }, blocks.slice(mid), opts);
+  return {
+    translations: new Map([...a.translations, ...b.translations]),
+    entities: [...a.entities, ...b.entities],
+    summary: [a.summary, b.summary].filter(Boolean).join(' '),
+    usage: [...a.usage, ...b.usage],
+  };
 }
 
 function collectProblems(translations: Map<string, { text: string }>, hitsByBlock: Map<string, GlossaryHit[]>, missing: string[], sources?: Map<string, string>): string[] {

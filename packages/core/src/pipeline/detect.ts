@@ -293,11 +293,15 @@ export function ellipseBubble(box: Box, fill: string, width: number, height: num
 
 /** Confident text boxes no block covers: the model skipped them (at most `max`, best first). */
 export function missedText(blocks: TextBlock[], dets: Detection[], max = MISSED_MAX): Box[] {
+  return missedDetections(blocks, dets, max).map((d) => d.box);
+}
+
+/** The same, with the detector's kind of each (text in a bubble or free). */
+export function missedDetections(blocks: TextBlock[], dets: Detection[], max = MISSED_MAX): Detection[] {
   const known = blocks.flatMap((b) => (b.textBox ? [b.bbox, b.textBox] : [b.bbox]));
   return dets
     .filter((d) => isTextKind(d.kind) && d.score >= MISSED_MIN)
     .filter((d) => !known.some((k) => interArea(k, d.box) > boxArea(d.box) * 0.25))
     .sort((a, b) => b.score - a.score)
-    .slice(0, max)
-    .map((d) => d.box);
+    .slice(0, max);
 }

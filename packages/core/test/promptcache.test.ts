@@ -77,16 +77,21 @@ describe('Ollama retry after a cut-off answer', () => {
     const p = new OpenAICompatibleProvider({ ...configFromPreset('ollama', 'qwen3.5:9b'), numCtx: 8192, fixedCtx: true }, f as any);
     const r = await p.complete({ system: '', messages: [{ role: 'user', content: 'x' }], json: true, maxTokens: 4096 });
     expect(bodies.map((b) => b.options.num_ctx)).toEqual([8192, 8192]);
-    expect(bodies.map((b) => b.options.num_predict)).toEqual([4096, 8192]);
+    // Twice the room, but never past the window: 8192 − 3000 prompt tokens − 64.
+    expect(bodies.map((b) => b.options.num_predict)).toEqual([4096, 5128]);
     expect(r.text).toBe('{"blocks":[]}');
   });
 
   it('caps num_predict at 16384 and defaults num_ctx to 8192', async () => {
     const { bodies, f } = capture((n) => (n === 1 ? cut : done));
-    const p = new OpenAICompatibleProvider(configFromPreset('ollama', 'qwen3.5:9b'), f as any);
+    const p = new OpenAICompatibleProvider({ ...configFromPreset('ollama', 'qwen3.5:9b'), numCtx: 32768 }, f as any);
     await p.complete({ system: '', messages: [{ role: 'user', content: 'x' }], maxTokens: 12000 });
-    expect(bodies.map((b) => b.options.num_ctx)).toEqual([8192, 8192]);
+    expect(bodies.map((b) => b.options.num_ctx)).toEqual([32768, 32768]);
     expect(bodies.map((b) => b.options.num_predict)).toEqual([12000, 16384]);
+    // Default window 8192: no retry that could never fit.
+    const two = capture((n) => (n === 1 ? cut : done));
+    await new OpenAICompatibleProvider(configFromPreset('ollama', 'qwen3.5:9b'), two.f as any).complete({ system: '', messages: [{ role: 'user', content: 'x' }], maxTokens: 12000 });
+    expect(two.bodies.map((b) => b.options.num_ctx)).toEqual([8192]);
   });
 
   it('does not retry when num_predict is already at the cap', async () => {

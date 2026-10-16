@@ -1,5 +1,6 @@
 import { AppError } from '../errors';
 import type { FetchLike } from './types';
+import { parseContextError } from '../translate/budget';
 import { tr } from '../i18n';
 
 function hostPort(url: string): { host: string; port: string; local: boolean } {
@@ -60,6 +61,12 @@ export async function httpError(res: Response, providerLabel: string, url = '', 
   // A missing model is reported as such even when its name happens to look like a memory word.
   if (res.status >= 400 && res.status !== 404 && !MODEL_NOT_FOUND_RE.test(msg) && OUT_OF_MEMORY_RE.test(msg)) {
     return new AppError('OUT_OF_MEMORY', { retryable: true, detail: tr('{0}: {1}. Закройте другие модели и программы, занимающие видеокарту, или выберите модель поменьше.', provider, msg) });
+  }
+  // Ollama / llama.cpp: "request (8285 tokens) exceeds the available context size (8192 tokens)".
+  const over = res.status >= 400 ? parseContextError(msg) ?? parseContextError(body.slice(0, 2000)) : null;
+  if (over) {
+    const nums = over.prompt && over.ctx ? `${over.prompt}/${over.ctx}` : '';
+    return new AppError('CONTEXT_TOO_LONG', { retryable: false, detail: tr('{0}: запрос не поместился в окно модели (токены: {1}). Программа сама сокращает контекст серии; если ошибка повторяется — выберите качество «Быстро» или очистите контекст серии в Студии → «Глоссарий и контекст».', provider, nums ? `[${nums}]` : msg.slice(0, 120)) });
   }
   if (res.status === 401 || res.status === 403) return new AppError('INVALID_API_KEY', { detail: `${provider}: ${msg || `HTTP ${res.status}`}` });
   if (res.status === 429) {

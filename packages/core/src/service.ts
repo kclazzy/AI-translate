@@ -199,10 +199,12 @@ export class TranslateService {
     }
     const baseKey = await this.cacheKey(bytes, config, { generic: opts.generic, fonts: lookOf(settings.fonts) });
     const noSkip = opts.noSkip ?? !!opts.force;
-    const prepared = await this.takeAhead(`${baseKey}|${noSkip ? 1 : 0}`);
+    const aheadId = `${baseKey}|${noSkip ? 1 : 0}`;
     if (!opts.force) {
       const hit = await this.db.get<StoredResult>('results', baseKey);
       if (hit) {
+        // A cached page never waits for a picture prepared ahead (detector windows it does not need).
+        this.ahead.delete(aheadId);
         // Only the text size changed in the settings: draw the text again, no model needed.
         if ((hit.fontScale ?? 1) !== (settings.fonts.scale ?? 1) && !hit.strip) {
           const again = await this.saveEdited(baseKey, hit.page);
@@ -216,6 +218,7 @@ export class TranslateService {
         return { result: hit, cached: true };
       }
     }
+    const prepared = await this.takeAhead(aheadId);
     const context = opts.generic ? undefined : await this.getContext(seriesKey);
     let key = baseKey;
     try {
@@ -290,6 +293,8 @@ export class TranslateService {
       const id = `${key}|${noSkip ? 1 : 0}`;
       const known = this.ahead.get(id);
       if (known) return void (await known);
+      // Already translated: nothing to prepare (reopening a chapter must not run the detector again).
+      if (!opts.force && ((await this.db.get('kv', `${META}${key}`)) || (await this.db.get('results', key)))) return;
       const promise = preparePage({ bytes, mime: realMime, config, generic: opts.generic, noSkip }, { backend: this.backend, fetchImpl: this.fetchImpl, detect: this.detector }).catch(() => undefined);
       this.ahead.set(id, promise);
       while (this.ahead.size > 2) this.ahead.delete(this.ahead.keys().next().value!);

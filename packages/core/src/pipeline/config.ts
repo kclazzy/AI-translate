@@ -60,16 +60,19 @@ export const MAX_SIDE: Record<Quality, number> = { fast: 1280, balanced: 1568, b
  * Ollama context window for one model, decided once from the settings and never changed between
  * requests (a different num_ctx makes Ollama load the model again). It must hold the picture, the
  * prompt and the answer: picture tokens (28 px patches of a page-shaped picture at the longest
- * side) + the prompt (instructions, glossary, series context, ≈ 2500) + a dense page's answer
+ * side) + the prompt (instructions, glossary, series context, ≈ 3500) + a dense page's answer
  * (≈ 3500; a longer answer only gets more output room, see readView), rounded up to 2 K. Never
  * less than the video-memory default, and at most what the card can hold.
  */
 export function contextFor(opts: { vramGb: number; quality: Quality; maxSide?: number; glossary?: number; image: boolean }): number {
-  const base = opts.vramGb >= 16 ? 16384 : 8192;
+  // Qwen3.5-style models keep a cache for only a few of their layers (≈ 32 KB per token): 12 K costs
+  // ≈ 0.4 GB on a 12 GB card, so it is the floor there; the request is still trimmed to fit (budget.ts).
+  const base = opts.vramGb >= 16 ? 16384 : opts.vramGb >= 12 ? 12288 : 8192;
   const cap = opts.vramGb >= 24 ? 32768 : opts.vramGb >= 16 ? 24576 : opts.vramGb >= 12 ? 16384 : 12288;
   const side = Math.min(MAX_SIDE[opts.quality], opts.maxSide ?? Infinity);
   const imageTokens = opts.image ? Math.ceil((side * (side / 1.4)) / (28 * 28)) : 0;
-  const prompt = 2500 + Math.min(150, opts.glossary ?? 0) * 20;
+  // Instructions ≈ 1500, glossary ≈ 20 per entry, the series context up to ≈ 2000 (CONTEXT_LEVELS[0]).
+  const prompt = 3500 + Math.min(150, opts.glossary ?? 0) * 20;
   const need = Math.ceil((imageTokens + prompt + 3500) / 2048) * 2048;
   return Math.max(base, Math.min(cap, need));
 }
@@ -82,7 +85,8 @@ function withKeepAlive(p: ProviderConfig | undefined, s: AppSettings, quality: Q
   // One window per model: the model that reads pictures gets room for one in every request (also
   // its text requests: translation, review), so the same model never gets two sizes.
   const glossary = s.glossary.filter((g) => g.enabled).length;
-  const numCtx = fam?.numCtx ?? contextFor({ vramGb: s.gpuVramGb ?? 12, quality, maxSide: fam?.maxSide, glossary, image: p.model === visionModel });
+  // A window the user set on the provider (settings file) wins over the family's and the computed one.
+  const numCtx = p.numCtx ?? fam?.numCtx ?? contextFor({ vramGb: s.gpuVramGb ?? 12, quality, maxSide: fam?.maxSide, glossary, image: p.model === visionModel });
   return { ...p, noThinking: p.noThinking ?? (isLocalProvider(p) ? fam?.noThinking : undefined), keepAliveMin: s.gpuKeepAliveMin ?? DEFAULT_KEEP_ALIVE_MIN, numCtx, fixedCtx: true };
 }
 

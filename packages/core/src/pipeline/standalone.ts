@@ -11,6 +11,7 @@ import { mergeContext, type ContextUpdate, type TranslationContext } from '../tr
 import { applyForbiddenFixes, findGlossaryHits, findViolations } from '../translate/glossary';
 import { isDegenerate, parseVisionAnswer, tameRuns, type VisionAnswer } from '../translate/parse';
 import { buildSystemPrompt, contextData, visionFullInstruction, visionOcrInstruction, visionPhrasebook, type PromptInput } from '../translate/prompt';
+import { completeFitted, CONTEXT_LEVELS, estimateTokens, growRoom, imageTokens, OCR_LEVEL, windowOf } from '../translate/budget';
 import { translateBlocks, usageFrom } from '../translate/translator';
 import type { Box, BubbleInfo, PageDebug, PageResult, StageEvent, TextBlock, TextStyle, Usage } from '../types';
 import { bytesToBase64, sha256Hex } from '../util/bytes';
@@ -21,8 +22,9 @@ import { MAX_SIDE, pipelineHash, type PipelineConfig } from './config';
 import { checkForTextAsync, type TextCheck } from '../image/textcheck';
 import { EngineClient } from './engine';
 import { addStep, createDebug, recording } from './debug';
+import { dedupeReads, dropRepeatedParts, echoesContext, nearBoxes, normText, sameText } from './dupes';
 import { backgroundUnder, colourFor } from './selfcheck';
-import { bubbleAround, detectedTextNear, detectorFindsText, detectPage, ellipseBubble, missedText, snapBlocksToDetections, type Detection, type TextDetector } from './detect';
+import { bubbleAround, detectedTextNear, detectorFindsText, detectPage, ellipseBubble, missedDetections, snapBlocksToDetections, type Detection, type TextDetector } from './detect';
 
 export interface PipelineRequest {
   bytes: Uint8Array;
@@ -176,27 +178,45 @@ async function encodeView(image: TiledImage, view: View, config: PipelineConfig,
   return { view, jpeg, dw, dh };
 }
 
-async function readView(provider: LlmProvider, image: TiledImage, view: View, config: PipelineConfig, context: TranslationContext | undefined, withTranslation: boolean, deps: StandaloneDeps, signal?: AbortSignal, encoded?: EncodedView): Promise<{ answer: VisionAnswer; usage: Usage }> {
+async function readView(provider: LlmProvider, image: TiledImage, view: View, config: PipelineConfig, context: TranslationContext | undefined, withTranslation: boolean, deps: StandaloneDeps, signal?: AbortSignal, encoded?: EncodedView, debug?: PageDebug): Promise<{ answer: VisionAnswer; usage: Usage }> {
   const family = familyFor(provider.config.model);
   const { jpeg, dw, dh } = encoded ?? (await encodeView(image, view, config, provider.config.model, deps));
-  const system = buildSystemPrompt(promptInput(config, context));
+  const input = promptInput(config, context);
+  const system = buildSystemPrompt(input);
   const instruction = withTranslation ? visionFullInstruction(dw, dh) : visionOcrInstruction(dw, dh);
+  // Reading only (two-step): the names help spelling; the story and earlier lines would only be echoed.
+  const levelOf = (i: number) => (withTranslation ? CONTEXT_LEVELS[i] : i === 0 ? OCR_LEVEL : CONTEXT_LEVELS[CONTEXT_LEVELS.length - 1]);
   // Single call: the page's text is not known yet, so the hints come from the previous pages' lines.
-  const data = [contextData(promptInput(config, context)), withTranslation ? visionPhrasebook(promptInput(config, context)) : ''].filter(Boolean).join('\n\n');
+  const dataAt = (i: number) => [contextData(input, levelOf(i)), withTranslation && levelOf(i).phrasebook ? visionPhrasebook(input) : ''].filter(Boolean).join('\n\n');
+  const fixed = estimateTokens(system) + estimateTokens(instruction) + imageTokens(dw, dh);
+  const inputAt = (i: number) => fixed + estimateTokens(dataAt(i));
+  const win = windowOf(provider.config);
+  const base64 = bytesToBase64(jpeg);
   let room = 6000;
+  let level = 0;
   return withRetry(
     async (attempt) => {
       const last = attempt >= 2;
-      const res = await provider.complete({
-        system,
-        messages: [{ role: 'user', content: [{ type: 'image', mime: 'image/jpeg', base64: bytesToBase64(jpeg) }, { type: 'text', text: data ? `${data}\n\n${instruction}` : instruction }] }],
-        json: true,
-        signal,
-        maxTokens: room,
-      });
+      const sent = await completeFitted(win, room, inputAt, (i, maxTokens) => {
+        const data = dataAt(i);
+        return provider.complete({
+          system,
+          messages: [{ role: 'user', content: [{ type: 'image', mime: 'image/jpeg', base64 }, { type: 'text', text: data ? `${data}\n\n${instruction}` : instruction }] }],
+          json: true,
+          signal,
+          maxTokens,
+          // Reading is transcription: as steady as possible (a temperature set by the user wins).
+          temperature: provider.config.temperature ?? 0.1,
+        });
+      }, { from: level, onTrim: (i, why) => addStep(debug, `context trimmed to level ${i}: ${why}`) });
+      level = sent.level;
+      const res = sent.res;
       // A cut-off answer is asked again first (with more room); only the last try keeps what can be mended.
       if (res.truncated && !last) {
-        room = 12000;
+        const more = growRoom(win, sent.maxTokens, sent.inputTokens, 12000);
+        // No more room in the window: give up the least important context for it.
+        if (more <= sent.maxTokens && level < CONTEXT_LEVELS.length - 1) level++;
+        room = win ? more : 12000;
         throw new AppError('TRANSLATION_INVALID_OUTPUT', { retryable: true, detail: 'Answer cut off at the output limit' });
       }
       const answer = parseVisionAnswer(res.text, withTranslation, last);
@@ -279,6 +299,18 @@ export async function redrawArt(original: TiledImage, cleaned: TiledImage, masks
 }
 
 /** Does text written in this script belong to the language (kanji-only Japanese looks Chinese)? */
+/**
+ * The user's filters for one text: «Только баблы» keeps speech and captions (and, when the detector
+ * says the text stands outside any bubble, captions only); «только язык оригинала» keeps texts in
+ * that script. One rule for the page's blocks, the re-reads and the translator's re-typing.
+ */
+export function wanted(config: Pick<PipelineConfig, 'bubblesOnly' | 'onlySourceLang' | 'sourceLang'>, type: TextBlock['textType'], text: string, detKind?: Detection['kind']): boolean {
+  if (config.bubblesOnly && (type === 'SFX' || type === 'SIGN' || type === 'OTHER')) return false;
+  if (config.bubblesOnly && detKind === 'text_free' && type !== 'NARRATION') return false;
+  if (config.onlySourceLang && !scriptFits(detectScript(text), config.sourceLang)) return false;
+  return true;
+}
+
 export function scriptFits(script: ReturnType<typeof detectScript>, lang: string): boolean {
   if (script === 'other') return true;
   const base = lang.split('-')[0];
@@ -348,7 +380,8 @@ export function mergeSharedBubbles(blocks: TextBlock[], closed: Map<string, bool
   const out: TextBlock[] = [];
   const groups: TextBlock[][] = [];
   for (const b of blocks) {
-    const g = b.bubble && closed.get(b.id) && b.textType !== 'SFX' ? groups.find((gr) => gr[0].bubble && overlapRatio(gr[0].bubble.box, b.bubble!.box) > 0.6) : undefined;
+    // Only speech joins speech: a sound effect next to a bubble keeps its own block (and type).
+    const g = b.bubble && closed.get(b.id) && b.textType !== 'SFX' ? groups.find((gr) => gr[0].bubble && gr[0].textType !== 'SFX' && closed.get(gr[0].id) && overlapRatio(gr[0].bubble.box, b.bubble!.box) > 0.6) : undefined;
     if (g) g.push(b);
     else groups.push([b]);
   }
@@ -379,11 +412,13 @@ export function mergeSharedBubbles(blocks: TextBlock[], closed: Map<string, bool
   return out;
 }
 
-function mergeGroup(g: TextBlock[]): TextBlock {
-  if (g.length === 1) return g[0];
+function mergeGroup(all: TextBlock[]): TextBlock {
+  // The same words read twice (two views, a re-read of the bubble) are said once.
+  const g = dropRepeatedParts(all);
   const first = g[0];
-  let bbox = first.bbox;
-  for (const o of g.slice(1)) {
+  // The box covers every part read (also the dropped copies: they stand on the same lettering).
+  let bbox = all[0].bbox;
+  for (const o of all.slice(1)) {
     const x = Math.min(bbox[0], o.bbox[0]);
     const y = Math.min(bbox[1], o.bbox[1]);
     bbox = [x, y, Math.max(bbox[0] + bbox[2], o.bbox[0] + o.bbox[2]) - x, Math.max(bbox[1] + bbox[3], o.bbox[1] + o.bbox[3]) - y];
@@ -606,7 +641,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   const located: Located[] = [];
   // A local server runs one request at a time anyway; parallel requests only split the GPU.
   const answers = await mapLimit(views, isLocalProvider(config.vision) ? 1 : 2, async (view, i) => {
-    const r = await readView(vision, original, view, config, req.context, !separate, deps, signal, encoded?.find((e) => e.view.y === view.y && e.view.h === view.h));
+    const r = await readView(vision, original, view, config, req.context, !separate, deps, signal, encoded?.find((e) => e.view.y === view.y && e.view.h === view.h), debug);
     stage('ocr', (i + 1) / views.length);
     return { view, ...r };
   });
@@ -621,7 +656,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     }
   }
   tDetected = performance.now();
-  const merged = dedupe(located);
+  const merged = dedupeReads(located, original.height);
+  if (merged.length < located.length) addStep(debug, `${located.length - merged.length} text(s) read twice (overlapping views) removed`);
   if (!merged.length) {
     addStep(debug, 'model found no text');
     return finish();
@@ -632,7 +668,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     const script = detectScript(l.text);
     const language = config.sourceLang !== 'auto' ? config.sourceLang : script === 'latin' ? 'en' : script === 'cyrillic' ? 'ru' : script === 'other' ? 'und' : script;
     // The user's filters: only bubbles, only the chosen language.
-    const skip = (config.bubblesOnly && (l.type === 'SFX' || l.type === 'SIGN' || l.type === 'OTHER')) || (config.onlySourceLang && !scriptFits(script, config.sourceLang));
+    const skip = !wanted(config, l.type, l.text);
     return {
       id: `b${i + 1}`,
       textType: req.generic && l.type === 'DIALOGUE' ? 'OTHER' : l.type,
@@ -653,6 +689,12 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     };
   });
 
+  // Lines of the previous pages the model copied into this page (it got them as context): kept
+  // only where lettering really stands under the box (see cleanOne), never drawn over the art.
+  const echoes = new Set(blocks.filter((b) => echoesContext(b.originalText, req.context?.recentLines ?? [])).map((b) => b.id));
+  if (echoes.size) addStep(debug, `text repeating earlier pages: ${[...echoes].join(', ')} (checked for lettering)`);
+  const dropped = new Set<string>();
+
   stage('translating');
   if (separate) {
     const translator = recording(createProvider(translatorCfg!, deps.fetchImpl), 'translate', debug);
@@ -667,6 +709,11 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         b.translatedText = t.text;
         if (t.type) b.textType = t.type;
         if (t.lowConfidence) b.lowConfidence = true;
+        // Re-typed by the translator (a «speech» that is a sound effect): the filters apply to the new type.
+        if (!wanted(config, b.textType, b.originalText) || (b.textType === 'SFX' && !config.translateSfx)) {
+          b.translate = false;
+          b.translatedText = b.originalText;
+        }
       } else if (b.translate) {
         b.translatedText = b.originalText;
         b.lowConfidence = true;
@@ -674,9 +721,11 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     }
   } else {
     // The model got stuck on a drawn-out word («COOOME…» → «Хххххххх»): ask once more as text only.
-    const stuck = blocks.filter((b) => b.translate && isDegenerate(b.translatedText, b.originalText));
+    // …and a block the model left untranslated (no "translation": the original text came back).
+    const untranslated = (b: TextBlock) => /\p{L}{2,}/u.test(b.originalText) && normText(b.translatedText) === normText(b.originalText) && !scriptFits(detectScript(b.originalText), config.targetLang);
+    const stuck = blocks.filter((b) => b.translate && (isDegenerate(b.translatedText, b.originalText) || untranslated(b)));
     if (stuck.length) {
-      addStep(debug, `stuck translation asked again as text: ${stuck.map((b) => b.id).join(', ')}`);
+      addStep(debug, `stuck or missing translation asked again as text: ${stuck.map((b) => b.id).join(', ')}`);
       try {
         const res = await translateBlocks(recording(createProvider(config.vision!, deps.fetchImpl), 'translate', debug), promptInput(config, req.context), stuck.map((b) => ({ id: b.id, type: b.textType, text: b.originalText, speaker: b.speaker, gender: b.speakerGender })), { signal, retries: 1 });
         usage.push(...res.usage);
@@ -727,6 +776,11 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         // UI/screen text: no bubbles; paint a plate behind the text instead.
         const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, expand: config.inpaintExpand });
         b.bubble = r.bubble ? { ...r.bubble, shape: 'rect', safeArea: [...b.bbox] as Box } : null;
+        return;
+      }
+      if (echoes.has(b.id) && !lettersUnder(b)) {
+        dropped.add(b.id);
+        addStep(debug, `${b.id} repeats an earlier page and no lettering stands under it → removed`);
         return;
       }
       const placed = erase && b.textType !== 'SFX' ? placeOnLettering(b) : true;
@@ -810,12 +864,23 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       b.fontSizeEstimate = estimateFontSize(b.bbox, b.originalText);
       return true;
     };
+    /** Lettering really stands in the box: about as many marks as the text has letters. */
+    const lettersUnder = (b: TextBlock): boolean => {
+      const chars = Math.max(1, [...b.originalText.replace(/\s+/g, '')].length);
+      const marks = findLetterClusters(original, b.bbox).filter((c) => intersects(c.box, b.bbox)).reduce((n, c) => n + c.count, 0);
+      return marks >= Math.max(3, chars * 0.4) && marks <= chars * 3 + 6;
+    };
+    /** A re-read that repeats a block already there (the same words nearby or in its bubble), or an earlier page. */
+    const repeatsKnown = (nb: TextBlock): boolean =>
+      blocks.some((o) => (sameText(o.originalText, nb.originalText) && (nearBoxes(o.bbox, nb.bbox) || (!!o.bubble && intersects(o.bubble.box, nb.bbox)))) || sameText(o.originalText, nb.originalText, 0.9)) ||
+      echoesContext(nb.originalText, req.context?.recentLines ?? []);
     const groupsOf = new Map<string, { groups: Box[]; lettering?: Lettering }>();
     for (const b of blocks) {
       await cleanOne(b);
       // Other messages (the editor, status polls) get their turn between blocks.
       await yieldIfBusy();
     }
+    if (dropped.size) blocks = blocks.filter((b) => !dropped.has(b.id));
     // One block whose lettering stands in separate groups far apart (two speeches in joined
     // bubbles, read by the model as one): each group gets its share of the translation in place.
     // Several blocks in that shape already: each is a speech of its own (see mergeSharedBubbles).
@@ -853,6 +918,12 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
             nb.polygon = boxToPolygon(nb.bbox);
             nb.fontSizeEstimate = estimateFontSize(nb.bbox, nb.originalText);
             if (!nb.originalText.trim() || !nb.translatedText.trim() || blocks.some((o) => overlapRatio(o.bbox, nb.bbox) > 0.5)) continue;
+            // The user's filters, and no second copy of a text already on the page.
+            if (!wanted(config, nb.textType, nb.originalText) || (nb.textType === 'SFX' && !config.translateSfx)) continue;
+            if (repeatsKnown(nb)) {
+              addStep(debug, `re-read ${nb.id} repeats a known text → skipped`);
+              continue;
+            }
             nb.language = blocks[0]?.language ?? nb.language;
             await cleanOne(nb);
             await yieldIfBusy();
@@ -866,7 +937,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         }
       }
       // Text the detector is sure of that no block covers: the model skipped it; read it from there.
-      for (const [k, box] of (dets ? missedText(blocks, dets) : []).entries()) {
+      for (const [k, det] of (dets ? missedDetections(blocks, dets) : []).entries()) {
+        const box = det.box;
         try {
           addStep(debug, `text found by the detector read again at [${box.map(Math.round).join(',')}]`);
           const pad = Math.round(Math.max(box[2], box[3]) * 0.3) + 12;
@@ -880,8 +952,12 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
             nb.polygon = boxToPolygon(nb.bbox);
             nb.fontSizeEstimate = estimateFontSize(nb.bbox, nb.originalText);
             if (!nb.originalText.trim() || !nb.translatedText.trim() || blocks.some((o) => overlapRatio(o.bbox, nb.bbox) > 0.5)) continue;
-            // The user's filters: only bubbles, sound effects left as they are.
-            if ((config.bubblesOnly && (nb.textType === 'SFX' || nb.textType === 'SIGN' || nb.textType === 'OTHER')) || (nb.textType === 'SFX' && !config.translateSfx)) continue;
+            // The user's filters (with the detector's own word: text outside bubbles), sound effects left as they are.
+            if (!wanted(config, nb.textType, nb.originalText, det.kind) || (nb.textType === 'SFX' && !config.translateSfx)) continue;
+            if (repeatsKnown(nb)) {
+              addStep(debug, `re-read ${nb.id} repeats a known text → skipped`);
+              continue;
+            }
             nb.language = blocks[0]?.language ?? nb.language;
             await cleanOne(nb);
             await yieldIfBusy();
@@ -948,9 +1024,11 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       createdAt: new Date().toISOString(),
     };
     const contextUpdate: ContextUpdate = {
+      page: pageId.slice(0, 16),
       entities,
       summary,
-      lines: blocksOut.filter((b) => b.textType === 'DIALOGUE' && b.translate).slice(-8).map((b) => ({ src: b.originalText, dst: b.translatedText })),
+      // Only lines that stand where they were read: an unsure one would be echoed on later pages.
+      lines: blocksOut.filter((b) => b.textType === 'DIALOGUE' && b.translate && !b.lowConfidence && !b.continued).slice(-8).map((b) => ({ src: b.originalText, dst: b.translatedText })),
     };
     // A skipped picture adds nothing to the story (and is not counted as a page of it).
     const context = req.context && !skipped ? mergeContext(req.context, contextUpdate) : undefined;
@@ -982,22 +1060,6 @@ export function letteringNear(b: TextBlock, blocks: TextBlock[], image: TiledIma
   return fits.sort((p, q) => dist(p) - dist(q))[0] ?? null;
 }
 
-/** Remove duplicates from overlapping views; keep the copy read nearer its view's centre. */
-function dedupe(items: Located[]): Located[] {
-  const out: Located[] = [];
-  for (const it of items) {
-    const dupIndex = out.findIndex((o) => overlapRatio(o.box, it.box) > 0.55);
-    if (dupIndex < 0) {
-      out.push(it);
-      continue;
-    }
-    const o = out[dupIndex];
-    const centre = (l: Located) => Math.abs(l.box[1] + l.box[3] / 2 - (l.view.y + l.view.h / 2)) / l.view.h;
-    if (centre(it) < centre(o)) out[dupIndex] = it;
-  }
-  return out;
-}
-
 /** Manual OCR: read and translate the text inside one user-selected box. */
 export async function recognizeRegion(
   image: TiledImage,
@@ -1018,7 +1080,8 @@ export async function recognizeRegion(
   const sub = new TiledImage(deps.backend, region[2], region[3], [{ y: 0, h: region[3], canvas }]);
   const separate = !!config.translator && config.translator.id !== config.vision.id;
   const vision = recording(createProvider(config.vision, deps.fetchImpl), 'region', opts.debug);
-  const { answer, usage } = await readView(vision, sub, { y: 0, h: region[3] }, { ...config, quality: 'best' }, opts.context, !separate, deps, opts.signal);
+  // A crop has no earlier lines of its own: only the names go along (an echo of earlier pages is the risk here).
+  const { answer, usage } = await readView(vision, sub, { y: 0, h: region[3] }, { ...config, quality: 'best' }, opts.context ? { ...opts.context, summaries: [], recentLines: [] } : undefined, !separate, deps, opts.signal, undefined, opts.debug);
   const usages = [usage];
   const blocks: TextBlock[] = answer.blocks.map((b, i): TextBlock => {
     const bx: Box = [region[0] + (b.box[0] / 1000) * region[2], region[1] + (b.box[1] / 1000) * region[3], ((b.box[2] - b.box[0]) / 1000) * region[2], ((b.box[3] - b.box[1]) / 1000) * region[3]];

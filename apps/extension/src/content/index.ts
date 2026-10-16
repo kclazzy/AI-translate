@@ -3,7 +3,7 @@ import { dominantLanguage, nativeName } from '@ait/core/languages';
 import type { SerializedError } from '@ait/core/errors';
 import { CANCELLED_ALL, PAGE_PORT, type BackgroundToContent, type ChapterFormat, type ContentToBackground, type ImageRef, type JobStatus, type PageLangs, type RenderedTile, type RenderedTiles, type UiStrings } from '../shared/messages';
 import { Overlay } from './overlay';
-import { asCandidate, candidateAt, chapterColumn, imgSrc, inlineData, lazySrc, markUi, scanPage, viewportRect, type Candidate } from './scanner';
+import { asCandidate, candidateAt, chapterColumn, imgSrc, inlineData, lazySrc, markUi, scanPage, shownChanged, shownIdentity, viewportRect, type Candidate } from './scanner';
 import { fmtNumber, fmtUsd, registerDictionary, setUiLang, tr } from '@ait/core/i18n';
 
 /**
@@ -28,6 +28,8 @@ interface Item {
   docRect?: { x: number; y: number; width: number; height: number };
   /** Translated together with these neighbouring pictures (one strip): a retry redoes them all. */
   group?: Candidate[];
+  /** What the element showed when the job was sent (see shownIdentity): a result for another picture is never drawn. */
+  shown?: string;
 }
 
 declare global {
@@ -296,8 +298,13 @@ function main() {
       const r = await send<RenderedTiles | null>({ type: 'get-result', key }).catch(() => null);
       const id = idFor(c.el);
       if (!r || items.has(id) || !c.el.isConnected || dismissed.has(c.el)) continue;
+      // The reader may have swapped the picture while the result was on its way.
+      if (shownChanged(c, c.src)) {
+        looked.delete(c.el);
+        continue;
+      }
       const overlay = makeOverlay(c, id);
-      const item: Item = { id, cand: c, src: c.src, status: 'done', overlay };
+      const item: Item = { id, cand: c, src: c.src, status: 'done', overlay, shown: c.src };
       watchEl(c.el);
       items.set(id, item);
       showResult(item, r);
@@ -341,7 +348,7 @@ function main() {
     existing?.overlay.destroy();
     const overlay = makeOverlay(c, id);
     const req = `${id}~${(reqSeq++).toString(36)}`;
-    const item: Item = { id, req, cand: c, src: c.src, status: 'queued', overlay };
+    const item: Item = { id, req, cand: c, src: c.src, status: 'queued', overlay, shown: shownIdentity(c) };
     watchEl(c.el);
     items.set(id, item);
     overlay.stage({ stage: 'queued' });
@@ -620,6 +627,12 @@ function main() {
       case 'job-done': {
         const it = itemFor(msg.id);
         if (!it) break;
+        // The element shows another picture now (the reader moved on): this result is not for it.
+        if (!it.docRect && shownChanged(it.cand, it.shown)) {
+          dropItem(it);
+          rescan();
+          break;
+        }
         showResult(it, msg.result);
         break;
       }
@@ -971,12 +984,9 @@ ${chapterStats(list)}`;
           dropItem(it);
           continue;
         }
-        if (it.cand.kind === 'img') {
-          const el = it.cand.el as HTMLImageElement;
-          const now = imgSrc(el);
-          // A lazy picture still showing its placeholder is the same picture.
-          if (it.src && now && now !== it.src && !lazySrc(el)) dropItem(it);
-        }
+        // Readers swap pictures under the same element (lazy <img>, CSS backgrounds, canvas pages):
+        // the overlay of the old picture must go so the new one gets its own translation.
+        if (shownChanged(it.cand, it.shown ?? it.src)) dropItem(it);
       }
       if (enabled) void applyCached();
       if (!autoTranslate && !pageMode) return;
@@ -1209,7 +1219,7 @@ ${chapterStats(list)}`;
     pageCheck = setTimeout(() => {
       pageCheck = null;
       const list = [...items.values()].filter((it) => !it.docRect);
-      const stale = list.filter((it) => !it.cand.el.isConnected || (it.cand.kind === 'img' && it.src && imgSrc(it.cand.el as HTMLImageElement) !== it.src));
+      const stale = list.filter((it) => !it.cand.el.isConnected || shownChanged(it.cand, it.shown ?? it.src));
       if (list.length && stale.length * 2 < list.length) return;
       onNewChapter();
     }, 1200);

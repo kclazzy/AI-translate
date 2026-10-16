@@ -172,3 +172,49 @@ export function chapterColumn<T extends { el: Element }>(cands: T[]): T[] {
   for (const g of groups.values()) if (!best || g.area > best.area) best = g;
   return best?.items ?? cands;
 }
+
+/**
+ * What a candidate element shows right now, to tell when a reader swapped the picture under an
+ * overlay: the address for <img> (the lazy one while its placeholder shows) and CSS backgrounds,
+ * a 16×16 thumbnail of the pixels for a canvas. undefined when it cannot be told (a canvas the
+ * page made unreadable) — then only the size is compared.
+ */
+export function shownIdentity(c: Pick<Candidate, 'el' | 'kind'>): string | undefined {
+  const el = c.el;
+  if (c.kind === 'img' && el instanceof HTMLImageElement) return lazySrc(el) ?? (imgSrc(el) || undefined);
+  if (c.kind === 'background') {
+    const url = backgroundUrl(el);
+    try {
+      return url ? new URL(url, location.href).href : undefined;
+    } catch {
+      return url ?? undefined;
+    }
+  }
+  if (c.kind === 'canvas' && el instanceof HTMLCanvasElement) {
+    const size = `${el.width}x${el.height}`;
+    try {
+      const t = document.createElement('canvas');
+      t.width = t.height = 16;
+      const ctx = t.getContext('2d', { willReadFrequently: true })!;
+      ctx.drawImage(el, 0, 0, 16, 16);
+      const d = ctx.getImageData(0, 0, 16, 16).data;
+      // Coarse values: the same picture redrawn gives the same signature despite smoothing.
+      let sig = '';
+      for (let i = 0; i < d.length; i += 4) sig += ((d[i] >> 5) * 64 + (d[i + 1] >> 5) * 8 + (d[i + 2] >> 5)).toString(36).padStart(2, '0');
+      return `${size}:${sig}`;
+    } catch {
+      return size;
+    }
+  }
+  return undefined;
+}
+
+/** True when the element no longer shows the picture recorded as `was` (unknown = not changed). */
+export function shownChanged(c: Pick<Candidate, 'el' | 'kind'>, was: string | undefined): boolean {
+  if (!was) return false;
+  const now = shownIdentity(c);
+  if (!now) return false;
+  if (c.kind === 'canvas' && !was.includes(':')) return now.split(':')[0] !== was;
+  if (c.kind === 'canvas' && !now.includes(':')) return now !== was.split(':')[0];
+  return now !== was;
+}

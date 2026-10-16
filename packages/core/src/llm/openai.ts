@@ -113,8 +113,10 @@ export class OpenAICompatibleProvider implements LlmProvider {
       // The answer was cut off: ask once more with twice the output room. num_ctx is never changed
       // (a different num_ctx makes Ollama reload the model, which costs far more than the retry).
       const opts = body.options as { num_ctx: number; num_predict: number };
-      if (json.done_reason === 'length' && opts.num_predict < 16384) {
-        opts.num_predict = Math.min(16384, opts.num_predict * 2);
+      // The answer must still fit the window next to the prompt: no retry that cannot fit.
+      const next = Math.min(16384, opts.num_predict * 2, opts.num_ctx - (json.prompt_eval_count ?? 0) - 64);
+      if (json.done_reason === 'length' && next > opts.num_predict) {
+        opts.num_predict = next;
         json = await ask();
       }
       const text = stripThinking(json.message?.content ?? '');

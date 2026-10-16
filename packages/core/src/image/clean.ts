@@ -1352,7 +1352,8 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     // into are not lettering left behind.
     const textArea = clampBox(expandBox(tb ? unionBox(tb, local) : local, 2), img.width, img.height);
     const within = flood ? enclosedHoles(flood.mask, img.width, img.height, textArea) : undefined;
-    if (!opts.analyzeOnly && residual(img, textArea, bg, 70, within) > 0.004) {
+    // A sound effect on open ground keeps no plate: a white box over every RUMBLE reads as a sticker.
+    if (!opts.analyzeOnly && !(opts.sfx && !closed) && residual(img, textArea, bg, 70, within) > 0.004) {
       // The plate only covers the bubble's own background and the letters, never the art or the
       // outline next to it (a rectangle would spill over the panel where the bubble is round).
       let limit: Uint8Array | undefined;
@@ -1454,14 +1455,18 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       }
       const tight = tb ? boxArea(textArea) <= boxArea(tb) * 1.6 + 400 : false;
       if (left / Math.max(1, textArea[2] * textArea[3]) > 0.01 && !opts.sfx && tight && boxArea(textArea) <= 60_000) {
-        paintPlate(img, clampBox(expandBox(textArea, 4), img.width, img.height), bg);
+        const plate = clampBox(expandBox(textArea, 4), img.width, img.height);
+        paintPlate(img, plate, bg);
         method = 'plate';
+        // A plate over art (a grey box on a face): LaMa, when on, redraws the whole plate from the art around it.
+        mask = new Uint8Array(img.width * img.height);
+        for (let y = plate[1]; y < plate[1] + plate[3]; y++) mask.fill(1, y * img.width + plate[0], y * img.width + plate[0] + plate[2]);
       }
     }
     const textBox: Box | null = tb ? [tb[0] + region[0], tb[1] + region[1], tb[2], tb[3]] : null;
     // Where letters over artwork were smudged away: a better inpainter (LaMa) can redo this part.
     let artMask: CleanResult['artMask'];
-    if (method === 'diffuse' && countMask(mask)) {
+    if ((method === 'diffuse' || method === 'plate') && countMask(mask)) {
       let x0 = img.width, y0 = img.height, x1 = -1, y1 = -1;
       for (let y = 0; y < img.height; y++) for (let x = 0; x < img.width; x++) if (mask[y * img.width + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
       const w = x1 - x0 + 1;

@@ -332,3 +332,21 @@ describe('cache size', () => {
     }
   });
 });
+
+describe('reopening a translated chapter', () => {
+  it('prefetch does nothing for a cached page, and the cached page never waits for one', async () => {
+    const page = await makeMangaPage(800, 1100, [{ cx: 220, cy: 260, rx: 120, ry: 170, text: 'たなかさん' }]);
+    let decodes = 0;
+    const backend: ImageBackend = { ...napiBackend, decode: async (bytes, mime) => (decodes++, napiBackend.decode(bytes, mime)) };
+    const m = mock(() => mangaAnswer(page.bubbles));
+    const svc = new TranslateService(memoryDb(), secrets, backend, async () => settingsWith(), m.fetchImpl);
+    svc.compactTiles = false;
+    await svc.translate(page.bytes, 'image/png');
+    const before = decodes;
+    await svc.prefetch(page.bytes, 'image/png');
+    expect(decodes).toBe(before);
+    const again = await svc.translate(page.bytes, 'image/png');
+    expect(again.cached).toBe(true);
+    expect(m.calls).toHaveLength(1);
+  });
+});

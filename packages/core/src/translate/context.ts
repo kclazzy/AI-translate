@@ -25,6 +25,8 @@ export interface TranslationContext {
   recentLines: { src: string; dst: string }[];
   styleNotes: string;
   pagesSeen: number;
+  /** Pages already merged (image hash prefixes, newest last): a page translated again adds no second summary or lines. */
+  mergedPages?: string[];
   updatedAt: string;
 }
 
@@ -60,21 +62,33 @@ export function normalizeEntity(raw: unknown, page?: number): ContextEntity | nu
  * so names stay consistent across a chapter.
  */
 export interface ContextUpdate {
+  /** The page this came from (image hash prefix); see TranslationContext.mergedPages. */
+  page?: string;
   entities?: unknown[];
   summary?: string;
   lines?: { src: string; dst: string }[];
 }
 
+/**
+ * Key that treats spellings of one term as the same: case, edge punctuation and an English plural
+ * (CHANTER, Chanter, Chanters → "chanter").
+ */
+export function entityKey(source: string): string {
+  const k = source.toLowerCase().replace(/^[\s"'«»“”.,!?…:;()\[\]-]+|[\s"'«»“”.,!?…:;()\[\]-]+$/g, '').replace(/\s+/g, ' ');
+  return /^[a-z][a-z' -]{3,}s$/.test(k) && !/ss$/.test(k) ? k.slice(0, -1) : k;
+}
+
 export function mergeContext(ctx: TranslationContext, update: ContextUpdate): TranslationContext {
   const entities = [...ctx.entities];
-  const index = new Map(entities.map((e, i) => [e.source, i]));
+  const index = new Map(entities.map((e, i) => [entityKey(e.source), i]));
+  const again = !!update.page && !!ctx.mergedPages?.includes(update.page);
   for (const raw of update.entities ?? []) {
     const e = normalizeEntity(raw, ctx.pagesSeen + 1);
     if (!e) continue;
-    const at = index.get(e.source);
+    const at = index.get(entityKey(e.source));
     if (at === undefined) {
       if (entities.length < CONTEXT_LIMITS.entities) {
-        index.set(e.source, entities.length);
+        index.set(entityKey(e.source), entities.length);
         entities.push(e);
       }
     } else {
@@ -82,6 +96,8 @@ export function mergeContext(ctx: TranslationContext, update: ContextUpdate): Tr
       if (!cur.locked && !cur.gender && e.gender) entities[at] = { ...cur, gender: e.gender };
     }
   }
+  // The same page translated again (⟳, other settings): its story and lines are already in.
+  if (again) return { ...ctx, entities, updatedAt: new Date().toISOString() };
   const summaries = [...ctx.summaries];
   const summary = sanitizeLine(update.summary, CONTEXT_LIMITS.summaryChars);
   if (summary) summaries.push(summary);
@@ -92,7 +108,8 @@ export function mergeContext(ctx: TranslationContext, update: ContextUpdate): Tr
   }
   const lines = (update.lines ?? []).map((l) => ({ src: sanitizeLine(l.src, 300), dst: sanitizeLine(l.dst, 300) })).filter((l) => l.src && l.dst);
   const recentLines = [...ctx.recentLines, ...lines].slice(-CONTEXT_LIMITS.recentLines);
-  return { ...ctx, entities, summaries, recentLines, pagesSeen: ctx.pagesSeen + 1, updatedAt: new Date().toISOString() };
+  const mergedPages = update.page ? [...(ctx.mergedPages ?? []), update.page].slice(-400) : ctx.mergedPages;
+  return { ...ctx, entities, summaries, recentLines, pagesSeen: ctx.pagesSeen + 1, ...(mergedPages ? { mergedPages } : {}), updatedAt: new Date().toISOString() };
 }
 
 export function upsertEntity(ctx: TranslationContext, entity: ContextEntity): TranslationContext {

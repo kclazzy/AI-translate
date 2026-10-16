@@ -173,7 +173,12 @@ describe('speed and the local model', () => {
   it('context window follows the video memory and holds a page picture, the prompt and the answer', () => {
     // 1568 px picture (balanced) ≈ 2240 tokens + prompt + answer: more than 8 K.
     expect(pipelineConfigFromSettings({ ...defaultSettings(), gpuVramGb: 8 }).vision?.numCtx).toBe(10240);
-    expect(pipelineConfigFromSettings({ ...defaultSettings(), gpuVramGb: 8, quality: 'fast' }).vision?.numCtx).toBe(8192);
+    // Fast quality still holds the series context (≈ 2 K) next to the picture: 8 K was too tight (8285 > 8192).
+    expect(pipelineConfigFromSettings({ ...defaultSettings(), gpuVramGb: 8, quality: 'fast' }).vision?.numCtx).toBe(10240);
+    expect(pipelineConfigFromSettings({ ...defaultSettings(), gpuVramGb: 12, quality: 'fast' }).vision?.numCtx).toBe(12288);
+    // A window set on the provider by the user wins.
+    const s0 = defaultSettings();
+    expect(pipelineConfigFromSettings({ ...s0, providers: s0.providers.map((p) => (p.id === s0.visionProviderId ? { ...p, numCtx: 20480 } : p)) }).vision?.numCtx).toBe(20480);
     expect(pipelineConfigFromSettings({ ...defaultSettings(), gpuVramGb: 16 }).vision?.numCtx).toBe(16384);
     // Fixed per model: the provider never changes it between requests (that reloads the model).
     expect(pipelineConfigFromSettings(defaultSettings()).vision?.fixedCtx).toBe(true);

@@ -96,3 +96,14 @@ describe('matching the original lettering', () => {
     expect(matchLettering(thin, { color: '#111111', stroke: 2, letterHeight: 24, colorShare: 0.9 })).toEqual({ color: '#111111', strokeColor: null, strokeWidth: 0 });
   });
 });
+
+describe('terms learned on earlier pages', () => {
+  it('a term translated differently is flagged, any case; declined forms pass', async () => {
+    const { emptyContext, mergeContext } = await import('../src/translate/context');
+    const ctx = mergeContext(emptyContext('s'), { entities: [{ source: 'Chanter', target: 'Заклинатель', kind: 'term' }, { source: 'Lesser Demon', target: 'Малый демон', kind: 'term' }] });
+    const kinds = (o: string, t: string) => ruleChecks(block('b1', o, t), 'ru', [], ctx).map((i) => i.kind);
+    expect(kinds('The CHANTER is here!', 'Певун здесь!')).toContain('terminology');
+    expect(kinds('The CHANTER is here!', 'Заклинатель здесь!')).not.toContain('terminology');
+    expect(kinds('A lesser demon!', 'Малого демона!')).not.toContain('terminology');
+  });
+});

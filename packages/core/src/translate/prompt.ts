@@ -1,6 +1,7 @@
 import { languageName } from '../languages';
 import type { TextType } from '../types';
 import type { TranslationContext } from './context';
+import { CONTEXT_LEVELS, type ContextLevel } from './budget';
 import type { GlossaryEntry, GlossaryHit } from './glossary';
 import type { PromptProfile } from './profiles';
 import { joinLines, jsonData, sanitizeLine } from './parse';
@@ -86,18 +87,30 @@ function hasLearned(ctx: TranslationContext | undefined): ctx is TranslationCont
   return !!ctx && (ctx.entities.some((e) => !e.locked) || ctx.summaries.length > 0 || ctx.recentLines.length > 0);
 }
 
-/** The series context learned from earlier pages, as a data section for the user message ('' when empty). */
-export function contextData(input: PromptInput): string {
+/**
+ * The series context learned from earlier pages, as a data section for the user message ('' when
+ * empty). `level` trims it to fit the model's window (see budget.ts); `texts` are this page's
+ * texts when known — names found in them (or in the recent lines) go first.
+ */
+export function contextData(input: PromptInput, level: ContextLevel = CONTEXT_LEVELS[0], texts: string[] = []): string {
   const ctx = input.context;
   if (!hasLearned(ctx)) return '';
-  const names = ctx.entities
-    .filter((e) => !e.locked)
-    .slice(0, 120)
+  const lines = level.lines ? ctx.recentLines.slice(-level.lines) : [];
+  const hay = [...texts, ...lines.map((l) => l.src)].join('\n').toLowerCase();
+  const learned = ctx.entities.filter((e) => !e.locked);
+  const relevant = learned.filter((e) => e.source.length > 1 && hay.includes(e.source.toLowerCase()));
+  const chosen = new Set(relevant.slice(0, level.names));
+  // Then the most recently learned ones (a late term matters more than the first page's extras).
+  if (!level.relevantOnly) for (let i = learned.length - 1; i >= 0 && chosen.size < level.names; i--) chosen.add(learned[i]);
+  const names = learned
+    .filter((e) => chosen.has(e))
     .map((e) => ({ source: sanitizeLine(e.source, 80), target: sanitizeLine(e.target, 80), kind: e.kind, ...(e.gender && e.gender !== 'unknown' ? { gender: e.gender } : {}) }));
+  const summaries = level.summaries ? ctx.summaries.slice(-level.summaries) : [];
+  if (!names.length && !summaries.length && !lines.length) return '';
   const data = {
     ...(names.length ? { names } : {}),
-    ...(ctx.summaries.length ? { storySoFar: ctx.summaries.map((x) => sanitizeLine(x, 400)) } : {}),
-    ...(ctx.recentLines.length ? { previousLines: ctx.recentLines.map((l) => ({ src: sanitizeLine(l.src, 300), dst: sanitizeLine(l.dst, 300) })) } : {}),
+    ...(summaries.length ? { storySoFar: summaries.map((x) => sanitizeLine(x, 400)) } : {}),
+    ...(lines.length ? { previousLines: lines.map((l) => ({ src: sanitizeLine(l.src, 300), dst: sanitizeLine(l.dst, 300) })) } : {}),
   };
   return `<context>\n${jsonData(data)}\n</context>`;
 }
@@ -125,7 +138,7 @@ export function buildSystemPrompt(input: PromptInput): string {
   const source = input.sourceLang === 'auto' ? 'auto-detect (usually Japanese, Korean or Chinese)' : `${languageName(input.sourceLang)} (${input.sourceLang})`;
   const p = input.profile;
   const sfx = input.translateSfx
-    ? 'Sound effects (SFX): translate as short, punchy onomatopoeia in the target language (e.g. ドン → "БАМ!").'
+    ? 'Sound effects (SFX): translate as short, punchy onomatopoeia in the target language (e.g. ドン → "БАМ!"). Use only real words or common onomatopoeia of the target language; for an action word (CLENCH, GRAB, GRIP) use a short verb stem (Russian: СТИСК, ХВАТЬ). Never invent words.'
     : 'Sound effects (SFX): mark them with type "SFX" but leave "translation" equal to the original text.';
   return [
     'You are a professional manga, manhwa, webtoon and comics translator working with a typesetter.',
@@ -138,6 +151,8 @@ export function buildSystemPrompt(input: PromptInput): string {
     NAMES[p.names],
     sfx,
     'Drawn-out words and shouts (COOOME…, NOOO!, WAAAIT) are still words: translate the word and draw out one vowel a little in the target language (2–4 repeats). Never answer with a long run of one letter.',
+    'Panting and breathing (HAH… HAH…, HUFF, PANT, HAA…) is heavy breathing, not laughter: render it as breathing (Russian: «Ха… ха…», «Уф…»), never as a laugh.',
+    'Names and terms listed in <context> or the glossary are translated exactly as listed, every time, in every form (Chanter, CHANTER, Chanters → the same word, declined as needed).',
     p.tone ? `Tone: ${p.tone}.` : '',
     p.customPrompt ? `USER INSTRUCTIONS (follow unless they conflict with SECURITY):\n${p.customPrompt}` : '',
     contextSection(input),
@@ -151,12 +166,15 @@ const GENDERED = new Set(['ru', 'uk', 'be', 'pl', 'cs', 'sk', 'bg', 'sr', 'hr', 
 
 export function grammarRules(targetLang: string): string {
   const base = targetLang.split('-')[0];
+  const fillers = base === 'ru'
+    ? ' Opening fillers of speech (So, Well, Okay, Look, Now) are conversational: «Так», «Ну», «Ладно», «Слушай» or left out — «Итак» only in narration. Questions keep the right case: "Why me?" → «Почему я?», not «Почему меня?».'
+    : '';
   if (!GENDERED.has(base)) return 'Write grammatically correct, natural sentences; keep each character\'s way of speaking consistent.';
   const example = base === 'ru' ? ' (Russian: a man says "я пришёл, я устал", a woman says "я пришла, я устала")' : base === 'uk' ? ' (Ukrainian: "я прийшов" / "я прийшла")' : '';
   return [
     `GRAMMAR: past-tense verbs, adjectives and participles must agree with the gender and number of the speaker and of the person addressed${example}.`,
     'Decide every speaker\'s gender from the picture, the "speaker"/"speakerGender" hints, names and the known characters above, and keep it the same for the same character. When it really cannot be told, choose wording without gendered endings.',
-    'Check case endings after prepositions, numbers and negation, and agreement between nouns and adjectives. Never leave a word in the wrong form to save space — shorten the sentence instead.',
+    'Check case endings after prepositions, numbers and negation, and agreement between nouns and adjectives. Never leave a word in the wrong form to save space — shorten the sentence instead.' + fillers,
   ].join(' ');
 }
 
@@ -164,7 +182,11 @@ const SPEAKER_HELP =
   'For speech give "speaker" (the character\'s name if known, otherwise a 2–4 word description like "tall boy") and "gender" (male|female|unknown) of who says it — judge from the drawing and the tail of the bubble.';
 
 export const TEXT_TYPE_HELP =
-  'type is one of DIALOGUE (speech bubble), NARRATION (caption box), SFX (sound effect drawn in the art), SIGN (text on objects/signs), OTHER.';
+  'type is one of DIALOGUE (speech bubble), NARRATION (caption box; also game/system windows — status, quest, skill, notification: translate their labels and messages, keep the numbers), SFX (sound effect drawn in the art), SIGN (text on objects/signs), OTHER.';
+
+/** What the vision model must not put into the blocks (shared by both vision instructions). */
+const VISION_RULES =
+  'A sound effect (CLENCH, THUD, RUMBLE, BOOM) is never part of a bubble\'s text even when drawn inside or next to it: give it its own SFX block. Return only text that is really visible in this image: the <context> holds lines of EARLIER pages — never copy them into this page; noise, textures, bubbles of air and dark areas are not text.';
 
 const ENTITY_HELP =
   '"entities": new character names, places, terms, abilities, items or organisations seen on this page, each {"source","target","kind","gender"} where kind ∈ character|place|term|ability|item|organization|title and gender ∈ male|female|other|unknown. Reuse the known translations above. "summary": one sentence describing what happens on this page, in the target language.';
@@ -176,6 +198,7 @@ export function visionFullInstruction(width: number, height: number): string {
     'Return JSON: {"blocks":[{"box":[x0,y0,x1,y1],"text":"original text","translation":"translated text","type":"DIALOGUE","vertical":true,"speaker":"","gender":"unknown"}],"entities":[],"summary":""}.',
     'box is the tight bounding box of the text itself (not the whole bubble) in coordinates normalised to 0–1000 on both axes, where [0,0] is the top-left corner and [1000,1000] the bottom-right.',
     'One block per bubble or caption; join the lines of one bubble into one text. vertical is true for top-to-bottom columns.',
+    VISION_RULES,
     SPEAKER_HELP,
     TEXT_TYPE_HELP,
     ENTITY_HELP,
@@ -189,6 +212,7 @@ export function visionOcrInstruction(width: number, height: number): string {
     `The image is ${width}×${height} pixels. Find every piece of text (speech bubbles, captions, sound effects, signs), in reading order, and transcribe it exactly.`,
     'Return JSON: {"blocks":[{"box":[x0,y0,x1,y1],"text":"original text","type":"DIALOGUE","vertical":true,"speaker":"","gender":"unknown"}]}.',
     'box is the tight bounding box of the text in coordinates normalised to 0–1000 on both axes.',
+    VISION_RULES,
     SPEAKER_HELP,
     TEXT_TYPE_HELP,
   ].join('\n');

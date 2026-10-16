@@ -1,3 +1,4 @@
+import { estimateTokens, MIN_ANSWER, SAFETY, windowOf } from './budget';
 import { languageName } from '../languages';
 import type { LlmProvider } from '../llm/types';
 import type { TextBlock, Usage } from '../types';
@@ -79,11 +80,17 @@ export function ruleChecks(b: TextBlock, targetLang: string, glossary: GlossaryE
   for (const h of findGlossaryHits(src, glossary)) {
     if (h.entry.target && !dst.toLowerCase().includes(h.entry.target.toLowerCase())) issues.push({ kind: 'terminology', severity: 'major', note: tr('По глоссарию «{0}» → «{1}».', h.entry.source, h.entry.target), code: 'По глоссарию «{0}» → «{1}».', args: [h.entry.source, h.entry.target], by: 'rules' });
   }
+  // Names and terms learned on earlier pages: the same translation every time (Chanter ≠ Певач/Певун/Чантер).
+  // Matched without case; each word of the translation by its stem, so declined forms pass.
+  const low = dst.toLowerCase();
+  const srcLow = src.toLowerCase();
   for (const e of context?.entities ?? []) {
-    if (!e.source || !e.target || e.kind !== 'character') continue;
-    if (src.includes(e.source) && !dst.toLowerCase().includes(e.target.toLowerCase().slice(0, Math.max(3, e.target.length - 2)))) {
-      issues.push({ kind: 'characters', severity: 'minor', note: tr('Имя «{0}» обычно переводится как «{1}».', e.source, e.target), code: 'Имя «{0}» обычно переводится как «{1}».', args: [e.source, e.target], by: 'rules' });
-    }
+    if (!e.source || !e.target || e.source.length < 3) continue;
+    if (!srcLow.includes(e.source.toLowerCase())) continue;
+    const stems = e.target.toLowerCase().split(/\s+/).filter(Boolean).map((w) => w.slice(0, Math.max(3, w.length - 2)));
+    if (stems.every((st) => low.includes(st))) continue;
+    if (e.kind === 'character') issues.push({ kind: 'characters', severity: 'minor', note: tr('Имя «{0}» обычно переводится как «{1}».', e.source, e.target), code: 'Имя «{0}» обычно переводится как «{1}».', args: [e.source, e.target], by: 'rules' });
+    else issues.push({ kind: 'terminology', severity: 'minor', note: tr('Термин «{0}» в этой серии переводится как «{1}».', e.source, e.target), code: 'Термин «{0}» в этой серии переводится как «{1}».', args: [e.source, e.target], by: 'rules' });
   }
   const ratio = [...dst].length / Math.max(1, [...src].length);
   if (!CJK.test(src) && (ratio > 3.5 || ratio < 0.25) && src.length > 8) issues.push({ kind: 'meaning', severity: 'minor', note: tr('Перевод сильно отличается по длине — возможно, что-то потеряно или добавлено.'), code: 'Перевод сильно отличается по длине — возможно, что-то потеряно или добавлено.', by: 'rules' });
@@ -183,9 +190,20 @@ async function review(items: { id: string; b: TextBlock }[], provider: LlmProvid
   const payload = items.map(({ id, b }) => ({ id, type: b.textType, original: b.originalText, translation: b.translatedText, ...(b.speaker ? { speaker: b.speaker } : {}), ...(b.speakerGender && b.speakerGender !== 'unknown' ? { speakerGender: b.speakerGender } : {}) }));
   const rules = items.filter(({ b }) => b.qa!.issues.length).map(({ id, b }) => `${id}: ${b.qa!.issues.map((i) => i.note).join(' ')}`);
   const user = `${namesData(opts.context)}<blocks>\n${jsonData(payload)}\n</blocks>${rules.length ? `\nAutomatic checks found:\n${rules.join('\n')}` : ''}`;
+  const system = reviewPrompt(opts.targetLang);
+  // Fit the model's window: a long batch is reviewed in halves, the answer room capped to what is left.
+  const win = windowOf(provider.config);
+  const want = Math.min(6000, 300 + items.length * 180);
+  const input = estimateTokens(system) + estimateTokens(user);
+  const usable = win ? Math.floor(win * (1 - SAFETY)) - input : Infinity;
+  if (usable < Math.min(want, MIN_ANSWER) && items.length > 1) {
+    const mid = Math.ceil(items.length / 2);
+    return [...(await review(items.slice(0, mid), provider, opts)), ...(await review(items.slice(mid), provider, opts))];
+  }
+  if (usable < 300) return [];
   let res;
   try {
-    res = await provider.complete({ system: reviewPrompt(opts.targetLang), messages: [{ role: 'user', content: user }], json: true, signal: opts.signal, maxTokens: Math.min(6000, 300 + items.length * 180) });
+    res = await provider.complete({ system, messages: [{ role: 'user', content: user }], json: true, signal: opts.signal, maxTokens: Math.min(want, usable), temperature: provider.config.temperature ?? 0 });
   } catch (e) {
     if ((e as { code?: string }).code === 'CANCELLED') throw e;
     return []; // the review is a bonus: never fail the page because of it

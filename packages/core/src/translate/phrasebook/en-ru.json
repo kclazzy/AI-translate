@@ -505,6 +505,28 @@
       ]
     },
     {
+      "id": "en:why-me",
+      "src": [
+        "Why me?",
+        "Why me…",
+        "Why me!?",
+        "Why me?!"
+      ],
+      "cat": "situational",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Почему я?",
+          "when": "обычный вопрос"
+        },
+        {
+          "text": "За что мне это?",
+          "when": "жалоба, отчаяние"
+        }
+      ],
+      "note": "не «Почему меня?» — падеж"
+    },
+    {
       "id": "en:hey",
       "src": [
         "Hey",
@@ -779,7 +801,6 @@
         "Haha",
         "Hahaha",
         "Ahaha",
-        "Hah",
         "Ha ha",
         "Bwahaha",
         "Mwahaha"
@@ -799,7 +820,36 @@
           "text": "Муа-ха-ха!",
           "when": "злодейский смех (mwahaha, bwahaha)"
         }
-      ]
+      ],
+      "note": "«Hah… hah…» с многоточием — это одышка, не смех (см. en:pant)"
+    },
+    {
+      "id": "en:pant",
+      "src": [
+        "Hah… hah…",
+        "Hah... hah...",
+        "Hah… Hah…",
+        "Haa… haa…",
+        "Huff",
+        "Huff huff",
+        "Pant",
+        "Pant pant",
+        "Heave",
+        "Hff"
+      ],
+      "cat": "interjection",
+      "standalone": true,
+      "variants": [
+        {
+          "text": "Ха… ха…",
+          "when": "тяжело дышит, запыхался"
+        },
+        {
+          "text": "Уф… уф…",
+          "when": "отдышивается после усилия"
+        }
+      ],
+      "note": "одышка, не смех: никогда не «Ха-ха!»"
     },
     {
       "id": "en:fufu",
@@ -4769,13 +4819,14 @@
       "variants": [
         {
           "text": "подземелье",
-          "when": "основной вариант"
+          "when": "основной вариант; один и тот же во всей серии"
         },
         {
           "text": "данж",
-          "when": "геймерский стиль серии"
+          "when": "только если серия так уже пишет (глоссарий)"
         }
-      ]
+      ],
+      "note": "не смешивать «подземелье», «данжон» и «данж» в одной серии"
     },
     {
       "id": "en:dungeon-break",
@@ -4826,6 +4877,54 @@
           "when": "интерфейс характеристик"
         }
       ]
+    },
+    {
+      "id": "en:status-labels",
+      "src": [
+        "Level",
+        "Lv.",
+        "Class",
+        "Title",
+        "Job",
+        "STR",
+        "AGI",
+        "VIT",
+        "INT",
+        "DEX",
+        "LUK",
+        "EXP",
+        "Stat Points",
+        "Strength",
+        "Agility",
+        "Stamina",
+        "Intelligence",
+        "Defense",
+        "Attack"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Уровень / Ур.",
+          "when": "Level, Lv."
+        },
+        {
+          "text": "Класс",
+          "when": "Class, Job"
+        },
+        {
+          "text": "Титул",
+          "when": "Title"
+        },
+        {
+          "text": "СИЛ / ЛОВ / ВЫН / ИНТ",
+          "when": "STR / AGI / VIT / INT в окне статуса"
+        },
+        {
+          "text": "ОЗ / ОМ / ОО",
+          "when": "HP / MP / EXP — или оставить HP/MP, если серия так пишет"
+        }
+      ],
+      "note": "окно статуса переводится, цифры остаются как есть"
     },
     {
       "id": "en:system",
@@ -5319,6 +5418,60 @@
         {
           "text": "Повелитель демонов",
           "when": "«Demon Lord», «Overlord»"
+        }
+      ]
+    },
+    {
+      "id": "en:lesser-demon",
+      "src": [
+        "Lesser Demon",
+        "Lesser Demons",
+        "Greater Demon",
+        "Greater Demons"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Малый демон",
+          "when": "Lesser Demon"
+        },
+        {
+          "text": "Высший демон",
+          "when": "Greater Demon"
+        }
+      ]
+    },
+    {
+      "id": "en:warlock",
+      "src": [
+        "Warlock",
+        "Warlocks"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Чернокнижник",
+          "when": "основной вариант"
+        }
+      ],
+      "note": "не «Варлок»"
+    },
+    {
+      "id": "en:elite",
+      "src": [
+        "Elite",
+        "Elite Monster",
+        "Elites"
+      ],
+      "cat": "term",
+      "variants": [
+        {
+          "text": "Элитный (монстр)",
+          "when": "элитный противник в игровой системе"
+        },
+        {
+          "text": "Элита",
+          "when": "о людях, верхушка общества"
         }
       ]
     },

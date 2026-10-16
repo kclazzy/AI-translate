@@ -244,3 +244,13 @@ describe('phrasebook data', () => {
     }
   });
 });
+
+describe('built-in English book: audit fixes', () => {
+  const en = (texts: string[]) => ids(findPhrases(texts.map((text, i) => ({ id: `b${i + 1}`, text })), { sourceLang: 'en', targetLang: 'ru', settings: on(), books: builtinBooks() }));
+  it('panting «HAH… HAH…» is breathing, not laughter; «Why me?» has its own entry', () => {
+    expect(en(['HAH… HAH…'])).toContain('en:pant');
+    expect(en(['HAH… HAH…'])).not.toContain('en:haha');
+    expect(en(['Hahaha!'])).toContain('en:haha');
+    expect(en(['Why me?'])).toContain('en:why-me');
+  });
+});
