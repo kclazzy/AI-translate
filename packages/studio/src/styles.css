@@ -353,6 +353,7 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ait-filmstrip button { flex: 0 0 90px; border: 2px solid var(--rule); border-radius: 6px; background: var(--paper); padding: 2px; cursor: pointer; display: grid; gap: 2px; font-size: 12px; }
 .ait-filmstrip button[aria-current='page'] { border-color: var(--magenta); }
 .ait-filmstrip img { width: 100%; height: 110px; object-fit: cover; object-position: top; display: block; }
+.ait-thumb { display: block; }
 .ait-page { position: relative; }
 .ait-page-tools { position: absolute; top: 4px; right: 4px; display: flex; gap: 2px; opacity: 0; transition: opacity .15s; z-index: 2; }
 .ait-page:hover .ait-page-tools, .ait-page:focus-within .ait-page-tools { opacity: 1; }

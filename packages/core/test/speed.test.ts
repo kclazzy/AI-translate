@@ -350,3 +350,25 @@ describe('reopening a translated chapter', () => {
     expect(m.calls).toHaveLength(1);
   });
 });
+
+describe('an edit saved while a background change is drawn', () => {
+  it('the background change based on the older copy is not stored over the edit', async () => {
+    const page = await makeMangaPage(800, 1100, [{ cx: 220, cy: 260, rx: 120, ry: 170, text: 'たなかさん' }]);
+    let slow = false;
+    const backend: ImageBackend = { ...napiBackend, encode: async (c, mime, q) => (slow && (await new Promise((r) => setTimeout(r, 400))), napiBackend.encode(c, mime, q)) };
+    const m = mock(() => mangaAnswer(page.bubbles));
+    const svc = new TranslateService(memoryDb(), secrets, backend, async () => settingsWith(), m.fetchImpl);
+    svc.compactTiles = false;
+    const { result } = await svc.translate(page.bytes, 'image/png');
+    const with_ = (t: string, edited?: boolean) => ({ ...result.page, blocks: result.page.blocks.map((b, i) => (i === 0 ? { ...b, translatedText: t, ...(edited ? { edited: true } : {}) } : b)) });
+    slow = true;
+    const background = svc.saveEdited(result.key, with_('ИСПРАВЛЕНИЕ ПРОВЕРКИ'), undefined, { ifRev: 0 }).then(() => 'stored', (e) => (e as Error).message);
+    await new Promise((r) => setTimeout(r, 50));
+    slow = false;
+    await svc.saveEdited(result.key, with_('ПРАВКА ПОЛЬЗОВАТЕЛЯ', true));
+    expect(await background).toBe('edited meanwhile');
+    const stored = await svc.getResult(result.key);
+    expect(stored!.page.blocks[0].translatedText).toBe('ПРАВКА ПОЛЬЗОВАТЕЛЯ');
+    expect(stored!.rev).toBe(1);
+  });
+});

@@ -402,7 +402,8 @@ function fixBlock(ctx: Ctx, b: TextBlock, issue: SelfCheckIssue): { block: TextB
       const left = leftover(ctx, b);
       for (const c of left) {
         const pad = Math.max(2, Math.round(c.letterHeight * 0.15));
-        cleanBlock(cleaned, clampBox(expandBox(c.box, pad), cleaned.width, cleaned.height), { sfx: b.textType === 'SFX', expand: 2 });
+        // Over the art (no bubble) only a smudge: a plate here would stay as a grey box (LaMa has run already).
+        cleanBlock(cleaned, clampBox(expandBox(c.box, pad), cleaned.width, cleaned.height), { sfx: b.textType === 'SFX', expand: 2, noPlate: !b.bubble || b.bubble.shape === 'rect' });
       }
       return { block: b, note: left.length ? `cleaned again (${left.length} place(s))` : undefined };
     }

@@ -64,12 +64,15 @@ const proxy = createServer((req, res) => {
 });
 await new Promise((r) => proxy.listen(18080, '127.0.0.1', r));
 
+// Chrome 137+ ignores --load-extension: CI loads the extension over CDP (see ci.yml).
+const cdp = !!process.env.E2E_CDP_EXTENSIONS;
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   env: { ...process.env, LANG: 'ru_RU.UTF-8', LANGUAGE: 'ru' },
   headless: false,
   userDataDir: profile,
-  args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, '--no-sandbox', '--lang=ru', '--no-first-run', '--window-size=1280,1300', '--disable-gpu'],
+  ...(cdp ? { pipe: true, enableExtensions: [ext] } : {}),
+  args: [...(cdp ? [] : [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`]), '--no-sandbox', '--lang=ru', '--no-first-run', '--window-size=1280,1300', '--disable-gpu'],
   defaultViewport: { width: 1200, height: 1200 },
 });
 browser.on('targetcreated', async (t) => {

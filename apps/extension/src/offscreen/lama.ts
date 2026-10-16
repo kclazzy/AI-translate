@@ -1,4 +1,5 @@
 import type { Inpainter, PixelData } from '@ait/core';
+import { GPU_NETS, IDLE_RELEASE_MS, onGpu } from './gpuLane';
 import { cached, downloadWithRuntime, LAMA_URL, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, resizePixels, type Ort } from './ortRuntime';
 
 /**
@@ -19,9 +20,21 @@ export async function downloadLama(progress: (share: number) => void, signal?: A
 }
 
 export async function deleteLama(): Promise<void> {
+  await releaseLama();
   await removeModel([LAMA_URL]);
-  session = null;
 }
+
+/** Free the session (video memory); the next picture loads it again. */
+export async function releaseLama(): Promise<void> {
+  const s = session;
+  session = null;
+  const L = await s?.catch(() => null);
+  await L?.s.release().catch(() => undefined);
+}
+
+/** One redraw at a time (a session does not run two calls at once), on the card between model requests. */
+let chain: Promise<unknown> = Promise.resolve();
+let idle: ReturnType<typeof setTimeout> | undefined;
 
 let session: Promise<{ ort: Ort; s: import('onnxruntime-web').InferenceSession; image: string; mask: string }> | null = null;
 
@@ -48,7 +61,18 @@ function load() {
 
 const resize = resizePixels;
 
-export const lamaInpainter: Inpainter = async (img, mask) => {
+export const lamaInpainter: Inpainter = (img, mask) => {
+  const job = chain.then(() => onGpu(GPU_NETS, () => runOnce(img, mask)));
+  chain = job.catch(() => undefined);
+  void job.finally(() => {
+    // Not used for a while: give the video memory back to the model.
+    clearTimeout(idle);
+    idle = setTimeout(() => void releaseLama(), IDLE_RELEASE_MS);
+  }).catch(() => undefined);
+  return job;
+};
+
+async function runOnce(img: PixelData, mask: Uint8Array): Promise<PixelData> {
   const { ort, s, image, mask: maskName } = await load();
   const px = resize(img, SIZE, SIZE);
   const input = new Float32Array(3 * SIZE * SIZE);
@@ -74,4 +98,4 @@ export const lamaInpainter: Inpainter = async (img, mask) => {
   }
   const back = resize({ width: SIZE, height: SIZE, data: rgba }, img.width, img.height);
   return { width: img.width, height: img.height, data: back };
-};
+}

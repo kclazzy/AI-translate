@@ -1,4 +1,5 @@
 import { DETECTOR_SIZE, parseDetectorOutputs, type Detection, type PixelData, type RawTensor, type TextDetector } from '@ait/core';
+import { GPU_NETS, IDLE_RELEASE_MS, onGpu } from './gpuLane';
 import { cached, DETECTOR_FP32_URL, DETECTOR_URL, downloadWithRuntime, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, resizePixels } from './ortRuntime';
 
 /**
@@ -86,8 +87,11 @@ async function runOnce(img: PixelData): Promise<Detection[]> {
   return parseDetectorOutputs(raw, S).map((d) => ({ ...d, box: [d.box[0] * sx, d.box[1] * sy, d.box[2] * sx, d.box[3] * sy] }));
 }
 
+let idle: ReturnType<typeof setTimeout> | undefined;
+
 export const textDetector: TextDetector = (img) => {
-  const job = chain.then(async () => {
+  clearTimeout(idle);
+  const job = chain.then(() => onGpu(GPU_NETS, async () => {
     try {
       return await runOnce(img);
     } catch (e) {
@@ -98,8 +102,12 @@ export const textDetector: TextDetector = (img) => {
       await load('wasm');
       return runOnce(img);
     }
-  });
+  }));
   chain = job.catch(() => undefined);
+  void job.finally(() => {
+    clearTimeout(idle);
+    idle = setTimeout(() => void releaseDetector(), IDLE_RELEASE_MS);
+  }).catch(() => undefined);
   return job.then((boxes) => ({ boxes }));
 };
 

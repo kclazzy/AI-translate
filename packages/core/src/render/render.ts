@@ -123,6 +123,11 @@ function spaced(m: Measurer, spacing: number | undefined): Measurer {
   };
 }
 
+/** Three words or more: speech, not a sound («БАМ!», «ХРЯСЬ», «Ледяной удар» are sounds). */
+function phraseLike(text: string): boolean {
+  return text.trim().split(/\s+/).filter((w) => /\p{L}/u.test(w)).length >= 3;
+}
+
 function layoutBlockIn(measurer: Measurer, block: TextBlock, d: StyleDefaults, box: Box, shape: 'rect' | 'ellipse', minSize?: number, readable = 0): LayoutResult {
   const style = resolveStyle(block, d);
   measurer = spaced(measurer, style.letterSpacing);
@@ -141,7 +146,9 @@ function layoutBlockIn(measurer: Measurer, block: TextBlock, d: StyleDefaults, b
     bold: style.bold,
     italic: style.italic,
     fontSize: style.fontSize,
-    maxSize: block.textType === 'SFX' ? undefined : cap,
+    // A sound effect fills its box; a «sound effect» that is really a phrase (a line the model
+    // typed as SFX) would fill the panel with giant words: it gets a size like speech, a bit bigger.
+    maxSize: block.textType === 'SFX' ? (phraseLike(displayText(block, d)) ? Math.max(cap ?? 0, readable * 2.5) || undefined : undefined) : cap,
     lineHeight: style.lineHeight,
     vertical: style.vertical,
     alignment: style.alignment,

@@ -133,3 +133,16 @@ describe('an answer cut off by a full context window', () => {
     expect(r.truncated).toBe(true);
   });
 });
+
+describe('a line typed as a sound effect', () => {
+  it('is not blown up to fill the panel; a real sound effect still is', async () => {
+    const { ctxMeasurer, layoutBlock, DEFAULT_STYLE_DEFAULTS } = await import('../src');
+    const { createCanvas } = await import('@napi-rs/canvas');
+    const m = ctxMeasurer(createCanvas(8, 8).getContext('2d') as any);
+    const b: any = { id: 'b', textType: 'SFX', originalText: 'x', translatedText: 'Ну, кулак научился говорить?', confidence: 1, language: 'en', bbox: [0, 0, 700, 900], polygon: [], orientation: 0, writingDirection: 'ltr', fontSizeEstimate: 30, bubble: null, translate: true, textBox: [0, 0, 700, 900] };
+    const phrase = layoutBlock(m, b, DEFAULT_STYLE_DEFAULTS).fontSize;
+    const sound = layoutBlock(m, { ...b, translatedText: 'БАМ!' }, DEFAULT_STYLE_DEFAULTS).fontSize;
+    expect(phrase).toBeLessThanOrEqual(60);
+    expect(sound).toBeGreaterThan(phrase * 1.5);
+  });
+});

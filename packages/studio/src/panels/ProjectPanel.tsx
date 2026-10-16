@@ -10,18 +10,31 @@ import { ContextEditor, GlossaryEditor } from './GlossaryPanel';
 import { tr, uiLocale } from '@ait/core/i18n';
 
 function Thumb({ store, project, page }: { store: ProjectStore; project: Project; page: ProjectPage }) {
+  const platform = usePlatform();
   const [bytes, setBytes] = useState<Uint8Array>();
+  const [seen, setSeen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  // Read only when it comes into view: a 300-page chapter must not load 300 pictures at once.
   useEffect(() => {
+    const el = box.current;
+    if (!el || seen) return;
+    if (typeof IntersectionObserver === 'undefined') return setSeen(true);
+    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && setSeen(true), { rootMargin: '400px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [seen]);
+  useEffect(() => {
+    if (!seen) return;
     let cancel = false;
-    void store.assets(project.id, page.id).then((a) => {
-      if (!cancel && a) setBytes(a.rendered?.[0]?.bytes ?? a.original.bytes);
+    void store.thumb(project.id, page.id, platform.backend).then((b) => {
+      if (!cancel && b) setBytes(b);
     });
     return () => {
       cancel = true;
     };
-  }, [store, project.id, page.id, page.result?.createdAt, page.status]);
-  const url = useObjectUrl(bytes);
-  return url ? <img src={url} alt={page.name} loading="lazy" /> : <img alt="" />;
+  }, [seen, store, platform.backend, project.id, page.id, page.result?.createdAt, page.status]);
+  const url = useObjectUrl(bytes, 'image/jpeg');
+  return <span ref={box} className="ait-thumb">{url ? <img src={url} alt={page.name} /> : <img alt="" />}</span>;
 }
 
 const STATUS: Record<ProjectPage['status'], string> = { new: tr('не переведена'), queued: tr('в очереди'), working: tr('перевод…'), done: tr('готово'), error: tr('ошибка') };
@@ -92,12 +105,18 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialFiles]);
 
+  /** Show a stored project only while it is still the one open (the user may have opened another meanwhile). */
+  const showIfOpen = (p: Project) => setProject((cur) => (cur?.id === p.id ? p : cur));
+
   const addPages = useAction(async (files: File[]) => {
     if (!project) return;
     const images = await importFiles(files);
-    const p = { ...project, pages: [...project.pages] };
-    await store.addPages(p, images, platform.backend);
-    setProject(await store.save(p));
+    const next = await store.update(project.id, async (fresh) => {
+      const p = { ...fresh, pages: [...fresh.pages] };
+      await store.addPages(p, images, platform.backend);
+      return p;
+    });
+    showIfOpen(next);
   });
 
   const importProject = useAction(async (file: File) => {
@@ -110,35 +129,42 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
     if (!project) return;
     const ctrl = new AbortController();
     abort.current = ctrl;
-    let current = project;
-    const todo = current.pages.filter((p) => !onlyNew || p.status !== 'done');
+    const pid = project.id;
+    const todo = project.pages.filter((p) => !onlyNew || p.status !== 'done').map((p) => p.id);
     let errors = 0;
     try {
-      for (const [i, page] of todo.entries()) {
+      for (const [i, pageId] of todo.entries()) {
         if (ctrl.signal.aborted) break;
         setProgress({ done: i, total: todo.length, label: tr('Страница {0} / {1}', i + 1, todo.length) });
-        current = { ...current, pages: current.pages.map((p) => (p.id === page.id ? { ...p, status: 'working' as const } : p)) };
-        setProject(current);
+        // Every step works on the latest stored copy: edits, new pages and glossary changes made
+        // meanwhile stay; a page deleted meanwhile is skipped.
+        const current = await store.updatePage(pid, pageId, (p) => ({ ...p, status: 'working' as const }));
+        const page = current.pages.find((p) => p.id === pageId);
+        if (!page) continue;
+        showIfOpen(current);
         try {
           const r = await translateProjectPage(store, platform.service, platform.backend, current, page, { signal: ctrl.signal });
-          current = r.project;
+          showIfOpen(r.project);
         } catch (e) {
           const err = toAppError(e);
           if (err.code === 'CANCELLED') break;
           errors++;
-          current = await store.save({ ...current, pages: current.pages.map((p) => (p.id === page.id ? { ...p, status: 'error' as const, error: err.toJSON() } : p)) });
+          showIfOpen(await store.updatePage(pid, pageId, (p) => ({ ...p, status: 'error' as const, error: err.toJSON() })));
           if (err.code === 'INVALID_API_KEY' || err.code === 'NOT_CONFIGURED' || err.code === 'PRIVACY_VIOLATION') throw err;
         }
-        setProject(current);
       }
     } finally {
-      abort.current = null;
+      if (abort.current === ctrl) abort.current = null;
       setProgress(null);
-      setProject(current.pages.some((p) => p.status === 'working') ? await store.save({ ...current, pages: current.pages.map((p) => (p.status === 'working' ? { ...p, status: 'new' as const } : p)) }) : current);
+      const fresh = await store.get(pid);
+      if (fresh?.pages.some((p) => p.status === 'working')) showIfOpen(await store.update(pid, (p) => ({ ...p, pages: p.pages.map((x) => (x.status === 'working' ? { ...x, status: 'new' as const } : x)) })));
       reload();
     }
     toast(errors ? tr('Готово, с ошибками: {0}', errors) : tr('Глава переведена'));
   });
+  // Leaving the chapter (another section, another project) stops its translation: nobody would see
+  // it go on, and coming back must not start a second run over the same pages.
+  useEffect(() => () => abort.current?.abort(), [project?.id]);
 
   const doExport = useAction(async () => {
     if (!project) return;
@@ -207,14 +233,16 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
     const j = i + dir;
     if (i < 0 || j < 0 || j >= pages.length) return;
     [pages[i], pages[j]] = [pages[j], pages[i]];
-    setProject(await store.save({ ...project, pages: pages.map((p, k) => ({ ...p, index: k })) }));
+    // The new order applied to the latest copy (its pages keep their latest results).
+    const order = new Map(pages.map((p, k) => [p.id, k]));
+    showIfOpen(await store.update(project.id, (f) => ({ ...f, pages: [...f.pages].sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9)).map((p, k) => ({ ...p, index: k })) })));
   };
   const deletePage = async (id: string) => {
     if (!project) return;
     const page = project.pages.find((p) => p.id === id);
     if (!page || !confirm(tr('Удалить страницу «{0}» из проекта?', page.name))) return;
     await store.removePage(project, id);
-    setProject(await store.save({ ...project, pages: project.pages.filter((p) => p.id !== id).map((p, k) => ({ ...p, index: k })) }));
+    showIfOpen(await store.update(project.id, (f) => ({ ...f, pages: f.pages.filter((p) => p.id !== id).map((p, k) => ({ ...p, index: k })) })));
   };
 
   if (!project) {
@@ -263,7 +291,7 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
       <div className="ait-panel">
         <div className="ait-row" style={{ alignItems: 'center' }}>
           <button className="ait-btn small ghost" style={{ flex: '0 0 auto' }} onClick={() => { setProject(null); reload(); }}>{tr('← Проекты')}</button>
-          <input className="ait-input" style={{ flex: '1 1 240px', fontWeight: 600 }} value={project.title} onChange={(e) => setProject({ ...project, title: e.target.value })} onBlur={() => void store.save(project)} aria-label={tr('Название проекта')} />
+          <input className="ait-input" style={{ flex: '1 1 240px', fontWeight: 600 }} value={project.title} onChange={(e) => setProject({ ...project, title: e.target.value })} onBlur={() => void store.update(project.id, (f) => ({ ...f, title: project.title }))} aria-label={tr('Название проекта')} />
           <span className="ait-muted" style={{ flex: '0 0 auto' }}>{tr('{0} из {1} готово', done, project.pages.length)}</span>
         </div>
         <div className="ait-row" style={{ marginTop: 14, alignItems: 'center' }}>
@@ -332,8 +360,8 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
           </div>
         </>
       ) : null}
-      {tab === 'glossary' ? <GlossaryEditor title={tr('Глоссарий проекта')} entries={project.glossary} onChange={(glossary) => { const p = { ...project, glossary }; setProject(p); void store.save(p); }} /> : null}
-      {tab === 'context' ? <ContextEditor context={project.context} onChange={(context) => { const p = { ...project, context }; setProject(p); void store.save(p); }} /> : null}
+      {tab === 'glossary' ? <GlossaryEditor title={tr('Глоссарий проекта')} entries={project.glossary} onChange={(glossary) => { setProject({ ...project, glossary }); void store.update(project.id, (f) => ({ ...f, glossary })); }} /> : null}
+      {tab === 'context' ? <ContextEditor context={project.context} onChange={(context) => { setProject({ ...project, context }); void store.update(project.id, (f) => ({ ...f, context })); }} /> : null}
       {tab === 'replace' ? <ReplaceAndStyle store={store} project={project} settings={settings} selection={selection} onChange={setProject} /> : null}
     </div>
   );

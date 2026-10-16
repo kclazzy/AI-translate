@@ -165,6 +165,24 @@ export function cleanTranslation(value: unknown, maxLen = 1500): string {
   return t.replace(/\\+[rn]/g, ' ').replace(/\s*[\r\n]+\s*/g, ' ').replace(/ {2,}/g, ' ').trim();
 }
 
+const QUOTES: [string, string][] = [['«', '»'], ['"', '"'], ['“', '”'], ['„', '“'], ['「', '」'], ["'", "'"]];
+
+/**
+ * A translation the model put in quotation marks («Разве мы не боевые товарищи?») when the bubble
+ * itself has none: the marks are the model's, not the speaker's.
+ */
+export function unquote(translation: string, original: string): string {
+  const t = translation.trim();
+  const o = original.trim();
+  for (const [a, b] of QUOTES) {
+    if (t.length > 2 && t.startsWith(a) && t.endsWith(b) && !t.slice(1, -1).includes(b)) {
+      const quotedOriginal = QUOTES.some(([x, y]) => o.startsWith(x) && o.endsWith(y));
+      return quotedOriginal ? t : t.slice(1, -1).trim();
+    }
+  }
+  return translation;
+}
+
 /** Lines of a bubble's original joined into one: the line breaks are layout, not meaning. */
 export function joinLines(text: string): string {
   return text
@@ -252,7 +270,7 @@ export function parseVisionAnswer(raw: string, expectTranslation: boolean, repai
     if (x1 - x0 < 2 || y1 - y0 < 2) continue;
     const text = sanitizeText(b.text, 1000);
     if (!text) continue;
-    const translation = cleanTranslation(b.translation, 1500);
+    const translation = unquote(cleanTranslation(b.translation, 1500), text);
     blocks.push({
       box: [x0, y0, x1, y1],
       text,
@@ -302,7 +320,7 @@ export function parseTranslationAnswer(raw: string, expected: { id: string; text
     // the original into "text" and the translation into "translation".
     const text = cleanTranslation(typeof t.translation === 'string' && t.translation.trim() ? t.translation : t.text, 1500);
     if (!text) continue;
-    translations.set(id, { text: limitLength(text, byId.get(id)!), type: t.type ? normalizeType(t.type) : undefined });
+    translations.set(id, { text: limitLength(unquote(text, byId.get(id)!), byId.get(id)!), type: t.type ? normalizeType(t.type) : undefined });
   }
   const missing = expected.filter((e) => !translations.has(e.id)).map((e) => e.id);
   if (expected.length > 0 && missing.length / expected.length > 0.3) {

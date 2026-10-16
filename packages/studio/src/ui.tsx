@@ -85,12 +85,18 @@ export function ToastHost() {
   ) : null;
 }
 
-/** Run an async action with busy/error state. */
+/**
+ * Run an async action with busy/error state. A second click while it runs is ignored: two runs of
+ * one action (translate all, add pages) would write over each other.
+ */
 export function useAction<A extends unknown[]>(fn: (...a: A) => Promise<void>) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const running = useRef(false);
   const run = useCallback(
     async (...a: A) => {
+      if (running.current) return;
+      running.current = true;
       setBusy(true);
       setError(null);
       try {
@@ -98,6 +104,7 @@ export function useAction<A extends unknown[]>(fn: (...a: A) => Promise<void>) {
       } catch (e) {
         setError(e);
       } finally {
+        running.current = false;
         setBusy(false);
       }
     },

@@ -24,6 +24,8 @@ import { KeyedMutex } from './util/mutex';
 
 export interface StoredResult {
   key: string;
+  /** Raised by every edit (saveEdited): a background write based on an older copy is not stored over it. */
+  rev?: number;
   page: PageResult;
   rendered: { y: number; h: number; bytes: Uint8Array }[];
   mime: ImageMime;
@@ -145,6 +147,8 @@ export class TranslateService {
    * N+1 has picked up its own preparation; one slot would throw that work away.
    */
   private ahead = new Map<string, Promise<PreparedPage | undefined>>();
+  /** Frees the video memory of the neural nets in this app (detector, LaMa) before a retry after «out of memory». */
+  releaseGpu?: () => Promise<void>;
   /** Short pages waiting for the batched translation check, by chapter + settings. */
   private reviews = new Map<string, { items: PendingReview[]; timer?: ReturnType<typeof setTimeout> }>();
   private reviewRuns = new Set<Promise<void>>();
@@ -452,6 +456,8 @@ export class TranslateService {
         if (err.code !== 'OUT_OF_MEMORY' || attempt >= 3 || !vision || !isLocalProvider(vision) || opts.signal?.aborted) throw err;
         opts.onStage?.({ stage: 'detecting', message: tr('Не хватило видеопамяти — освобождаю память и пробую ещё раз ({0} из 3)', attempt + 1) });
         if (attempt === 0) {
+          // The detector's and LaMa's sessions hold video memory too: let them go first.
+          await this.releaseGpu?.().catch(() => undefined);
           if (isOllama(vision)) await ollamaUnloadAll(vision.baseUrl, this.fetchImpl).catch(() => undefined);
         } else {
           const numCtx = attempt === 1 ? 8192 : 4096;
@@ -484,9 +490,10 @@ export class TranslateService {
   }
 
   /** Persist editor changes: new blocks and/or a new cleaned layer, then re-render. */
-  async saveEdited(key: string, page: PageResult, cleaned?: TiledImage): Promise<StoredResult> {
+  async saveEdited(key: string, page: PageResult, cleaned?: TiledImage, opts: { ifRev?: number } = {}): Promise<StoredResult> {
     const stored = await this.getResult(key);
     if (!stored) throw new AppError('UNKNOWN', { message: 'Result not found', retryable: false });
+    if (opts.ifRev !== undefined && (stored.rev ?? 0) !== opts.ifRev) throw new EditConflict();
     // A picture cut out of a glued strip: the edit goes into the strip, which is cut again, so a
     // later re-cut (another picture edited, text size changed) keeps it.
     if (stored.strip) {
@@ -499,7 +506,18 @@ export class TranslateService {
     const rendered = await renderOutput(this.backend, { page, cleaned: image }, styleDefaultsFor({ targetLang: page.targetLang, sfxStyle: settings.sfxStyle }, settings.fonts));
     const cleanedTiles = cleaned ? await Promise.all(cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') }))) : stored.cleaned;
     const next: StoredResult = { ...stored, page: rendered.page, rendered: rendered.tiles, cleaned: cleanedTiles, lastHitAt: new Date().toISOString(), fontScale: settings.fonts.scale };
-    await this.putResult(key, next);
+    // Drawing took a while: a background change (the review) that was based on the copy read above
+    // is dropped when someone (the editor, maybe in another tab) saved meanwhile.
+    let conflict = false;
+    await this.updateResult(key, async (current) => {
+      if (opts.ifRev !== undefined && (current?.rev ?? 0) !== opts.ifRev) {
+        conflict = true;
+        return null;
+      }
+      next.rev = (current?.rev ?? stored.rev ?? 0) + 1;
+      return next;
+    });
+    if (conflict) throw new EditConflict();
     this.scheduleCompact(key);
     // A glued strip: cut the edited result back into its pictures too.
     if (stored.parts?.length) {
@@ -818,6 +836,17 @@ export class TranslateService {
 
   /** Put the reviewer's notes and fixes into the stored result; redraw and tell the app when text changed. */
   private async applyReview(key: string, reviewed: TextBlock[], usage: Usage[]): Promise<void> {
+    // An edit saved while the review was being applied wins; the review is applied again on top of it.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await this.applyReviewOnce(key, reviewed, usage);
+      } catch (e) {
+        if (!(e instanceof EditConflict)) throw e;
+      }
+    }
+  }
+
+  private async applyReviewOnce(key: string, reviewed: TextBlock[], usage: Usage[]): Promise<void> {
     await this.deriving.get(key)?.catch(() => undefined);
     const stored = await this.getResult(key);
     if (!stored) return;
@@ -835,16 +864,32 @@ export class TranslateService {
     if (!any) return;
     const page: PageResult = { ...stored.page, blocks, usage: [...stored.page.usage, ...usage] };
     if (changed) {
-      const next = await this.saveEdited(key, page);
+      const next = await this.saveEdited(key, page, undefined, { ifRev: stored.rev ?? 0 });
       for (const k of [key, ...(next.parts ?? [])]) this.onResultChanged?.(k);
     } else {
-      await this.putResult(key, { ...stored, page });
+      // Only the notes: never over an edit saved meanwhile.
+      let conflict = false;
+      await this.updateResult(key, async (current) => {
+        if ((current?.rev ?? 0) !== (stored.rev ?? 0)) {
+          conflict = true;
+          return null;
+        }
+        return { ...stored, page };
+      });
+      if (conflict) throw new EditConflict();
       // The notes changed too (shown in the editor): the pictures stay the same.
       if (stored.parts?.length) for (const k of stored.parts) {
         const part = await this.getResult(k);
         if (part?.strip) await this.putResult(k, { ...part, page: pageForSpan(page, { y: part.strip.y, h: part.strip.h }, part.strip.index) });
       }
     }
+  }
+}
+
+/** A background change found that the result was edited after it was read (see saveEdited ifRev). */
+class EditConflict extends Error {
+  constructor() {
+    super('edited meanwhile');
   }
 }
 

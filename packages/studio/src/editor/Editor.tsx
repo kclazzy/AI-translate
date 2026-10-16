@@ -47,7 +47,8 @@ export interface EditorProps {
   original: TiledImage;
   cleaned: TiledImage;
   settings: AppSettings;
-  onSave: (page: PageResult, cleaned: TiledImage, pixelsChanged: boolean) => Promise<void>;
+  /** `dirtyRows`: the rows of the cleaned picture changed since the last save (a whole chapter saves only those pictures). */
+  onSave: (page: PageResult, cleaned: TiledImage, pixelsChanged: boolean, dirtyRows?: [number, number][]) => Promise<void>;
   onClose?: () => void;
   title?: string;
   /** Rows where one picture of the chapter ends and the next begins (whole-chapter mode). */
@@ -134,6 +135,8 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   const editSeq = useRef(0);
   /** Pixels of the cleaned picture changed since the last save. */
   const pixelsChanged = useRef(false);
+  /** Rows of the cleaned picture changed since the last save. */
+  const dirtyRows = useRef<[number, number][]>([]);
   const tileCanvases = useRef<(HTMLCanvasElement | null)[]>([]);
   const origCanvases = useRef<(HTMLCanvasElement | null)[]>([]);
   const innerRef = useRef<HTMLDivElement>(null);
@@ -257,6 +260,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   /** Pixels of the cleaned picture changed in these rows. */
   const markPixels = (box: Box) => {
     renderState.current.rows.push([box[1], box[1] + box[3]]);
+    dirtyRows.current.push([box[1], box[1] + box[3]]);
     pixelsChanged.current = true;
     scheduleRender();
   };
@@ -868,13 +872,15 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     if (savePromise.current) return savePromise.current;
     const seq = editSeq.current;
     const px = pixelsChanged.current;
+    const rows = dirtyRows.current;
     pixelsChanged.current = false;
+    dirtyRows.current = [];
     setSaving(true);
     setSaveError(null);
     const p = (async () => {
       try {
         const savedBlocks = blocksRef.current;
-        await onSave({ ...page, blocks: savedBlocks }, cleaned, px);
+        await onSave({ ...page, blocks: savedBlocks }, cleaned, px, rows);
         // Edits made while saving stay «unsaved».
         if (editSeq.current === seq) setDirty(false);
         toast(tr('Сохранено'));
@@ -882,6 +888,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
         return true;
       } catch (e) {
         if (px) pixelsChanged.current = true;
+        dirtyRows.current = [...rows, ...dirtyRows.current];
         setSaveError(e);
         return false;
       } finally {

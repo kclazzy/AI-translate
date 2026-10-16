@@ -20,6 +20,10 @@ describe('cropping a project page', () => {
       putAssets: async (_p: string, _q: string, a: any) => void (assets = a),
       get: async () => saved ?? project,
       save: async (p: any) => (saved = p),
+      updatePage: async (_id: string, pageId: string, fn: (p: any) => any) => {
+        const cur = saved ?? project;
+        return (saved = { ...cur, pages: cur.pages.map((x: any) => (x.id === pageId ? fn(x) : x)) });
+      },
     };
     const block = (id: string, y: number): any => ({ id, textType: 'DIALOGUE', originalText: 'a', translatedText: 'Привет', confidence: 1, language: 'en', bbox: [100, y, 100, 40], polygon: [[100, y]], orientation: 0, writingDirection: 'ltr', fontSizeEstimate: 20, bubble: null, translate: true });
     const result: any = { pageId: 'p', width: 400, height: 600, blocks: [block('in', 300), block('out', 20)], targetLang: 'ru', source: { lang: 'en', detectedBy: 'x' }, timings: {}, usage: [], pipeline: { version: 1, hash: '', mode: 'standalone' }, createdAt: '' };

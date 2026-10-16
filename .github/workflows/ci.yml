@@ -72,6 +72,15 @@ jobs:
           xvfb-run -a node e2e/phrasebook.e2e.mjs 2>&1 | tee .test-output/e2e-phrasebook.log
           xvfb-run -a node e2e/race.e2e.mjs 2>&1 | tee .test-output/e2e-race.log
           pnpm --filter @ait/studio test
+      - name: Why the end-to-end tests failed (as annotations, readable without the logs)
+        if: failure()
+        run: |
+          for f in .test-output/e2e-*.log; do
+            [ -f "$f" ] || continue
+            if grep -qE "✗|Error|Timed out" "$f"; then
+              echo "::error title=$(basename "$f")::$(grep -E "✗|Error|Timed out|passed$" "$f" | tail -6 | tr '\n' ' ' | cut -c1-900)"
+            fi
+          done
       - name: Package release files
         run: node scripts/package-release.mjs
       - uses: actions/upload-artifact@v4

@@ -183,6 +183,26 @@ export function maskBounds(mask: Uint8Array, width: number, height: number): Box
   return maxX < 0 ? null : [minX, minY, maxX - minX + 1, maxY - minY + 1];
 }
 
+/**
+ * The bubble's ground near the text differs from its average colour by more than a shade in many
+ * places (a gradient, paper texture, compression noise): see the flat-fill branch of cleanBlock.
+ */
+export function groundVaries(img: PixelData, ground: Uint8Array, area: Box, bg: RGB, skip?: Uint8Array): boolean {
+  const [x0, y0, w, h] = area;
+  let n = 0;
+  let off = 0;
+  for (let y = y0; y < y0 + h; y += 2) {
+    for (let x = x0; x < x0 + w; x += 2) {
+      const p = y * img.width + x;
+      if (!ground[p] || skip?.[p]) continue;
+      const i = p * 4;
+      n++;
+      if (Math.abs(img.data[i] - bg[0]) + Math.abs(img.data[i + 1] - bg[1]) + Math.abs(img.data[i + 2] - bg[2]) > 6) off++;
+    }
+  }
+  return n > 50 && off > n * 0.15;
+}
+
 export function fillMask(img: PixelData, mask: Uint8Array, color: RGB): void {
   for (let p = 0; p < mask.length; p++) {
     if (!mask[p]) continue;
@@ -673,6 +693,8 @@ export interface CleanOptions {
    * flood must lie within it, and one that does is taken even when it is much bigger than its text.
    */
   bubbleBox?: Box;
+  /** Never cover leftovers over art with a plate (a second pass after LaMa: a grey box would stay). */
+  noPlate?: boolean;
 }
 
 /** Colour, stroke thickness and letter height of the lettering in `mask` (before erasing). */
@@ -1345,7 +1367,13 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       mask = dilateIn(snap.mask, img.width, img.height, grow, snap.box && expandBox(snap.box, Math.ceil(grow)));
     }
     const lettering = measureLettering(img, letterMask, closed ? flood!.box : search, bg);
-    if (!opts.analyzeOnly) fillMask(img, mask, bg);
+    if (!opts.analyzeOnly) {
+      fillMask(img, mask, bg);
+      // A bubble that is not one flat colour (a soft gradient, an off-white with noise): a patch of
+      // the single average colour would show the old letters' shapes as a faint ghost. Take the
+      // colour from the ground right around each letter instead.
+      if (closed && !opts.sfx && flood && groundVaries(img, flood.mask, clampBox(expandBox(tb ?? local, 12), img.width, img.height), bg, mask)) diffuseInpaint(img, mask, 40);
+    }
     let method: CleanResult['method'] = opts.analyzeOnly ? 'none' : 'fill';
     // Verify: nothing that stands out from the bubble colour may remain where the text was. Only
     // marks the bubble's background surrounds count: the outline or the art a loose box reaches
@@ -1454,7 +1482,7 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
         }
       }
       const tight = tb ? boxArea(textArea) <= boxArea(tb) * 1.6 + 400 : false;
-      if (left / Math.max(1, textArea[2] * textArea[3]) > 0.01 && !opts.sfx && tight && boxArea(textArea) <= 60_000) {
+      if (left / Math.max(1, textArea[2] * textArea[3]) > 0.01 && !opts.sfx && !opts.noPlate && tight && boxArea(textArea) <= 60_000) {
         const plate = clampBox(expandBox(textArea, 4), img.width, img.height);
         paintPlate(img, plate, bg);
         method = 'plate';

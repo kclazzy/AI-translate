@@ -1,4 +1,4 @@
-import { AppError, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type StoredResult } from '@ait/core';
+import { AppError, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
 import { loadBundledFonts, loadUserFonts } from '@ait/studio/fonts';
 import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
 import { buildProblemReport } from '@ait/studio/problem-report';
@@ -6,8 +6,9 @@ import type { StageEvent } from '@ait/core';
 import { CANCELLED_ALL, type FromOffscreen, type JobStatus, type RenderedTiles, type SpeedStats, type ToOffscreen } from '../shared/messages';
 import { deleteJobBytes, getJobBytes, pruneJobBytes } from '../shared/jobstore';
 import { db, loadSettings, secrets } from '../shared/store';
-import { lamaDownloaded, lamaInpainter } from './lama';
+import { lamaDownloaded, lamaInpainter, releaseLama } from './lama';
 import { detectorDownloaded, releaseDetector, textDetector } from './detector';
+import { gpuFetch } from './gpuLane';
 import { setUiLang, tr } from '@ait/core/i18n';
 
 /**
@@ -15,7 +16,12 @@ import { setUiLang, tr } from '@ait/core/i18n';
  * DOM fonts, OffscreenCanvas, IndexedDB and long-running work without the
  * 30-second service-worker idle limit.
  */
-export const service = new TranslateService(db, secrets, browserBackend, loadSettings);
+// The local model, the detector and LaMa take turns on the video card (see gpuLane.ts).
+export const service = new TranslateService(db, secrets, browserBackend, loadSettings, gpuFetch() as FetchLike);
+service.releaseGpu = async () => {
+  await releaseDetector();
+  await releaseLama();
+};
 const queue = new TaskQueue(2);
 let fontsReady: Promise<void> | null = null;
 /** A picture with no answer for this long is failed and the queue moves on. */
@@ -460,8 +466,9 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       return { cancelled: n };
     }
     case 'free-memory':
-      // «Освободить и повторить»: the detector's session (video memory) is made again when needed.
+      // «Освободить и повторить»: the detector's and LaMa's sessions (video memory) are made again when needed.
       await releaseDetector();
+      await releaseLama();
       return { ok: true };
     case 'status':
       return Object.fromEntries(msg.jobIds.map((id) => [id, jobStatus(id)]));
