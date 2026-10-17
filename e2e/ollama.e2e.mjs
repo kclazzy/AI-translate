@@ -157,6 +157,25 @@ try {
       };
     });
   });
+  // «Оптимально для локальной модели»: the list of changes, then one click applies them (and can be undone).
+  await tab.waitForSelector('[data-testid="optimal-local"] button');
+  await tab.$eval('[data-testid="optimal-local"] button', (b) => b.click());
+  await tab.waitForSelector('.ait-optimal-list');
+  const optText = await tab.$eval('.ait-optimal-list', (e) => e.innerText);
+  await tab.evaluate(() => [...document.querySelectorAll('.ait-optimal-list button')].find((b) => b.textContent === 'Применить').click());
+  await new Promise((r) => setTimeout(r, 600));
+  const opt = await tab.evaluate(async () => {
+    const db = await new Promise((res) => {
+      const r = indexedDB.open('ai-translate', 1);
+      r.onsuccess = () => res(r.result);
+    });
+    return new Promise((res) => {
+      const g = db.transaction('kv').objectStore('kv').get('settings');
+      g.onsuccess = () => res({ q: g.result.quality, two: g.result.twoStepTranslation, keep: g.result.gpuKeepAliveMin, fast: g.result.fastLocal });
+    });
+  });
+  const optBtn = await tab.$eval('[data-testid="optimal-local"]', (e) => e.innerText);
+  check('«Оптимально для локальной модели» lists the changes and applies them', optText.includes('изменится') && opt.q === 'balanced' && opt.two !== false && opt.keep === 15 && !opt.fast && optBtn.includes('Вернуть как было'), `${optText.slice(0, 200)} ${JSON.stringify(opt)} ${optBtn}`);
   check('settings saved: model, folder and check result', saved.model === MODEL && saved.vision === true && saved.base.includes('11434') && saved.dir === 'D:\\AI\\ollama-models' && saved.checks.length === 1, JSON.stringify(saved));
   const popup2 = await browser.newPage();
   await popup2.goto(`chrome-extension://${extId}/popup.html`);

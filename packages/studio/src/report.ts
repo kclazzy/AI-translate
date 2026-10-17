@@ -21,6 +21,12 @@ export async function buildReport(opts: { db: IdbStore; settings: AppSettings; v
   zip.file('settings.json', JSON.stringify(redactSettings(opts.settings), null, 2));
   zip.file('history.json', JSON.stringify(opts.history.slice(0, 50).map((h) => ({ ...h, url: h.url ? h.url.replace(/[?#].*$/, '') : undefined })), null, 2));
   try {
+    // The last errors the extension met (code and message only), newest first.
+    zip.file('errors.json', JSON.stringify((await opts.db.get('kv', 'errors')) ?? [], null, 2));
+  } catch {
+    /* none */
+  }
+  try {
     zip.file('speed.json', JSON.stringify((await opts.db.get('kv', 'speed')) ?? null, null, 2));
   } catch {
     /* none */

@@ -10,7 +10,9 @@ import {
   LANGUAGES,
   listOpenAiModels,
   maskKey,
+  optimalLocalSettings,
   PROVIDER_PRESETS,
+  readsLocally,
   shortId,
   type AppSettings,
   type PromptProfile,
@@ -389,6 +391,55 @@ function StorageLine({ settings: s, update }: SettingsProps) {
   );
 }
 
+/**
+ * «Оптимально для локальной модели»: one click for the settings that suit a model on this computer
+ * (see optimalLocalSettings); what will change is listed first, and the click can be undone.
+ */
+/** What «Вернуть как было» restores; kept outside the component, which the saved settings may re-create. */
+let optimalUndo: Partial<AppSettings> | null = null;
+
+function OptimalLocal({ settings: s, update }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void }) {
+  const [open, setOpen] = useState(false);
+  const [undo, setUndoState] = useState<Partial<AppSettings> | null>(optimalUndo);
+  const setUndo = (u: Partial<AppSettings> | null) => {
+    optimalUndo = u;
+    setUndoState(u);
+  };
+  if (!readsLocally(s)) return null;
+  const { patch, changes } = optimalLocalSettings(s);
+  const apply = () => {
+    const before: Partial<AppSettings> = {};
+    for (const k of Object.keys(patch) as (keyof AppSettings)[]) (before as Record<string, unknown>)[k] = s[k];
+    update(patch);
+    setUndo(before);
+    setOpen(false);
+    toast(tr('Настройки для локальной модели применены'));
+  };
+  return (
+    <div className="ait-optimal" data-testid="optimal-local">
+      <button className="ait-btn small" disabled={!changes.length} onClick={() => setOpen(!open)} title={changes.length ? undefined : tr('Уже настроено')}>
+        {changes.length ? tr('Оптимально для локальной модели') : tr('Настроено оптимально для локальной модели ✓')}
+      </button>
+      {undo ? (
+        <button className="ait-btn small ghost" onClick={() => { update(undo); setUndo(null); }}>
+          {tr('Вернуть как было')}
+        </button>
+      ) : null}
+      {open && changes.length ? (
+        <div className="ait-optimal-list" role="dialog" aria-label={tr('Что изменится')}>
+          <p className="ait-muted" style={{ margin: '0 0 6px' }}>{tr('Для видеокарты {0} ГБ изменится:', s.gpuVramGb ?? 12)}</p>
+          <ul>{changes.map((c) => <li key={c}>{c}</li>)}</ul>
+          <p className="ait-hint">{tr('Модели, ключи, языки и глоссарий не меняются.')}</p>
+          <div className="ait-row">
+            <button className="ait-btn small" onClick={apply}>{tr('Применить')}</button>
+            <button className="ait-btn small ghost" onClick={() => setOpen(false)}>{tr('Отмена')}</button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function SettingsPanel({ settings: s, update }: SettingsProps) {
   const platform = usePlatform();
   const params = new URLSearchParams(location.search);
@@ -456,6 +507,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
       {s.pipeline === 'standalone' && platform.kind === 'extension' ? <LocalModels settings={s} update={update} getKey={getKey} autoStart={params.get('pull') === '1'} /> : null}
       <div className="ait-panel" data-testid="how-to-translate">
         <h2>{tr('Как переводить')}</h2>
+        <OptimalLocal settings={s} update={update} />
         <div className="ait-set-langs">
           <Field label={tr('Исходный язык')}>
             <select className="ait-select" value={s.sourceLang} onChange={(e) => update({ sourceLang: e.target.value })}>

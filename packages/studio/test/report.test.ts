@@ -15,7 +15,7 @@ describe('problem report', () => {
     expect(all).not.toContain('sk-secret-123');
     expect(all).not.toContain('tok-secret-456');
     expect(all).not.toContain('user:pass');
-    expect(Object.keys(zip.files).sort()).toEqual(['history.json', 'info.json', 'settings.json', 'speed.json']);
+    expect(Object.keys(zip.files).sort()).toEqual(['errors.json', 'history.json', 'info.json', 'settings.json', 'speed.json']);
   });
 });
 

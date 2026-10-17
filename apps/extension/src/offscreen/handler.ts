@@ -161,6 +161,21 @@ async function autoSave(r: StoredResult, pageUrl: string, title: string, src: st
   emit({ source: 'offscreen', type: 'save', tabId, url, filename: `AI Translate/${folders.join('/')}/${name}.png` });
 }
 
+/**
+ * The last errors (kv 'errors', newest first, at most 30) for «Сообщить о проблеме»: code, message
+ * and detail only — no pictures, texts or keys. Never fails: logging must not cause another error.
+ */
+export async function logError(error: { code: string; message?: string; detail?: string }, during?: string): Promise<void> {
+  if (error.code === 'CANCELLED') return;
+  try {
+    const list = (await db.get<unknown[]>('kv', 'errors')) ?? [];
+    const entry = { at: new Date().toISOString(), code: error.code, message: error.message?.slice(0, 300), detail: error.detail?.slice(0, 500), ...(during ? { during } : {}) };
+    await db.put('kv', 'errors', [entry, ...list].slice(0, 30));
+  } catch {
+    /* the database itself may be what failed */
+  }
+}
+
 /** LaMa in the browser, when chosen in the settings and downloaded. */
 async function browserLama(mode: string | undefined) {
   return mode === 'browser' && (await lamaDownloaded()) ? lamaInpainter : undefined;
