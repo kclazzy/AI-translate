@@ -10,27 +10,25 @@ const letters = (t: string) => t.replace(/[^\p{L}\p{N}]/gu, '');
  */
 export function joinLetterBlocks(blocks: TextBlock[]): { blocks: TextBlock[]; joined: string[][] } {
   const single = blocks.filter((b) => b.textType !== 'DIALOGUE' && b.textType !== 'NARRATION' && letters(b.originalText).length > 0 && letters(b.originalText).length <= 2);
+  // Letters next to each other (boxes touching, or a gap under a letter's height) form one logo;
+  // the model's boxes of such letters are rough (one may span the whole logo), so no row is required.
+  const near = (p: TextBlock, q: TextBlock) => {
+    const gx = Math.max(0, Math.max(p.bbox[0], q.bbox[0]) - Math.min(p.bbox[0] + p.bbox[2], q.bbox[0] + q.bbox[2]));
+    const gy = Math.max(0, Math.max(p.bbox[1], q.bbox[1]) - Math.min(p.bbox[1] + p.bbox[3], q.bbox[1] + q.bbox[3]));
+    const h = Math.max(p.bbox[3], q.bbox[3]);
+    return gx <= h * 0.9 && gy <= h * 0.5;
+  };
   const used = new Set<string>();
   const groups: TextBlock[][] = [];
-  const sorted = [...single].sort((a, b) => a.bbox[0] - b.bbox[0]);
-  for (const s of sorted) {
-    if (used.has(s.id)) continue;
-    const g = [s];
-    used.add(s.id);
-    let grew = true;
-    while (grew) {
-      grew = false;
-      for (const o of sorted) {
-        if (used.has(o.id)) continue;
-        const last = g.reduce((a, b) => (b.bbox[0] + b.bbox[2] > a.bbox[0] + a.bbox[2] ? b : a));
-        const h = Math.min(last.bbox[3], o.bbox[3]);
-        const overlapY = Math.min(last.bbox[1] + last.bbox[3], o.bbox[1] + o.bbox[3]) - Math.max(last.bbox[1], o.bbox[1]);
-        const gap = o.bbox[0] - (last.bbox[0] + last.bbox[2]);
-        if (overlapY >= h * 0.4 && gap <= Math.max(last.bbox[3], o.bbox[3]) * 0.9 && gap >= -last.bbox[2] * 0.6) {
-          g.push(o);
-          used.add(o.id);
-          grew = true;
-        }
+  for (const s0 of single) {
+    if (used.has(s0.id)) continue;
+    const g = [s0];
+    used.add(s0.id);
+    for (let i = 0; i < g.length; i++) {
+      for (const o of single) {
+        if (used.has(o.id) || !near(g[i], o)) continue;
+        g.push(o);
+        used.add(o.id);
       }
     }
     if (g.length >= 3) groups.push(g);
@@ -45,7 +43,7 @@ export function joinLetterBlocks(blocks: TextBlock[]): { blocks: TextBlock[]; jo
       drop.add(b.id);
       return b;
     }
-    const byX = [...g].sort((a, c) => a.bbox[0] - c.bbox[0]);
+    const byX = [...g].sort((a, c) => a.bbox[0] + a.bbox[2] / 2 - (c.bbox[0] + c.bbox[2] / 2));
     const w = byX.reduce((a, c) => a + c.bbox[2], 0) / byX.length;
     let text = '';
     for (const [i, c] of byX.entries()) {

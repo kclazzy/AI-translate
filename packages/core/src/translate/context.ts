@@ -144,7 +144,7 @@ export function rememberedTranslation(ctx: TranslationContext | undefined, text:
   if (!ctx?.memory?.length || k.replace(/\s/g, '').length < 12) return undefined;
   const exact = ctx.memory.findLast((m) => memoryKey(m.src) === k);
   if (exact) return exact.dst;
-  if (type !== 'SIGN' && type !== 'OTHER') return undefined;
+  // A background sign is the same sign whatever type the model gave it this time (SIGN, OTHER, even DIALOGUE).
   const words = new Set(k.split(' '));
   let best: { dst: string; score: number } | undefined;
   for (const m of ctx.memory) {
