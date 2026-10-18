@@ -45,7 +45,7 @@ export async function runPipeline(req: PipelineRequest & { batchReview?: boolean
   return out;
 }
 
-export function styleDefaultsFor(config: Pick<PipelineConfig, 'targetLang' | 'sfxStyle'>, fonts?: { dialogue?: string; narration?: string; sfx?: string; scale?: number }): StyleDefaults {
+export function styleDefaultsFor(config: Pick<PipelineConfig, 'targetLang' | 'sfxStyle'>, fonts?: { dialogue?: string; narration?: string; sfx?: string; scale?: number; minSize?: number }): StyleDefaults {
   return {
     ...DEFAULT_STYLE_DEFAULTS,
     targetLang: config.targetLang,
@@ -54,6 +54,7 @@ export function styleDefaultsFor(config: Pick<PipelineConfig, 'targetLang' | 'sf
     narrationFont: fonts?.narration || DEFAULT_STYLE_DEFAULTS.narrationFont,
     sfxFont: fonts?.sfx || DEFAULT_STYLE_DEFAULTS.sfxFont,
     fontScale: fonts?.scale,
+    ...(fonts?.minSize ? { minFontSize: fonts.minSize } : {}),
   };
 }
 

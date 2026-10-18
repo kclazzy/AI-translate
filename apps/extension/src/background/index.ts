@@ -11,6 +11,8 @@ import { dictionaryFor, setUiLang, tr, uiLang } from '@ait/core/i18n';
  */
 
 const OFFSCREEN_URL = 'offscreen.html';
+/** Picture files smaller than this are not manga pages (see the translate message). */
+const TINY_FILE_BYTES = 3000;
 /** Small in-memory diagnostics ring buffer (readable from DevTools as __aitLog). */
 const debugLog: string[] = [];
 (globalThis as unknown as { __aitLog: string[] }).__aitLog = debugLog;
@@ -62,6 +64,28 @@ async function ensureOffscreen(): Promise<void> {
   await creating;
 }
 
+/**
+ * The offscreen document lives only while there is work: OFFSCREEN_IDLE_MS after the last message,
+ * with no picture in work in any tab, it is closed (its memory — pictures, canvases, the neural
+ * nets — goes back to the system). The next picture opens it again in about a second.
+ */
+const OFFSCREEN_IDLE_MS = 3 * 60_000;
+let offscreenIdle: ReturnType<typeof setTimeout> | null = null;
+function scheduleOffscreenClose(): void {
+  if (!chrome.offscreen?.closeDocument) return;
+  if (offscreenIdle) clearTimeout(offscreenIdle);
+  offscreenIdle = setTimeout(() => {
+    offscreenIdle = null;
+    const busy = [...running.values()].some((set) => set.size > 0);
+    if (busy || creating) return scheduleOffscreenClose();
+    void chrome.offscreen.hasDocument?.().then((has) => {
+      if (!has) return;
+      dlog('offscreen idle: closing');
+      return chrome.offscreen.closeDocument();
+    }).catch(() => undefined);
+  }, OFFSCREEN_IDLE_MS);
+}
+
 /** Firefox has no offscreen API but its background page has a DOM: run the handler in place. */
 async function toOffscreen<T = unknown>(msg: ToOffscreen): Promise<T> {
   dlog('to offscreen', msg.type);
@@ -78,6 +102,7 @@ async function toOffscreen<T = unknown>(msg: ToOffscreen): Promise<T> {
         await new Promise((res) => setTimeout(res, 150));
         continue;
       }
+      scheduleOffscreenClose();
       // The worker failed: an error, not a result.
       if (r && typeof r === 'object' && '__aitError' in r) throw toAppError((r as OffscreenFailure).__aitError);
       return r as T;
@@ -413,6 +438,13 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
           const { shot, rect, dpr } = await captureFor(tabId, windowId, msg.image.id);
           await toOffscreen({ target: 'offscreen', type: 'crop-run', jobId, tabId, doc, screenshot: shot, rect, dpr, pageUrl: msg.pageUrl, title: msg.title, generic: false, priority: msg.priority });
           return { queued: true, captured: true };
+        }
+        // A file of a few KB is an icon, an avatar or a spacer, not a page: found automatically, it
+        // is let go quietly (asked for by a click, it is translated all the same).
+        if (bytes.length < TINY_FILE_BYTES && !msg.force) {
+          track(tabId, jobId, false);
+          sendToTab(tabId, { type: 'job-error', id: msg.image.id, error: new AppError('CANCELLED', { detail: 'tiny file' }).toJSON() });
+          return { queued: false };
         }
         const stashed = await stash(jobId, bytes, mime);
         blobId = stashed.blobId;

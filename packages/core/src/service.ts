@@ -26,6 +26,8 @@ export interface StoredResult {
   key: string;
   /** Raised by every edit (saveEdited): a background write based on an older copy is not stored over it. */
   rev?: number;
+  /** Translated as screen/UI text (see TranslateOptions.generic). */
+  generic?: boolean;
   page: PageResult;
   rendered: { y: number; h: number; bytes: Uint8Array }[];
   mime: ImageMime;
@@ -207,7 +209,7 @@ export class TranslateService {
     const noSkip = opts.noSkip ?? !!opts.force;
     const aheadId = `${baseKey}|${noSkip ? 1 : 0}`;
     if (!opts.force) {
-      const hit = await this.db.get<StoredResult>('results', baseKey);
+      const hit = (await this.db.get<StoredResult>('results', baseKey)) ?? (await this.otherLook(baseKey, !!opts.generic));
       if (hit) {
         // A cached page never waits for a picture prepared ahead (detector windows it does not need).
         this.ahead.delete(aheadId);
@@ -256,6 +258,7 @@ export class TranslateService {
         lastHitAt: now,
         fontScale: settings.fonts.scale,
         ...(lighter ? { degraded: true } : {}),
+        ...(opts.generic ? { generic: true } : {}),
       };
       await this.putResult(key, result);
       void this.journal({ key, page, storeMs: Math.round(performance.now() - tStore), vision: config.vision }).catch(() => undefined);
@@ -578,6 +581,24 @@ export class TranslateService {
     if (!r) return;
     r.lastHitAt = new Date().toISOString();
     await this.markUsed(key, r);
+  }
+
+  /**
+   * The same picture translated with the same settings but drawn with other fonts (only the look
+   * changed): copied under the new key and drawn again — the fonts never cost a model run.
+   */
+  private async otherLook(key: string, generic: boolean): Promise<StoredResult | undefined> {
+    const at = key.indexOf(':', key.indexOf(':') + 1);
+    const prefix = at < 0 ? key : key.slice(0, at);
+    const keys = (await this.db.keysWithPrefix?.('results', prefix)) ?? [];
+    for (const k of keys) {
+      if (k === key || k.includes('~') || k.endsWith(':lite') || (at < 0 ? false : k.length > prefix.length && k[prefix.length] !== ':')) continue;
+      const other = await this.db.get<StoredResult>('results', k);
+      if (!other || other.strip || !!other.generic !== generic) continue;
+      await this.putResult(key, { ...other, key, parts: undefined });
+      return this.saveEdited(key, other.page);
+    }
+    return undefined;
   }
 
   /**

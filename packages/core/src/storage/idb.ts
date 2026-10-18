@@ -97,6 +97,11 @@ export class IdbStore {
     return this.tx(store, 'readwrite', (s) => s.delete(key) as IDBRequest<undefined>);
   }
 
+  /** Keys starting with `prefix` (an index range: nothing else is read). */
+  keysWithPrefix(store: StoreName, prefix: string): Promise<string[]> {
+    return this.tx(store, 'readonly', (s) => s.getAllKeys(IDBKeyRange.bound(prefix, `${prefix}\uffff`)) as IDBRequest<string[]>);
+  }
+
   keys(store: StoreName): Promise<string[]> {
     return this.tx(store, 'readonly', (s) => s.getAllKeys() as IDBRequest<string[]>);
   }

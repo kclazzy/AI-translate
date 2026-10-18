@@ -5,6 +5,7 @@ import { confirmLeave } from '../editor/guard';
 import { exportCbz, exportEpub, exportPdf, exportZip, importFiles, type ExportPage } from '../files';
 import { usePlatform } from '../platform';
 import { rerenderProjectPage, translateProjectPage, ProjectStore } from '../projects';
+import { textsTable } from '../problemReport';
 import { ErrorBox, Field, Progress, Switch, toast, useAction, useObjectUrl } from '../ui';
 import { ContextEditor, GlossaryEditor } from './GlossaryPanel';
 import { tr, uiLocale } from '@ait/core/i18n';
@@ -77,7 +78,7 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
   const [selection, setSelection] = useState<Set<string>>(new Set());
   // Ticks belong to one chapter: start clean when another one opens.
   useEffect(() => setSelection(new Set()), [project?.id]);
-  const [exportFmt, setExportFmt] = useState<'zip-png' | 'zip-jpg' | 'zip-webp' | 'pdf' | 'cbz' | 'epub'>('pdf');
+  const [exportFmt, setExportFmt] = useState<'zip-png' | 'zip-jpg' | 'zip-webp' | 'pdf' | 'cbz' | 'epub' | 'texts'>('pdf');
   const abort = useRef<AbortController | null>(null);
   const scanlator = settings.uiMode === 'scanlator';
 
@@ -168,6 +169,11 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
 
   const doExport = useAction(async () => {
     if (!project) return;
+    if (exportFmt === 'texts') {
+      // Texts only: original and translation of every block, one table (for proofreading or a typesetter).
+      const tsv = textsTable(project.pages.map((p) => ({ name: p.name, blocks: p.result?.blocks ?? [] })));
+      return platform.saveFile(`${project.title}.tsv`, new TextEncoder().encode(tsv), 'text/tab-separated-values');
+    }
     const pages: ExportPage[] = [];
     for (const p of project.pages) {
       const a = await store.assets(project.id, p.id);
@@ -311,6 +317,7 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
             <option value="pdf">PDF</option>
             <option value="cbz">{tr('CBZ (читалки комиксов)')}</option>
             <option value="epub">{tr('EPUB (книжные приложения)')}</option>
+            <option value="texts">{tr('Тексты: оригинал и перевод (таблица)')}</option>
           </select>
           <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void doExport.run()} disabled={busy || !done}>{tr('Скачать')}</button>
           <button className="ait-btn" style={{ flex: '0 0 auto' }} onClick={() => void saveProjectFile.run()} disabled={busy}>{tr('Сохранить проект')}</button>

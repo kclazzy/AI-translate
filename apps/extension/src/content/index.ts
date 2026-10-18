@@ -255,8 +255,24 @@ function main() {
     const fromCache = u.reduce((a, x) => a + (x.cachedTokens ?? 0), 0);
     const models = [...new Set(u.map((x) => x.model))].join(', ');
     const sec = r.page.timings.totalMs ? fmtNumber(r.page.timings.totalMs / 1000, { maximumFractionDigits: 1 }) : '—';
+    // «Почему долго»: where the time went, the slowest stage first in mind (see the speed benchmark).
+    const t = r.page.timings;
+    const s1 = (ms?: number) => fmtNumber((ms ?? 0) / 1000, { maximumFractionDigits: 1 });
+    const read = (t.decodeMs ?? 0) + (t.detectMs ?? 0) + (t.ocrMs ?? 0);
+    const stages = [
+      [tr('чтение картинки'), read],
+      [tr('перевод'), t.translateMs ?? 0],
+      [tr('проверка'), t.qaMs ?? 0],
+      [tr('стирание'), Math.max(0, (t.cleanMs ?? 0) - (t.inpaintMs ?? 0))],
+      [tr('LaMa'), t.inpaintMs ?? 0],
+      [tr('вёрстка'), t.renderMs ?? 0],
+    ].filter(([, ms]) => (ms as number) >= 50) as [string, number][];
+    const slowest = stages.length ? stages.reduce((a, b) => (b[1] > a[1] ? b : a)) : null;
     const lines = [
       tr('Время: {0} с', sec),
+      stages.length && !r.cached ? tr('По этапам: {0}', stages.map(([n, ms]) => `${n} ${s1(ms)} с`).join(', ')) : '',
+      slowest && !r.cached && (t.totalMs ?? 0) > 3000 ? tr('Дольше всего: {0}', slowest[0]) : '',
+      t.llmCalls && !r.cached ? tr('Запросов к модели: {0}, модель отвечала {1} с', t.llmCalls, s1(t.llmMs)) + (t.tokensPerSec ? tr(', {0} токенов/с', fmtNumber(Math.round(t.tokensPerSec))) : '') : '',
       tr('Токены: {0} на входе, {1} на выходе', fmtNumber(tokIn), fmtNumber(tokOut)),
       fromCache ? tr('Из кэша провайдера: {0} токенов', fmtNumber(fromCache)) : '',
       tr('Стоимость: {0}', fmtUsd(cost, 4)),
@@ -684,6 +700,11 @@ function main() {
         if (msg.command === 'translate-page') translatePage();
         else if (msg.command === 'download-chapter') downloadChapter((msg.value as ChapterFormat) || 'pdf');
         else if (msg.command === 'select-area') selectArea();
+        else if (msg.command === 'repeat-area') {
+          // «Повторить область»: the same part of the screen again (a reader that turns pages in place).
+          if (lastArea) requestAnimationFrame(() => void translateArea(lastArea!));
+          else selectArea();
+        }
         else if (msg.command === 'toggle-original') {
           originalsShown = !originalsShown;
           for (const it of items.values()) if (it.status === 'done') it.overlay.setOriginal(originalsShown);
@@ -955,7 +976,8 @@ ${chapterStats(list)}`;
   // ---- auto translate (infinite scroll) ----------------------------------------------------
   const io = new IntersectionObserver(
     (entries) => {
-      if (!autoTranslate) return;
+      // A tab in the background starts nothing by itself: its pictures wait until it is looked at.
+      if (!autoTranslate || document.hidden) return;
       for (const e of entries) {
         if (!e.isIntersecting) continue;
         const c = asCandidate(e.target, minSize);
@@ -1006,13 +1028,18 @@ ${chapterStats(list)}`;
           io.observe(c.el);
         }
         const id = byElement.get(c.el);
-        if (!id || !items.has(id)) {
+        if ((!id || !items.has(id)) && !document.hidden) {
           const r = c.el.getBoundingClientRect();
           if (r.bottom > -innerHeight && r.top < innerHeight * 2.5) void translate(c);
         }
       }
     }, 250);
   }
+
+  // Back in front: the pictures in view that waited get their turn.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && autoTranslate) rescan();
+  });
 
   const mo = new MutationObserver((muts) => {
     if (muts.some((m) => !(m.target instanceof Element) || !m.target.closest('[data-ait-ui]'))) {
@@ -1040,17 +1067,32 @@ ${chapterStats(list)}`;
   };
   addEventListener('scroll', reposition, { capture: true, passive: true });
   addEventListener('resize', reposition, { passive: true });
-  const tickTimer = setInterval(() => {
-    reposition();
-    checkUrl();
-  }, 500);
+  // Nothing runs on a page until it has a translation (or one is on its way): the timer and the
+  // size watcher start with the first overlay and the timer stops when the last one is gone.
+  let tickTimer: ReturnType<typeof setInterval> | null = null;
   // Pictures above loading (webtoons) move everything below without a scroll event: follow at once,
   // otherwise the original shows from under a translation that lags behind for a moment.
   const ro = new ResizeObserver(reposition);
-  ro.observe(document.documentElement);
-  if (document.body) ro.observe(document.body);
+  let roStarted = false;
+  const ensureTick = () => {
+    if (!roStarted) {
+      roStarted = true;
+      ro.observe(document.documentElement);
+      if (document.body) ro.observe(document.body);
+    }
+    tickTimer ??= setInterval(() => {
+      if (!items.size) {
+        clearInterval(tickTimer!);
+        tickTimer = null;
+        return;
+      }
+      reposition();
+      checkUrl();
+    }, 500);
+  };
   const watched = new WeakSet<Element>();
   const watchEl = (el: Element) => {
+    ensureTick();
     if (watched.has(el)) return;
     watched.add(el);
     ro.observe(el);
@@ -1070,7 +1112,7 @@ ${chapterStats(list)}`;
     hoverBtn.textContent = tr('Перевести');
     hoverBtn.setAttribute('aria-label', tr('Перевести изображение'));
   };
-  document.documentElement.appendChild(hoverHost);
+  // Put into the page only when it is first shown.
   let hoverCand: Candidate | null = null;
   let lastMove = 0;
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1098,6 +1140,7 @@ ${chapterStats(list)}`;
       }
       hoverCand = c;
       const r = c.el.getBoundingClientRect();
+      if (!hoverHost.isConnected) document.documentElement.appendChild(hoverHost);
       hoverBtn.style.display = 'block';
       hoverBtn.style.top = `${Math.max(8, r.top + 10)}px`;
       hoverBtn.style.left = `${Math.min(innerWidth - 120, r.right - 120)}px`;
@@ -1111,6 +1154,9 @@ ${chapterStats(list)}`;
   });
 
   // ---- screen area --------------------------------------------------------------------------
+  /** The last area chosen on screen (window coordinates), for «Повторить область». */
+  let lastArea: { x: number; y: number; width: number; height: number } | null = null;
+
   function selectArea() {
     const host = document.createElement('div');
     markUi(host);
@@ -1150,6 +1196,7 @@ ${chapterStats(list)}`;
       const rect = { x: Math.min(start[0], e.clientX), y: Math.min(start[1], e.clientY), width: Math.abs(e.clientX - start[0]), height: Math.abs(e.clientY - start[1]) };
       done();
       if (rect.width < 12 || rect.height < 12) return;
+      lastArea = rect;
       // Wait two frames so our veil is not in the screenshot.
       requestAnimationFrame(() => requestAnimationFrame(() => void translateArea(rect)));
     });
@@ -1182,6 +1229,7 @@ ${chapterStats(list)}`;
     });
     const item: Item = { id, cand: { el: pseudo, kind: 'canvas' }, status: 'queued', overlay, docRect: doc };
     items.set(id, item);
+    ensureTick();
     overlay.stage({ stage: 'queued' });
     try {
       await send({ type: 'capture-area', image: { id, kind: 'area', rect, dpr: devicePixelRatio }, pageUrl: location.href, title: document.title });

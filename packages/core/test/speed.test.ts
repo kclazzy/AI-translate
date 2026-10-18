@@ -16,6 +16,7 @@ function memoryDb() {
     put: async (s: string, k: string, v: unknown) => void m.set(`${s}/${k}`, structuredClone(v)),
     delete: async (s: string, k: string) => void m.delete(`${s}/${k}`),
     keys: async (s: string) => of(s).map(([k]) => k),
+    keysWithPrefix: async (s: string, p: string) => of(s).map(([k]) => k).filter((k) => k.startsWith(p)),
     entries: async (s: string) => of(s),
   } as any;
 }
@@ -392,5 +393,21 @@ describe('the page journal', () => {
     expect(t.storeMs).toBeGreaterThanOrEqual(0);
     expect(journal[0].size).toBe('800x1100');
     expect(JSON.stringify(journal)).not.toContain('たなか');
+  });
+});
+
+describe('other fonts for a translated page', () => {
+  it('draw the page again from the cache without asking the model', async () => {
+    const page = await makeMangaPage(800, 1100, [{ cx: 220, cy: 260, rx: 120, ry: 170, text: 'たなかさん' }]);
+    const m = mock(() => mangaAnswer(page.bubbles));
+    let s = settingsWith();
+    const svc = new TranslateService(memoryDb(), secrets, napiBackend, async () => s, m.fetchImpl);
+    svc.compactTiles = false;
+    const first = await svc.translate(page.bytes, 'image/png');
+    s = { ...s, fonts: { ...s.fonts, dialogue: 'Comic Neue' } };
+    const second = await svc.translate(page.bytes, 'image/png');
+    expect(second.result.key).not.toBe(first.result.key);
+    expect(m.calls).toHaveLength(1);
+    expect(second.result.page.blocks.map((b) => b.translatedText)).toEqual(first.result.page.blocks.map((b) => b.translatedText));
   });
 });

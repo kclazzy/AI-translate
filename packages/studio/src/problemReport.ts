@@ -154,6 +154,25 @@ const ANALYSIS_README = `Пакет для анализа главы — AI Tran
 const cell = (v: unknown) => String(v ?? '').replace(/[\t\r\n]+/g, ' ').trim();
 
 /**
+ * All texts of a chapter as one table (page, block, type, translated or not, unsure, original,
+ * translation, notes): TSV in UTF-8 with a BOM, so Excel and LibreOffice open the Cyrillic right.
+ */
+export function textsTable(pages: { name: string; blocks: PageResult['blocks'] }[]): string {
+  const rows = [['page', 'block', 'type', 'translate', 'unsure', 'original', 'translation', 'notes'].join('\t')];
+  for (const p of pages) {
+    for (const b of p.blocks) {
+      const notes = [
+        ...(b.qa?.issues ?? []).map((q) => `${q.kind}: ${q.note}`),
+        (b as { continued?: boolean }).continued ? 'continued from the neighbour picture' : '',
+        b.overflow ? 'text does not fit' : '',
+      ].filter(Boolean);
+      rows.push([cell(p.name), b.id, b.textType, b.translate ? 'yes' : 'no', b.lowConfidence ? 'yes' : '', cell(b.originalText), cell(b.translatedText), cell(notes.join('; '))].join('\t'));
+    }
+  }
+  return '﻿' + rows.join('\n') + '\n';
+}
+
+/**
  * «Для анализа»: the whole chapter — each picture's original, its current translated look and its
  * data, plus all texts in one table — to see at a glance where a translation went wrong.
  */
@@ -170,23 +189,13 @@ export async function buildAnalysisPack(input: {
   const date = input.date ?? new Date();
   const zip = new JSZip();
   zip.file('README.txt', ANALYSIS_README);
-  const rows = [['page', 'block', 'type', 'translate', 'unsure', 'original', 'translation', 'notes'].join('\t')];
   for (const [i, p] of input.pages.entries()) {
     const dir = String(i + 1).padStart(3, '0');
     if (p.original?.bytes?.length) zip.file(`${dir}/original.${extOf(p.original.bytes, p.original.mime)}`, p.original.bytes);
     await resultJpeg(zip, `${dir}/result`, p.rendered, p.page.width, p.page.height, input.backend);
     zip.file(`${dir}/page.json`, JSON.stringify(p.page, null, 2));
-    for (const b of p.page.blocks) {
-      const notes = [
-        ...(b.qa?.issues ?? []).map((q) => `${q.kind}: ${q.note}`),
-        (b as { continued?: boolean }).continued ? 'continued from the neighbour picture' : '',
-        b.overflow ? 'text does not fit' : '',
-      ].filter(Boolean);
-      rows.push([dir, b.id, b.textType, b.translate ? 'yes' : 'no', b.lowConfidence ? 'yes' : '', cell(b.originalText), cell(b.translatedText), cell(notes.join('; '))].join('\t'));
-    }
   }
-  // UTF-8 with a BOM: Excel opens the Cyrillic right.
-  zip.file('texts.tsv', '﻿' + rows.join('\n') + '\n');
+  zip.file('texts.tsv', textsTable(input.pages.map((p, i) => ({ name: String(i + 1).padStart(3, '0'), blocks: p.page.blocks }))));
   if (input.settings) zip.file('settings.json', JSON.stringify(sanitizeSettings(input.settings), null, 2));
   zip.file('journal.json', JSON.stringify(input.journal ?? [], null, 2));
   zip.file('errors.json', JSON.stringify(input.errors ?? [], null, 2));

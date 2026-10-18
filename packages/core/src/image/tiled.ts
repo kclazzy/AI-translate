@@ -15,6 +15,8 @@ export interface Tile {
  */
 /** Pictures up to this size keep a copy of their pixels in memory while one is held (≤ 64 MB). */
 export const HOLD_MAX_PIXELS = 16_000_000;
+/** A picture over MAX_PIXELS is scaled down to this many pixels (see fromDecoded). */
+export const FIT_PIXELS = 50_000_000;
 
 export class TiledImage {
   readonly tiles: Tile[];
@@ -36,10 +38,19 @@ export class TiledImage {
   }
 
   static fromDecoded(backend: ImageBackend, img: DecodedImage): TiledImage {
-    const t = new TiledImage(backend, img.width, img.height);
+    // Bigger than can be held (a whole chapter glued by the site into one picture): scaled down to
+    // FIT_PIXELS instead of refused — the overlay is stretched over the picture on screen anyway.
+    const k = img.width * img.height > MAX_PIXELS ? Math.sqrt(FIT_PIXELS / (img.width * img.height)) : 1;
+    const w = Math.max(1, Math.round(img.width * k));
+    const h = Math.max(1, Math.round(img.height * k));
+    const t = new TiledImage(backend, w, h);
     for (const tile of t.tiles) {
       const ctx = tile.canvas.getContext('2d');
-      ctx.drawImage(img.source, 0, tile.y, img.width, tile.h, 0, 0, img.width, tile.h);
+      if (k === 1) ctx.drawImage(img.source, 0, tile.y, img.width, tile.h, 0, 0, img.width, tile.h);
+      else {
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img.source, 0, tile.y / k, img.width, tile.h / k, 0, 0, w, tile.h);
+      }
     }
     return t;
   }

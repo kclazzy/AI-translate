@@ -165,6 +165,9 @@ interface Located {
   pre?: boolean;
 }
 
+/** The largest picture sent in one request, bytes (under the strictest provider limit, 5 MB, as base64 +33%). */
+export const VIEW_MAX_BYTES = 3_600_000;
+
 /** One view of the picture as the vision model gets it: scaled to the quality's size, JPEG. */
 async function encodeView(image: TiledImage, view: View, config: PipelineConfig, model: string, deps: StandaloneDeps): Promise<EncodedView> {
   const family = familyFor(model);
@@ -176,7 +179,14 @@ async function encodeView(image: TiledImage, view: View, config: PipelineConfig,
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingQuality = 'high';
   image.drawRegion(ctx, 0, view.y, image.width, view.h, dw, dh);
-  const jpeg = await deps.backend.encode(canvas, 'image/jpeg', 0.92);
+  let jpeg = await deps.backend.encode(canvas, 'image/jpeg', 0.92);
+  // Providers refuse big pictures (Anthropic: 5 MB): a lower quality only when needed, and only
+  // when it really comes out smaller.
+  for (const q of [0.85, 0.8, 0.75]) {
+    if (jpeg.length <= VIEW_MAX_BYTES) break;
+    const smaller = await deps.backend.encode(canvas, 'image/jpeg', q);
+    if (smaller.length < jpeg.length) jpeg = smaller;
+  }
   return { view, jpeg, dw, dh };
 }
 

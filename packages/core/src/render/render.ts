@@ -34,7 +34,9 @@ export function displayText(block: TextBlock, d: StyleDefaults = DEFAULT_STYLE_D
 }
 
 export function layoutBlock(measurer: Measurer, block: TextBlock, d: StyleDefaults = DEFAULT_STYLE_DEFAULTS, page?: { width: number; height: number }): LayoutResult {
-  const l = layoutBlockRaw(measurer, block, d, page ? minReadableSize(page.width) : 0);
+  // The user's own lower limit (settings → «Минимальный размер текста») wins over the automatic one.
+  const min = Math.max(page ? minReadableSize(page.width) : 0, d.minFontSize ?? 0);
+  const l = layoutBlockRaw(measurer, block, d, min);
   return page ? keepInsidePage(l, l.box ?? targetBox(block, d), page) : l;
 }
 

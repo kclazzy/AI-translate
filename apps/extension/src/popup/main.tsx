@@ -109,7 +109,7 @@ function Popup() {
     setS(next);
     void saveSettings(next);
   };
-  const command = async (command: 'translate-page' | 'select-area' | 'toggle-original' | 'download-chapter' | 'clear-page' | 'refresh-look') => {
+  const command = async (command: 'translate-page' | 'select-area' | 'repeat-area' | 'toggle-original' | 'download-chapter' | 'clear-page' | 'refresh-look') => {
     if (!tab?.id) return;
     if (command !== 'toggle-original' && command !== 'clear-page' && command !== 'refresh-look') {
       // Before a local translation: is everything installed and running? If not, open the helper,
@@ -208,6 +208,9 @@ function Popup() {
       </div>
       <div className="pp-row">
         <button className="ait-btn" disabled={!canRun} onClick={() => void command('select-area')}>{tr('Перевести область')}</button>
+        <button className="ait-btn" disabled={!canRun} onClick={() => void command('repeat-area')} title={tr('Ту же часть экрана ещё раз — для читалок, которые листают страницы на месте')}>
+          {tr('Повторить область')}
+        </button>
         <button
           className="ait-btn"
           disabled={!canRun}

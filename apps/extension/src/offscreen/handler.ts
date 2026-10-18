@@ -89,6 +89,28 @@ function dropIfUnneeded(task: Task) {
   forget(task);
 }
 
+/**
+ * Errors every waiting picture would hit too (no model chosen, a rejected key, the local server
+ * down, a missing program): the waiting pictures of the same tab fail at once with the same reason
+ * instead of each trying and waiting in turn. A picture already running finishes on its own.
+ */
+const STOPS_QUEUE = new Set(['NOT_CONFIGURED', 'INVALID_API_KEY', 'PRIVACY_VIOLATION', 'SETUP_NEEDED', 'PROVIDER_UNAVAILABLE', 'ENGINE_UNAVAILABLE', 'ENGINE_UNAUTHORIZED', 'DISABLED']);
+function stopQueueAfter(failed: Task, error: ReturnType<AppError['toJSON']>, emit: (m: FromOffscreen) => void): void {
+  if (!STOPS_QUEUE.has(error.code)) return;
+  const tabs = new Set([...failed.subs.values()].map((s) => s.tabId));
+  for (const task of [...tasks.values()]) {
+    if (task === failed || task.startedAt || !queue.has(task.key)) continue;
+    const subs = [...task.subs].filter(([, s]) => tabs.has(s.tabId));
+    if (!subs.length) continue;
+    for (const [id, s] of subs) {
+      task.subs.delete(id);
+      jobTask.delete(id);
+      if (!task.delivered.has(s.part)) emit({ source: 'offscreen', type: 'error', jobId: id, tabId: s.tabId, error });
+    }
+    dropIfUnneeded(task);
+  }
+}
+
 function emitTo(task: Task, part: number | null, emit: (m: FromOffscreen) => void, make: (jobId: string, sub: Sub) => FromOffscreen) {
   for (const [jobId, sub] of task.subs) if (part === null || sub.part === part) emit(make(jobId, sub));
 }
@@ -259,7 +281,8 @@ async function prepare() {
   const local = settings.pipeline !== 'engine' && (!vision || isLocalProvider(vision));
   // Running two pages at once on a local server makes both twice as slow and can push a single
   // page past the timeout.
-  queue.concurrency = local ? 1 : Math.max(1, settings.concurrency);
+  // A local server works on one picture at a time; a cloud one gets at most 3 at once.
+  queue.concurrency = local ? 1 : Math.min(3, Math.max(1, settings.concurrency));
   return local;
 }
 
@@ -375,6 +398,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
         .catch((e) => {
           const error = toAppError(e).toJSON();
           emitTo(task, null, emit, (id, s) => ({ source: 'offscreen', type: 'error', jobId: id, tabId: s.tabId, error }));
+          stopQueueAfter(task, error, emit);
         })
         .finally(() => forget(task));
       return { queued: true, status: jobStatus(jobId) };
@@ -449,6 +473,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
         .catch((e) => {
           const error = toAppError(e).toJSON();
           for (const [id, s] of task.subs) if (!task.delivered.has(s.part)) emit({ source: 'offscreen', type: 'error', jobId: id, tabId: s.tabId, error });
+          stopQueueAfter(task, error, emit);
         })
         .finally(() => forget(task));
       return { queued: true, status: jobStatus(jobIds[0]) };

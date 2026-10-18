@@ -19,6 +19,8 @@ export interface StyleDefaults {
   verticalForCjk: boolean;
   /** Scale of the automatic text size (1 = fit the bubble as usual). */
   fontScale?: number;
+  /** Never smaller than this, px (the user's setting; 0 / absent = the automatic readable size). */
+  minFontSize?: number;
 }
 
 export const DEFAULT_STYLE_DEFAULTS: StyleDefaults = {

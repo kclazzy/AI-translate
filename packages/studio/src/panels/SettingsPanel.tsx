@@ -599,6 +599,11 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
                 <input type="range" min={0.6} max={1.5} step={0.05} value={s.fonts.scale ?? 1} onChange={(e) => update({ fonts: { ...s.fonts, scale: Number(e.target.value) } })} aria-label={tr('Размер текста перевода')} />
                 <SetHint text={tr('Меньше 100% — текст мельче, чем помещается в бабл; больше — крупнее, пока помещается. Размер, заданный в редакторе вручную, не меняется.')} />
               </label>
+              <label className="ait-field" data-testid="font-min">
+                <span>{s.fonts.minSize ? tr('Минимальный размер текста: {0} px', s.fonts.minSize) : tr('Минимальный размер текста: авто')}</span>
+                <input type="range" min={0} max={30} step={1} value={s.fonts.minSize ?? 0} onChange={(e) => update({ fonts: { ...s.fonts, minSize: Number(e.target.value) || undefined } })} aria-label={tr('Минимальный размер текста')} />
+                <SetHint text={tr('Перевод не станет мельче этого размера, даже если не помещается в бабл. «Авто» — около 1,6% ширины картинки, не меньше 12 px.')} />
+              </label>
               <label className="ait-field">
                 <span>{tr('Стирать оригинал с запасом: {0} px', s.inpaintExpand ?? 3)}</span>
                 <input type="range" min={0} max={12} value={s.inpaintExpand ?? 3} onChange={(e) => update({ inpaintExpand: Number(e.target.value) })} aria-label={tr('Запас вокруг букв при стирании')} />

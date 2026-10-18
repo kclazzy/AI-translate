@@ -90,7 +90,8 @@ export interface AppSettings {
   saveHistory: boolean;
   debug: boolean;
   /** Fonts by text type; `scale` makes all automatic sizes bigger or smaller (1 = as fits). */
-  fonts: { dialogue: string; narration: string; sfx: string; scale?: number };
+  /** minSize: the smallest text size, px (absent: automatic, 1.6 % of the picture's width). */
+  fonts: { dialogue: string; narration: string; sfx: string; scale?: number; minSize?: number };
   cacheDays: number;
   /** First-run setup finished (mobile app shows a setup screen until then). */
   onboarded?: boolean;
@@ -363,7 +364,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     minImageSize: isNum(r.minImageSize) ? r.minImageSize : d.minImageSize,
     saveHistory: typeof r.saveHistory === 'boolean' ? r.saveHistory : d.saveHistory,
     debug: r.debug === true,
-    fonts: { dialogue: strOr(fonts.dialogue, ''), narration: strOr(fonts.narration, ''), sfx: strOr(fonts.sfx, ''), ...(isNum(fonts.scale) ? { scale: fonts.scale } : {}) },
+    fonts: { dialogue: strOr(fonts.dialogue, ''), narration: strOr(fonts.narration, ''), sfx: strOr(fonts.sfx, ''), ...(isNum(fonts.scale) ? { scale: fonts.scale } : {}), ...(isNum(fonts.minSize) && fonts.minSize > 0 ? { minSize: Math.min(40, Math.round(fonts.minSize)) } : {}) },
     cacheDays: isNum(r.cacheDays) ? r.cacheDays : d.cacheDays,
     phrasebook: cleanPhrasebook(r.phrasebook),
     version: 1,
