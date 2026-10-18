@@ -2,6 +2,7 @@
 // (lazy, like Webtoons) and a long strip is translated completely and downloaded as one PDF,
 // with the strip cut into book pages.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -187,6 +188,32 @@ try {
     });
     check('the whole chapter is in it (also the page that loads only on scroll), the strip is cut into pages, other episodes are not', pages === 7, `pages=${pages} ${JSON.stringify(hist)}`);
   }
+  // «Для анализа»: the same chapter (from the cache) as originals + the current look + a table of texts.
+  await new Promise((r) => setTimeout(r, 1500));
+  await studio.evaluate(async () => {
+    const [t] = await chrome.tabs.query({ url: 'http://127.0.0.1:18111/*' });
+    await chrome.runtime.sendMessage({ type: 'popup-command', command: 'download-chapter', format: 'analysis', tabId: t.id });
+  });
+  await tab.bringToFront();
+  let pack = null;
+  for (let i = 0; i < 120 && !pack; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    pack = readdirSync(DL).find((f) => f.startsWith('ait-analysis') && f.endsWith('.zip'));
+  }
+  if (!pack) {
+    // The test browser may keep a random name: the newest zip.
+    pack = readdirSync(DL).filter((f) => !f.endsWith('.pdf') && !f.endsWith('.crdownload')).sort().pop() ?? null;
+  }
+  let packNames = [];
+  let tsv = '';
+  if (pack) {
+    await new Promise((r) => setTimeout(r, 500));
+    const JSZip = createRequire(join(ROOT, 'packages/studio/package.json'))('jszip');
+    const z = await JSZip.loadAsync(readFileSync(join(DL, pack)));
+    packNames = Object.keys(z.files);
+    tsv = (await z.file('texts.tsv')?.async('string')) ?? '';
+  }
+  check('«Для анализа» downloads originals, the current translation and all texts in one table', packNames.includes('texts.tsv') && packNames.some((n) => /^001\/original\./.test(n)) && packNames.includes('001/result.jpg') && packNames.includes('001/page.json') && packNames.includes('journal.json') && tsv.includes('page\tblock\ttype'), `${pack} ${packNames.filter((n) => !n.startsWith("0")).join(', ')} rows=${tsv.split('\n').length}`);
 } catch (e) {
   check('unexpected failure', false, String(e?.stack ?? e));
 } finally {

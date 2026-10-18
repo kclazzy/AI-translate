@@ -68,7 +68,8 @@ export interface SpeedStats {
 }
 
 /** File formats for «Перевести и скачать». */
-export type ChapterFormat = 'pdf' | 'cbz' | 'zip' | 'epub';
+/** 'analysis': originals + the current translation + data of every picture, for finding problems. */
+export type ChapterFormat = 'pdf' | 'cbz' | 'zip' | 'epub' | 'analysis';
 
 // background → content
 export type BackgroundToContent =
@@ -116,7 +117,7 @@ export type ToOffscreen =
   /** Stop every job of a tab (or of one page shown in it: `doc`), or of all tabs. */
   | { target: 'offscreen'; type: 'cancel-tab'; tabId?: number; doc?: string }
   | { target: 'offscreen'; type: 'status'; jobIds: string[] }
-  | { target: 'offscreen'; type: 'build-file'; keys: string[]; title: string; format: ChapterFormat; lang: string }
+  | { target: 'offscreen'; type: 'build-file'; keys: string[]; title: string; format: ChapterFormat; lang: string; version?: string }
   | { target: 'offscreen'; type: 'build-problem-report'; key: string; comment?: string; pageUrl?: string; version: string }
   | { target: 'offscreen'; type: 'get-result'; key: string }
   | { target: 'offscreen'; type: 'get-tile'; key: string; index: number }

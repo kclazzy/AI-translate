@@ -38,6 +38,7 @@ const CSS = `
 .info textarea { font: inherit; min-height: 44px; resize: vertical; border: 1px solid #1c223066; border-radius: 6px; padding: 4px; }
 .info label { display: flex; gap: 6px; align-items: center; }
 .info button { justify-self: end; border: 1.5px solid #1c2230; background: #c8205f; color: #fff; border-radius: 999px; padding: 4px 10px; cursor: pointer; font: inherit; }
+.info button[data-pack] { background: #fff; color: #1c2230; }
 .info button:disabled { opacity: .6; cursor: default; }
 .info small { color: #555; }
 .split::after { content: '⟷'; position: absolute; top: 50%; left: -12px; width: 26px; height: 26px; margin-top: -13px; border-radius: 50%; background: #c8205f; color: #fff; display: grid; place-items: center; font: 13px/1 system-ui, sans-serif; }
@@ -211,7 +212,7 @@ export class Overlay {
    * «ⓘ»: how this page was translated (time, tokens, cost, model). A click opens the details with
    * «Сообщить о проблеме»: a zip for the developer (`onReport` builds and downloads it, returns a note).
    */
-  setInfo(details: string, onReport?: (o: { comment: string; includeUrl: boolean }) => Promise<string>): void {
+  setInfo(details: string, onReport?: (o: { comment: string; includeUrl: boolean }) => Promise<string>, onChapterPack?: () => void): void {
     this.bar.querySelector('[data-info]')?.remove();
     this.wrap.querySelector('.info')?.remove();
     const b = document.createElement('button');
@@ -222,12 +223,12 @@ export class Overlay {
     b.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (onReport) this.toggleInfo(details, onReport);
+      if (onReport) this.toggleInfo(details, onReport, onChapterPack);
     });
     this.bar.append(b);
   }
 
-  private toggleInfo(details: string, onReport: (o: { comment: string; includeUrl: boolean }) => Promise<string>): void {
+  private toggleInfo(details: string, onReport: (o: { comment: string; includeUrl: boolean }) => Promise<string>, onChapterPack?: () => void): void {
     const open = this.wrap.querySelector('.info');
     if (open) return void open.remove();
     const p = document.createElement('div');
@@ -259,7 +260,23 @@ export class Overlay {
       ).finally(() => (send.disabled = false));
     });
     for (const el of [p, comment, url]) el.addEventListener('click', (e) => e.stopPropagation());
-    p.append(pre, comment, label, send, note);
+    p.append(pre, comment, label, send);
+    if (onChapterPack) {
+      // The whole chapter at once: originals, the current translation and all texts in one table.
+      const pack = document.createElement('button');
+      pack.type = 'button';
+      pack.dataset.pack = '1';
+      pack.textContent = tr('Вся глава для анализа');
+      pack.title = tr('Скачать архив: оригинал и текущий перевод каждой картинки главы, все тексты таблицей и журнал (без ключей API)');
+      pack.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        p.remove();
+        onChapterPack();
+      });
+      p.append(pack);
+    }
+    p.append(note);
     this.wrap.append(p);
   }
 

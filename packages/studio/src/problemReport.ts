@@ -124,3 +124,109 @@ export async function buildProblemReport(input: ProblemReportInput): Promise<{ n
   const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
   return { name: problemReportName(page, date), bytes };
 }
+
+/** One translated page of a chapter for the analysis pack. */
+export interface AnalysisPage {
+  page: PageResult;
+  original?: { bytes: Uint8Array; mime?: string };
+  rendered: Tile[];
+}
+
+const ANALYSIS_README = `Пакет для анализа главы — AI Translate
+
+Для каждой картинки главы, по порядку чтения (папки 001, 002, …):
+- original.* — исходная картинка с сайта;
+- result.jpg — как она выглядит с переводом сейчас;
+- page.json — найденные блоки, исходный текст, перевод, ответы модели и решения программы.
+
+Общие файлы:
+- texts.tsv — все реплики главы в одной таблице (страница, блок, тип, оригинал, перевод, пометки) —
+  открывается в Excel или LibreOffice;
+- journal.json — время каждого этапа, запросы к модели и токены по страницам;
+- errors.json — последние ошибки (код и текст);
+- settings.json — настройки без ключей API;
+- info.txt — версия, модели и число страниц.
+
+Ключей API здесь нет. Адрес страницы не включён. Если картинки личные — не отправляйте файл.
+`;
+
+/** One cell of the TSV: tabs and line breaks would break the table. */
+const cell = (v: unknown) => String(v ?? '').replace(/[\t\r\n]+/g, ' ').trim();
+
+/**
+ * «Для анализа»: the whole chapter — each picture's original, its current translated look and its
+ * data, plus all texts in one table — to see at a glance where a translation went wrong.
+ */
+export async function buildAnalysisPack(input: {
+  pages: AnalysisPage[];
+  settings?: AppSettings;
+  version: string;
+  platform: string;
+  backend?: ImageBackend;
+  journal?: unknown;
+  errors?: unknown;
+  date?: Date;
+}): Promise<{ name: string; bytes: Uint8Array }> {
+  const date = input.date ?? new Date();
+  const zip = new JSZip();
+  zip.file('README.txt', ANALYSIS_README);
+  const rows = [['page', 'block', 'type', 'translate', 'unsure', 'original', 'translation', 'notes'].join('\t')];
+  for (const [i, p] of input.pages.entries()) {
+    const dir = String(i + 1).padStart(3, '0');
+    if (p.original?.bytes?.length) zip.file(`${dir}/original.${extOf(p.original.bytes, p.original.mime)}`, p.original.bytes);
+    await resultJpeg(zip, `${dir}/result`, p.rendered, p.page.width, p.page.height, input.backend);
+    zip.file(`${dir}/page.json`, JSON.stringify(p.page, null, 2));
+    for (const b of p.page.blocks) {
+      const notes = [
+        ...(b.qa?.issues ?? []).map((q) => `${q.kind}: ${q.note}`),
+        (b as { continued?: boolean }).continued ? 'continued from the neighbour picture' : '',
+        b.overflow ? 'text does not fit' : '',
+      ].filter(Boolean);
+      rows.push([dir, b.id, b.textType, b.translate ? 'yes' : 'no', b.lowConfidence ? 'yes' : '', cell(b.originalText), cell(b.translatedText), cell(notes.join('; '))].join('\t'));
+    }
+  }
+  // UTF-8 with a BOM: Excel opens the Cyrillic right.
+  zip.file('texts.tsv', '﻿' + rows.join('\n') + '\n');
+  if (input.settings) zip.file('settings.json', JSON.stringify(sanitizeSettings(input.settings), null, 2));
+  zip.file('journal.json', JSON.stringify(input.journal ?? [], null, 2));
+  zip.file('errors.json', JSON.stringify(input.errors ?? [], null, 2));
+  const models = new Set<string>();
+  for (const p of input.pages) for (const u of p.page.usage ?? []) models.add(`${u.provider} — ${u.model}`);
+  zip.file(
+    'info.txt',
+    [
+      'AI Translate — chapter analysis pack',
+      `version: ${input.version}`,
+      `platform: ${input.platform}`,
+      `date: ${date.toISOString()}`,
+      `pictures: ${input.pages.length}`,
+      `blocks: ${input.pages.reduce((n, p) => n + p.page.blocks.length, 0)}`,
+      'models:',
+      ...[...models].map((m) => `  ${m}`),
+      '',
+    ].join('\n'),
+  );
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+  const d = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
+  return { name: `ait-analysis-${d}-${input.pages.length}p.zip`, bytes };
+}
+
+/** The translated look as one JPEG (a PDF-sized chapter in PNG would be hundreds of MB). */
+async function resultJpeg(zip: JSZip, base: string, tiles: Tile[], width: number, height: number, backend?: ImageBackend): Promise<void> {
+  if (!tiles.length) return;
+  if (backend && height <= 16_000) {
+    try {
+      const canvas = backend.createCanvas(width, height);
+      const ctx = canvas.getContext('2d');
+      for (const t of tiles) {
+        const img = await backend.decode(t.bytes, sniffImageMime(t.bytes) ?? 'image/png');
+        ctx.drawImage(img.source, 0, t.y);
+        img.close?.();
+      }
+      return void zip.file(`${base}.jpg`, await backend.encode(canvas, 'image/jpeg', 0.85));
+    } catch {
+      /* the parts as they are */
+    }
+  }
+  for (const [i, t] of tiles.entries()) zip.file(`${base}-part${pad(i + 1)}-y${t.y}.${extOf(t.bytes)}`, t.bytes);
+}

@@ -1,7 +1,7 @@
 import { AppError, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
 import { loadBundledFonts, loadUserFonts } from '@ait/studio/fonts';
 import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
-import { buildProblemReport } from '@ait/studio/problem-report';
+import { buildAnalysisPack, buildProblemReport, type AnalysisPage } from '@ait/studio/problem-report';
 import type { StageEvent } from '@ait/core';
 import { CANCELLED_ALL, type FromOffscreen, type JobStatus, type RenderedTiles, type SpeedStats, type ToOffscreen } from '../shared/messages';
 import { deleteJobBytes, getJobBytes, pruneJobBytes } from '../shared/jobstore';
@@ -529,6 +529,27 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       return { url, name, size: bytes.length };
     }
     case 'build-file': {
+      if (msg.format === 'analysis') {
+        // «Для анализа»: originals, the current look and the data of every picture, plus all texts in a table.
+        const pages: AnalysisPage[] = [];
+        for (const key of msg.keys) {
+          const r = await service.getResult(key);
+          if (r) pages.push({ page: r.page, original: r.original, rendered: r.rendered });
+        }
+        if (!pages.length) throw new AppError('UNKNOWN', { retryable: false, message: tr('Нет переведённых страниц') });
+        const { name, bytes } = await buildAnalysisPack({
+          pages,
+          settings: await loadSettings(),
+          version: msg.version ?? '',
+          platform: 'extension',
+          backend: browserBackend,
+          journal: await db.get('kv', 'journal'),
+          errors: await db.get('kv', 'errors'),
+        });
+        const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/zip' }));
+        setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
+        return { url, name, pages: pages.length, size: bytes.length };
+      }
       // Assemble the translated pages of a chapter into one file and hand back a blob URL.
       const pages: ExportPage[] = [];
       for (const [i, key] of msg.keys.entries()) {

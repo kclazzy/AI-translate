@@ -503,7 +503,7 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
     }
     case 'build-download': {
       const s = await loadSettings();
-      const r = await toOffscreen<{ url: string; name: string; pages: number; size: number }>({ target: 'offscreen', type: 'build-file', keys: msg.keys, title: msg.title, format: msg.format, lang: s.targetLang });
+      const r = await toOffscreen<{ url: string; name: string; pages: number; size: number }>({ target: 'offscreen', type: 'build-file', keys: msg.keys, title: msg.title, format: msg.format, lang: s.targetLang, version: chrome.runtime.getManifest().version });
       if (!r?.url) throw new AppError('UNKNOWN', { retryable: false, detail: 'build failed' });
       let id: number;
       try {
@@ -517,7 +517,7 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
           if (!r.name) throw new Error('empty');
           id = await chrome.downloads.download({ url: r.url, filename: r.name, saveAs: false, conflictAction: 'uniquify' });
         } catch {
-          r.name = `AI Translate ${new Date().toISOString().slice(0, 10)}.${msg.format}`;
+          r.name = `AI Translate ${new Date().toISOString().slice(0, 10)}.${msg.format === 'analysis' ? 'zip' : msg.format}`;
           id = await chrome.downloads.download({ url: r.url, filename: r.name, saveAs: false, conflictAction: 'uniquify' });
         }
       }

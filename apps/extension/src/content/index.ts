@@ -150,7 +150,7 @@ function main() {
       ...(b.selfCheck?.issues ?? []).map((i) => `⚠ ${selfCheckNote(i)}`),
     ]);
     it.overlay.setQa(qa.length, qa.slice(0, 8).join('\n'));
-    it.overlay.setInfo(pageInfo(result), (o) => reportProblem(result.key, o));
+    it.overlay.setInfo(pageInfo(result), (o) => reportProblem(result.key, o), () => downloadChapter('analysis'));
     // No lettering found, the model was not asked: say so (⟳ translates it anyway).
     if (result.page.skippedNoText) it.overlay.setSkipped(tr('Текста не найдено'));
     it.overlay.position();
