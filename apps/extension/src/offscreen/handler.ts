@@ -198,9 +198,23 @@ export async function logError(error: { code: string; message?: string; detail?:
   }
 }
 
+let lamaLogged = 0;
+/** LaMa was on but did not run (the engine is not started): into the error log, once in a while. */
+async function lamaProblem(kind: 'engine-down' | 'not-downloaded'): Promise<void> {
+  if (Date.now() - lamaLogged < 10 * 60_000) return;
+  lamaLogged = Date.now();
+  await logError(
+    kind === 'engine-down'
+      ? { code: 'LAMA_ENGINE_DOWN', message: 'LaMa: the local engine did not answer; the background under text over art was painted over simply' }
+      : { code: 'LAMA_NOT_DOWNLOADED', message: 'LaMa in the browser is chosen but not downloaded' },
+    'translate',
+  );
+}
+
 /** LaMa in the browser, when chosen in the settings and downloaded. */
 async function browserLama(mode: string | undefined) {
-  return mode === 'browser' && (await lamaDownloaded()) ? lamaInpainter : undefined;
+  // In the engine mode the browser's LaMa (when downloaded) stands in while the engine does not answer.
+  return (mode === 'browser' || mode === 'engine') && (await lamaDownloaded()) ? lamaInpainter : undefined;
 }
 
 function tileOf(r: StoredResult, i: number) {
@@ -218,7 +232,7 @@ export function toRendered(r: StoredResult, cached: boolean): RenderedTiles {
     height: r.page.height,
     tiles: omit ? [] : r.rendered.map((_, i) => tileOf(r, i)),
     tilesOmitted: omit ? r.rendered.length : undefined,
-    page: { blocks: r.page.blocks, timings: r.page.timings, usage: r.page.usage, pipeline: r.page.pipeline, stripLang: r.page.stripLang, artText: r.page.artText, artRedrawn: r.page.artRedrawn, skippedNoText: r.page.skippedNoText, selfCheck: r.page.selfCheck },
+    page: { blocks: r.page.blocks, timings: r.page.timings, usage: r.page.usage, pipeline: r.page.pipeline, stripLang: r.page.stripLang, artText: r.page.artText, artRedrawn: r.page.artRedrawn, lama: r.page.lama, skippedNoText: r.page.skippedNoText, selfCheck: r.page.selfCheck },
     cached,
   };
 }
@@ -381,6 +395,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
                 },
               });
               if (!cached) void recordSpeed(Date.now() - t0, result.page.usage);
+              if (!cached && (result.page.lama === 'engine-down' || result.page.lama === 'not-downloaded')) void lamaProblem(result.page.lama);
               task.delivered.add(0);
               const rendered = toRendered(result, cached);
               emitTo(task, null, emit, (id, s) => ({ source: 'offscreen', type: 'done', jobId: id, tabId: s.tabId, result: rendered }));

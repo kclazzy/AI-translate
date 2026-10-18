@@ -586,7 +586,9 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       // Offered only where LaMa can run in this browser, while it is off and the user did not refuse it.
       const s = await loadSettings();
       const mode = s.lamaMode ?? (s.lamaEngine ? 'engine' : 'off');
-      return { offer: lamaSupported() && mode === 'off' && !s.lamaOfferDismissed };
+      // LaMa is on but did not run: always said (once per tab), with the browser's LaMa as the way out when it can run here.
+      if (msg.reason) return { offer: true, browser: lamaSupported() };
+      return { offer: lamaSupported() && mode === 'off' && !s.lamaOfferDismissed, browser: true };
     }
     case 'lama-offer-answer': {
       if (msg.accept) {

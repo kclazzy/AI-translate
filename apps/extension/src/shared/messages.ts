@@ -19,7 +19,7 @@ export interface RenderedTiles {
   width: number;
   height: number;
   tiles: { y: number; h: number; dataUrl: string }[];
-  page: Pick<PageResult, 'blocks' | 'timings' | 'usage' | 'pipeline' | 'stripLang' | 'artText' | 'artRedrawn' | 'skippedNoText' | 'selfCheck'>;
+  page: Pick<PageResult, 'blocks' | 'timings' | 'usage' | 'pipeline' | 'stripLang' | 'artText' | 'artRedrawn' | 'lama' | 'skippedNoText' | 'selfCheck'>;
   cached: boolean;
   /**
    * The tiles were too big for one message (browsers refuse messages over 64 MiB): `tiles` is
@@ -47,7 +47,7 @@ export type ContentToBackground =
   | { type: 'status'; ids: string[] }
   | { type: 'open-setup' }
   /** Should the page offer LaMa (text over artwork was painted over simply)? */
-  | { type: 'lama-offer' }
+  | { type: 'lama-offer'; reason?: 'engine-down' | 'not-downloaded' }
   /** The LaMa offer: «Включить» opens the settings, «Не предлагать» remembers the choice. */
   | { type: 'lama-offer-answer'; accept: boolean }
   | { type: 'free-memory' }

@@ -99,6 +99,17 @@ export function fastLocalActive(s: AppSettings): boolean {
 /** How long a local model stays in video memory after the last page, unless the user changes it. */
 export const DEFAULT_KEEP_ALIVE_MIN = 5;
 
+/**
+ * The translation check, by default: checks without a model when a model on this computer translates (a
+ * small local model's review costs a quarter of the chapter's time and its fixes help as often as they
+ * hurt), the model's review with fixes otherwise. A mode the user picked stays as picked.
+ */
+export function qaModeOf(s: AppSettings): QaMode {
+  if (s.qaMode) return s.qaMode;
+  const p = providerById(s, s.translationProviderId) ?? providerById(s, s.visionProviderId);
+  return s.pipeline !== 'engine' && p && isLocalProvider(p) ? 'rules' : 'fix';
+}
+
 export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): PipelineConfig {
   setCatalog(s.modelCatalog);
   const quality: Quality = fastLocalActive(s) ? 'fast' : s.quality;
@@ -116,7 +127,7 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     vision: withKeepAlive(providerById(s, s.visionProviderId), s, quality, visionModel),
     translator: withKeepAlive(providerById(s, s.translationProviderId), s, quality, visionModel),
     engine: s.engine,
-    qa: fastLocalActive(s) && (s.qaMode ?? 'fix') !== 'off' ? 'rules' : s.qaMode ?? 'fix',
+    qa: fastLocalActive(s) && qaModeOf(s) !== 'off' ? 'rules' : qaModeOf(s),
     twoStep: s.twoStepTranslation ?? !(fastLocalActive(s) || s.quality === 'fast'),
     bubblesOnly: s.bubblesOnly || undefined,
     onlySourceLang: (s.onlySourceLang && s.sourceLang !== 'auto') || undefined,

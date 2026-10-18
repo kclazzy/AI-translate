@@ -154,7 +154,8 @@ function main() {
     // No lettering found, the model was not asked: say so (⟳ translates it anyway).
     if (result.page.skippedNoText) it.overlay.setSkipped(tr('Текста не найдено'));
     it.overlay.position();
-    if (artPlain(result)) void offerLama();
+    if (result.page.lama === 'engine-down' || result.page.lama === 'not-downloaded') void offerLama(result.page.lama);
+    else if (artPlain(result)) void offerLama();
   }
 
   /** A problem the self-check after typesetting left for the reader (same notes as in the editor). */
@@ -179,11 +180,18 @@ function main() {
   // ---- LaMa offer: once per tab, after a page where text over artwork was painted over simply ----
   let lamaOffered = false;
   let lamaCard: HTMLElement | null = null;
-  async function offerLama() {
+  async function offerLama(reason?: 'engine-down' | 'not-downloaded') {
     if (lamaOffered || dead) return;
     lamaOffered = true;
-    const r = await send<{ offer: boolean } | null>({ type: 'lama-offer' }).catch(() => null);
+    const r = await send<{ offer: boolean; browser?: boolean } | null>({ type: 'lama-offer', ...(reason ? { reason } : {}) }).catch(() => null);
     if (!r?.offer || dead) return;
+    const text =
+      reason === 'engine-down'
+        ? tr('LaMa не сработала: локальный движок AI Translate Engine не отвечает, фон под текстом на рисунке закрашен упрощённо. Запустите движок или включите LaMa в браузере.')
+        : reason === 'not-downloaded'
+          ? tr('LaMa в браузере включена, но ещё не скачана — фон под текстом на рисунке закрашен упрощённо.')
+          : tr('Фон под текстом на рисунке закрашен упрощённо. Нейросеть LaMa дорисует его аккуратнее (скачать ~200 МБ один раз).');
+    const mainLabel = reason === 'engine-down' ? tr('LaMa в браузере') : reason === 'not-downloaded' ? tr('Скачать') : tr('Включить');
     const host = document.createElement('div');
     markUi(host);
     const root = host.attachShadow({ mode: 'closed' });
@@ -195,16 +203,16 @@ function main() {
       button { all: initial; cursor: pointer; color: #fff; font: inherit; border: 1px solid #fff6; border-radius: 6px; padding: 2px 8px; }
       button.main { background: #e2558f; border-color: #e2558f; }
       button.x { border: none; padding: 0 4px; opacity: .7; }
-    </style><div class="p" role="status" data-ait="lama-offer"><span class="t">${esc(tr('Фон под текстом на рисунке закрашен упрощённо. Нейросеть LaMa дорисует его аккуратнее (скачать ~200 МБ один раз).'))}</span><div class="row"><button type="button" class="x" aria-label="${esc(tr('Закрыть'))}">✕</button><button type="button" class="no">${esc(tr('Не предлагать'))}</button><button type="button" class="main">${esc(tr('Включить'))}</button></div></div>`;
+    </style><div class="p" role="status" data-ait="lama-offer"><span class="t">${esc(text)}</span><div class="row"><button type="button" class="x" aria-label="${esc(tr('Закрыть'))}">✕</button>${reason ? '' : `<button type="button" class="no">${esc(tr('Не предлагать'))}</button>`}${r.browser === false ? '' : `<button type="button" class="main">${esc(mainLabel)}</button>`}</div></div>`;
     const close = () => {
       host.remove();
       if (lamaCard === host) lamaCard = null;
     };
-    (root.querySelector('.main') as HTMLButtonElement).addEventListener('click', () => {
+    root.querySelector('.main')?.addEventListener('click', () => {
       close();
       void send({ type: 'lama-offer-answer', accept: true }).catch(() => undefined);
     });
-    (root.querySelector('.no') as HTMLButtonElement).addEventListener('click', () => {
+    root.querySelector('.no')?.addEventListener('click', () => {
       close();
       void send({ type: 'lama-offer-answer', accept: false }).catch(() => undefined);
     });
@@ -278,7 +286,15 @@ function main() {
       tr('Стоимость: {0}', fmtUsd(cost, 4)),
       models ? tr('Модель: {0}', models) : '',
       tr('Текстов на картинке: {0}', r.page.blocks.length),
-      artPlain(r) ? tr('Текст поверх рисунка: {0} — фон без LaMa', r.page.artText) : '',
+      r.page.lama === 'engine-down'
+        ? tr('LaMa: локальный движок не отвечает — фон закрашен упрощённо')
+        : r.page.lama === 'not-downloaded'
+          ? tr('LaMa: не скачана — фон закрашен упрощённо')
+          : r.page.lama === 'browser-instead'
+            ? tr('LaMa: движок не ответил, дорисовано в браузере')
+            : r.page.artRedrawn
+              ? tr('LaMa: дорисовано мест — {0}', r.page.artText)
+              : artPlain(r) ? tr('Текст поверх рисунка: {0} — фон без LaMa', r.page.artText) : '',
       r.page.skippedNoText ? tr('Пропущена: текста не найдено') : '',
       r.page.selfCheck && r.page.selfCheck.fixed + r.page.selfCheck.flagged > 0 ? tr('Самопроверка: исправлено {0}, требуют внимания {1}', r.page.selfCheck.fixed, r.page.selfCheck.flagged) : '',
       r.cached ? tr('Взято из кэша') : '',

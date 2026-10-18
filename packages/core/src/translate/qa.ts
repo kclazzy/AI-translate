@@ -6,6 +6,7 @@ import type { TranslationContext } from './context';
 import { findGlossaryHits, type GlossaryEntry } from './glossary';
 import { extractJson, isDegenerate, jsonData, sanitizeLine, sanitizeText } from './parse';
 import { usageFrom } from './translator';
+import { isLocalProvider } from '../llm/privacy';
 import { lazyStrings, tr, uiLang } from '../i18n';
 
 /**
@@ -187,7 +188,7 @@ export async function qaPages(pages: TextBlock[][], opts: QaOptions): Promise<Us
 }
 
 async function review(items: { id: string; b: TextBlock }[], provider: LlmProvider, opts: QaOptions): Promise<Usage[]> {
-  const payload = items.map(({ id, b }) => ({ id, type: b.textType, original: b.originalText, translation: b.translatedText, ...(b.speaker ? { speaker: b.speaker } : {}), ...(b.speakerGender && b.speakerGender !== 'unknown' ? { speakerGender: b.speakerGender } : {}) }));
+  const payload = items.map(({ id, b }) => ({ id, type: b.textType, original: b.originalText, translation: b.translatedText, ...(b.speakerGender && b.speakerGender !== 'unknown' ? { speakerGender: b.speakerGender } : {}) }));
   const rules = items.filter(({ b }) => b.qa!.issues.length).map(({ id, b }) => `${id}: ${b.qa!.issues.map((i) => i.note).join(' ')}`);
   const user = `${namesData(opts.context)}<blocks>\n${jsonData(payload)}\n</blocks>${rules.length ? `\nAutomatic checks found:\n${rules.join('\n')}` : ''}`;
   const system = reviewPrompt(opts.targetLang);
@@ -214,6 +215,8 @@ async function review(items: { id: string; b: TextBlock }[], provider: LlmProvid
   } catch {
     return [usageFrom(provider, res)];
   }
+  // A model on this computer: only fixes that repair something checkable (fixAccepted).
+  const strict = isLocalProvider(provider.config);
   for (const { id, b } of items) {
     const r = reviews.get(id);
     b.qa!.reviewed = !!r;
@@ -223,12 +226,54 @@ async function review(items: { id: string; b: TextBlock }[], provider: LlmProvid
     const serious =
       r.issues.some((i) => i.severity === 'major' || i.kind === 'grammar' || i.kind === 'spelling' || i.kind === 'characters') ||
       b.qa!.issues.some((i) => i.severity === 'major');
-    if (opts.mode === 'fix' && r.fix && serious && r.fix !== b.translatedText && [...r.fix].length <= [...b.translatedText].length * 1.6 + 20) {
+    if (opts.mode === 'fix' && r.fix && serious && r.fix !== b.translatedText && [...r.fix].length <= [...b.translatedText].length * 1.6 + 20 && (!strict || fixAccepted(b, r.fix, opts))) {
       b.qa!.before = b.translatedText;
       b.translatedText = r.fix;
     }
   }
   return [usageFrom(provider, res)];
+}
+
+const majorRules = (b: TextBlock, text: string, opts: QaOptions) =>
+  ruleChecks({ ...b, translatedText: text }, opts.targetLang, opts.glossary, opts.context).filter((i) => i.severity === 'major' || i.kind === 'punctuation').length;
+
+const wordsOf = (s: string) => s.toLowerCase().replace(/ё/g, 'е').split(/[^\p{L}\p{N}-]+/u).filter(Boolean);
+
+/** Feminine forms of the masculine short words (рад → рада) a first-person line changes with the speaker. */
+const SHORT_FEM: Record<string, string> = { рад: 'рада', готов: 'готова', должен: 'должна', уверен: 'уверена', один: 'одна', сам: 'сама', согласен: 'согласна', виноват: 'виновата', нужен: 'нужна', жив: 'жива', занят: 'занята', свободен: 'свободна', счастлив: 'счастлива', прав: 'права', болен: 'больна' };
+
+/** w → w2 is the same past-tense verb or short word in the other gender (подкинул → подкинула). */
+function genderPair(w: string, w2: string): 'f' | 'm' | null {
+  const fem = (m: string, f: string) => (m.endsWith('л') && f === `${m}а`) || (m.endsWith('лся') && f === `${m.slice(0, -2)}ась`) || SHORT_FEM[m] === f;
+  if (fem(w, w2)) return 'f';
+  if (fem(w2, w)) return 'm';
+  return null;
+}
+
+/**
+ * A reviewer's fix is taken only when it repairs something checkable: fewer rule problems (untranslated,
+ * numbers, glossary, lost «?»), or only first-person endings changed towards the known gender of the
+ * speaker. A small local model's "fixes" otherwise change words and meaning as often as they help
+ * (a 104-page chapter: of 37 applied fixes about 15 made the line worse).
+ */
+export function fixAccepted(b: TextBlock, fix: string, opts: QaOptions): boolean {
+  if (majorRules(b, fix, opts) < majorRules(b, b.translatedText, opts)) return true;
+  const g = b.speakerGender === 'female' ? 'f' : b.speakerGender === 'male' ? 'm' : null;
+  if (!g) return false;
+  const a = wordsOf(b.translatedText);
+  const c = wordsOf(fix);
+  if (a.length !== c.length) return false;
+  let changed = 0;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === c[i]) continue;
+    // A first-person line: «я» before the word in the same sentence, no other subject between.
+    const before = a.slice(0, i);
+    const me = before.lastIndexOf('я');
+    if (me < 0 || before.slice(me + 1).some((x) => ['ты', 'вы', 'он', 'она', 'они', 'мы'].includes(x))) return false;
+    if (genderPair(a[i], c[i]) !== g) return false;
+    changed++;
+  }
+  return changed > 0;
 }
 
 /** Batched review limits (settings → qaBatch). */

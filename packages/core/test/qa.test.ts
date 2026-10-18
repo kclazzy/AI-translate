@@ -37,7 +37,7 @@ describe('rule checks', () => {
 });
 
 describe('semantic review', () => {
-  const answer = (content: string) => new OpenAICompatibleProvider({ ...configFromPreset('lmstudio', 'x'), vision: true }, async () => jsonResponse({ choices: [{ message: { content } }], usage: { prompt_tokens: 10, completion_tokens: 5 }, model: 'm' }));
+  const answer = (content: string, preset = 'openrouter') => new OpenAICompatibleProvider({ ...configFromPreset(preset, 'x'), vision: true }, async () => jsonResponse({ choices: [{ message: { content } }], usage: { prompt_tokens: 10, completion_tokens: 5 }, model: 'm' }));
   const review = JSON.stringify({
     reviews: [
       { id: 'b1', ok: true },
@@ -62,6 +62,48 @@ describe('semantic review', () => {
     const b2 = [block('b1', 'Hello', 'Привет')];
     await expect(qaPage(b2, { provider: broken, mode: 'fix', targetLang: 'ru', glossary: [] })).resolves.toEqual([]);
     expect(b2[0].qa).toMatchObject({ reviewed: false });
+  });
+});
+
+describe('fixes from a model on this computer', () => {
+  const local = (content: string) => new OpenAICompatibleProvider({ ...configFromPreset('lmstudio', 'x'), vision: true }, async () => jsonResponse({ choices: [{ message: { content } }], usage: { prompt_tokens: 10, completion_tokens: 5 }, model: 'm' }));
+  const fixes = (rows: { id: string; fix: string; kind?: string }[]) =>
+    JSON.stringify({ reviews: rows.map((r) => ({ id: r.id, ok: false, issues: [{ kind: r.kind ?? 'grammar', severity: 'major', note: 'x' }], fix: r.fix })) });
+  it('takes only fixes that repair something checkable', async () => {
+    const blocks = [
+      // a different word, same meaning: kept as translated
+      block('b1', 'THOSE ARE THE REAL FREAKS.', 'Вот кто настоящие чудики.', { speakerGender: 'female' }),
+      // first person, the speaker is a woman: the ending follows her
+      block('b2', 'I WAS JUST TEASING YOU...', 'Я просто тебя дразнил...', { speakerGender: 'female' }),
+      // second person: the ending is about someone else
+      block('b3', 'YOU ALMOST HUGGED ME!', 'Ты меня чуть не обнял!', { speakerGender: 'female' }),
+      // an adjective with a masculine noun is right as it is
+      block('b4', "I'M NOT A FUNNY GUY.", 'Я не смешной человек.', { speakerGender: 'female' }),
+      // a lost question mark comes back
+      block('b5', 'IS THAT SO?', 'Вот как.', {}),
+      // the fix moves the meaning: rejected
+      block('b6', 'PLAY WITH US.', 'Играй с нами.', {}),
+    ];
+    await qaPage(blocks, {
+      provider: local(fixes([
+        { id: 'b1', fix: 'Вот кто настоящие странники.', kind: 'terminology' },
+        { id: 'b2', fix: 'Я просто тебя дразнила...' },
+        { id: 'b3', fix: 'Ты меня чуть не обняла!' },
+        { id: 'b4', fix: 'Я не смешная человек.' },
+        { id: 'b5', fix: 'Вот как?' },
+        { id: 'b6', fix: 'Играй против нас.', kind: 'meaning' },
+      ])),
+      mode: 'fix',
+      targetLang: 'ru',
+      glossary: [],
+    });
+    expect(blocks.map((b) => b.translatedText)).toEqual(['Вот кто настоящие чудики.', 'Я просто тебя дразнила...', 'Ты меня чуть не обнял!', 'Я не смешной человек.', 'Вот как?', 'Играй с нами.']);
+  });
+  it('checks without a model by default when the model is on this computer', async () => {
+    const { qaModeOf, defaultSettings } = await import('../src');
+    const DEFAULT_SETTINGS = defaultSettings();
+    expect(qaModeOf({ ...DEFAULT_SETTINGS, visionProviderId: 'ollama', translationProviderId: null })).toBe('rules');
+    expect(qaModeOf({ ...DEFAULT_SETTINGS, visionProviderId: 'ollama', qaMode: 'fix' })).toBe('fix');
   });
 });
 

@@ -15,6 +15,7 @@ import { preparePage, type Inpainter, type PreparedPage } from './pipeline/stand
 import type { TextDetector } from './pipeline/detect';
 import { QA_BATCH, qaPages } from './translate/qa';
 import { translateBlocks } from './translate/translator';
+import { continuesNext } from './translate/continuation';
 import { createProvider } from './llm/presets';
 import { assertPrivacy, isLocalProvider } from './llm/privacy';
 import { isOllama } from './llm/openai';
@@ -158,6 +159,8 @@ export class TranslateService {
   private reviewRuns = new Set<Promise<void>>();
   /** Strip results being cut into pictures: a late review of one waits for that. */
   private deriving = new Map<string, Promise<unknown>>();
+  /** The last speech line at the bottom of the series' latest page (a sentence may go on on the next one). */
+  private tails = new Map<string, { key: string; blockId: string; src: string; dst: string; type: TextBlock['textType']; at: number }>();
   private compactQueue: string[] = [];
   private compacting: Promise<void> | null = null;
   constructor(
@@ -238,6 +241,9 @@ export class TranslateService {
       );
       // A result made with lighter settings must not answer for the full-quality key.
       if (lighter) key = `${baseKey}:lite`;
+      if (seriesKey && !opts.generic) await this.joinWithPrevious(seriesKey, out.page, config, context, opts.signal).catch((e) => {
+        if ((e as { code?: string }).code === 'CANCELLED') throw e;
+      });
       opts.onStage?.({ stage: 'rendering' });
       const rendered = await renderOutput(this.backend, out, styleDefaultsFor(config, settings.fonts));
       const tStore = performance.now();
@@ -261,6 +267,7 @@ export class TranslateService {
         ...(opts.generic ? { generic: true } : {}),
       };
       await this.putResult(key, result);
+      if (seriesKey && !opts.generic) this.rememberTail(seriesKey, key, page);
       void this.journal({ key, page, storeMs: Math.round(performance.now() - tStore), vision: config.vision }).catch(() => undefined);
       if (out.reviewLater) this.queueReview({ key, seriesKey, config, context: out.context ?? context, blocks: structuredClone(page.blocks) });
       if (seriesKey && !opts.generic) {
@@ -284,6 +291,46 @@ export class TranslateService {
       }
       throw err;
     }
+  }
+
+  private rememberTail(seriesKey: string, key: string, page: PageResult): void {
+    const speech = page.blocks.filter((b) => b.translate && b.originalText.trim() && (b.textType === 'DIALOGUE' || b.textType === 'NARRATION'));
+    const last = speech[speech.length - 1];
+    // Only a line near the bottom of the picture can go on at the top of the next one.
+    if (!last || last.bbox[1] + last.bbox[3] < page.height * 0.6) {
+      this.tails.delete(seriesKey);
+      return;
+    }
+    this.tails.set(seriesKey, { key, blockId: last.id, src: last.originalText, dst: last.translatedText, type: last.textType, at: Date.now() });
+  }
+
+  /**
+   * The previous page of the series ended mid-sentence («I CAN'T») and this one goes on at the top
+   * («FIGURE IT OUT.»): both halves are translated again as one sentence, this page gets its half
+   * before it is drawn, the previous page is redrawn with its half (unless edited by hand meanwhile).
+   */
+  private async joinWithPrevious(seriesKey: string, page: PageResult, config: PipelineConfig, context: TranslationContext | undefined, signal?: AbortSignal): Promise<void> {
+    const tail = this.tails.get(seriesKey);
+    if (!tail || Date.now() - tail.at > 15 * 60_000 || !continuesNext(tail.src)) return;
+    const first = page.blocks.find((b) => b.translate && b.originalText.trim());
+    if (!first || first.textType !== tail.type || first.bbox[1] > page.height * 0.4 || first.edited) return;
+    const cfg = config.translator ?? config.vision;
+    if (!cfg) return;
+    assertPrivacy(config.privacy, cfg, 'text');
+    const provider = createProvider(cfg, this.fetchImpl);
+    const input = { sourceLang: config.sourceLang, targetLang: config.targetLang, profile: config.profile, glossary: config.glossary, context, translateSfx: config.translateSfx, ...(config.phrasebook?.enabled ? { phrasebook: config.phrasebook } : {}) };
+    const res = await translateBlocks(provider, input, [{ id: 'a', type: tail.type, text: tail.src, joinsNext: true }, { id: 'b', type: first.textType, text: first.originalText }], { signal, retries: 1 });
+    const a = res.translations.get('a')?.text.trim();
+    const b = res.translations.get('b')?.text.trim();
+    page.usage = [...page.usage, ...res.usage];
+    if (!a || !b) return;
+    first.translatedText = b;
+    page.debug?.steps?.push(`joined with the last line of the previous page: ${first.id}`);
+    const prev = await this.getResult(tail.key);
+    const pb = prev?.page.blocks.find((x) => x.id === tail.blockId);
+    if (!prev || !pb || pb.edited || pb.translatedText !== tail.dst || a === tail.dst) return;
+    const next = await this.saveEdited(tail.key, { ...prev.page, blocks: prev.page.blocks.map((x) => (x.id === tail.blockId ? { ...x, translatedText: a } : x)) }, undefined, { ifRev: prev.rev ?? 0 }).catch(() => null);
+    if (next) for (const k of [tail.key, ...(next.parts ?? [])]) this.onResultChanged?.(k);
   }
 
   /**

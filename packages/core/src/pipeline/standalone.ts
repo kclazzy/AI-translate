@@ -311,7 +311,11 @@ export function engineInpainter(engine: { url: string; token: string }, deps: St
  * Text over artwork is smudged away with a simple fill first; LaMa (in the local engine or in the
  * browser) then redraws those areas properly (hair, backgrounds). Any failure keeps the simple fill.
  */
-export async function redrawArt(original: TiledImage, cleaned: TiledImage, masks: { box: Box; mask: Uint8Array }[], inpaint: Inpainter, signal?: AbortSignal): Promise<number> {
+function errorText(e: unknown): string {
+  return String((e as Error)?.message ?? e).slice(0, 160);
+}
+
+export async function redrawArt(original: TiledImage, cleaned: TiledImage, masks: { box: Box; mask: Uint8Array }[], inpaint: Inpainter, signal?: AbortSignal, failed?: (e: unknown) => void): Promise<number> {
   let done = 0;
   for (const m of masks.slice(0, 12)) {
     try {
@@ -338,6 +342,7 @@ export async function redrawArt(original: TiledImage, cleaned: TiledImage, masks
       done++;
     } catch (e) {
       if ((e as { code?: string }).code === 'CANCELLED' || (e as Error)?.name === 'AbortError') throw e;
+      failed?.(e);
       break; // the inpainter is not there: keep the simple fill
     }
   }
@@ -368,10 +373,8 @@ export function scriptFits(script: ReturnType<typeof detectScript>, lang: string
 }
 
 /** Letters with case (Latin, Cyrillic, Greek) and all of them capitals: comic lettering. */
-export function isAllCaps(text: string): boolean {
-  const letters = [...text].filter((c) => c.toLowerCase() !== c.toUpperCase());
-  return letters.length >= 3 && letters.every((c) => c === c.toUpperCase());
-}
+export { isAllCaps } from '../translate/caseNorm';
+import { isAllCaps } from '../translate/caseNorm';
 
 /** Make the translation look like the original: capitals, weight and colour of the letters. */
 export function matchLettering(b: TextBlock, l: Lettering | undefined): Partial<TextStyle> {
@@ -658,6 +661,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   let inpaintMs = 0;
   const artMasks: { box: Box; mask: Uint8Array }[] = [];
   let artRedrawn = false;
+  let lama: PageResult['lama'];
   // No lettering anywhere (local check): the model is not asked at all.
   const skipped = !!prep.textCheck?.noText;
   let tDetected = tDecoded;
@@ -1026,12 +1030,23 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     if (artMasks.length && config.lama) {
       // The engine gets the picture only on this computer / network, unless the cloud is allowed.
       const viaEngine = config.lama === 'engine' && config.engine?.url && (config.privacy === 'cloud' || isLocalUrl(config.engine.url));
-      const inpaint = viaEngine ? engineInpainter(config.engine!, deps) : config.lama === 'browser' ? deps.inpaint : undefined;
-      if (inpaint) {
-        const tl = performance.now();
-        artRedrawn = (await redrawArt(original, cleaned, artMasks, inpaint, signal)) > 0;
-        inpaintMs = Math.round(performance.now() - tl);
-      }
+      const tl = performance.now();
+      let why = '';
+      if (viaEngine) {
+        artRedrawn = (await redrawArt(original, cleaned, artMasks, engineInpainter(config.engine!, deps), signal, (e) => (why = errorText(e)))) > 0;
+        if (why) {
+          lama = 'engine-down';
+          addStep(debug, `LaMa: the engine at ${config.engine!.url} did not answer (${why})${deps.inpaint ? ' → LaMa in the browser' : ''}`);
+        }
+      } else if (config.lama === 'engine') lama = 'engine-down';
+      if (!artRedrawn && deps.inpaint && (config.lama === 'browser' || lama === 'engine-down')) {
+        why = '';
+        artRedrawn = (await redrawArt(original, cleaned, artMasks, deps.inpaint, signal, (e) => (why = errorText(e)))) > 0;
+        if (why) addStep(debug, `LaMa in the browser failed (${why})`);
+        if (artRedrawn && lama === 'engine-down') lama = 'browser-instead';
+      } else if (!deps.inpaint && config.lama === 'browser') lama = 'not-downloaded';
+      if (artRedrawn && !lama) lama = 'ok';
+      inpaintMs = Math.round(performance.now() - tl);
     }
   } finally {
     // Also when the page fails half-way (cancelled): the copies are not kept with the pictures.
@@ -1068,7 +1083,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       usage,
       pipeline: { version: 1, hash: await pipelineHash(config), mode: 'standalone' },
       summary,
-      ...(artMasks.length ? { artText: artMasks.length, artRedrawn } : {}),
+      ...(artMasks.length ? { artText: artMasks.length, artRedrawn, ...(lama ? { lama } : {}) } : {}),
       ...(skipped ? { skippedNoText: true } : {}),
       debug,
       createdAt: new Date().toISOString(),

@@ -199,6 +199,8 @@ try {
     s.providers = [{ id: 'mock', label: 'Mock VL', kind: 'openai-compatible', preset: 'custom', baseUrl: 'http://127.0.0.1:18080/v1', model: 'mock-vl', vision: true, jsonMode: 'json_object' }];
     s.visionProviderId = 'mock';
     s.translationProviderId = null;
+    // The review step is part of what this test checks (a local model checks without the model by default).
+    s.qaMode = 'fix';
     s.privacy = 'local';
     s.pipeline = window.__MODE === 'engine' ? 'engine' : 'standalone';
     s.engine = { url: 'http://127.0.0.1:18765', token: 'e2e-token', options: { detector: 'classic', ocr: 'vision', inpainter: 'auto' } };

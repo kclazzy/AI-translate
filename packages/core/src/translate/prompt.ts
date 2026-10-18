@@ -175,7 +175,8 @@ export function grammarRules(targetLang: string): string {
     `GRAMMAR: past-tense verbs, adjectives and participles must agree with the gender and number of the speaker and of the person addressed${example}.`,
     'Decide every speaker\'s gender from the picture, the "speaker"/"speakerGender" hints, names and the known characters above, and keep it the same for the same character. When it really cannot be told, choose wording without gendered endings.',
     'Check case endings after prepositions, numbers and negation, and agreement between nouns and adjectives. Never leave a word in the wrong form to save space — shorten the sentence instead.' + fillers,
-  ].join(' ');
+    base === 'ru' ? 'A woman\'s name ending in a consonant (Саранг, Субин, Кармен) is not declined: «у Саранг», «с Субин». Use the gender given for a character in <context> for every line by or about that character.' : '',
+  ].filter(Boolean).join(' ');
 }
 
 const SPEAKER_HELP =
@@ -229,23 +230,30 @@ export interface BlockForTranslation {
   text: string;
   speaker?: string;
   gender?: string;
+  /** Ends mid-sentence and goes on in the next block (see continuesNext). */
+  joinsNext?: boolean;
 }
 
 /** Text-only translation of already recognised blocks. */
-export function textTranslateInstruction(blocks: BlockForTranslation[], hintsByBlock: Record<string, string[]>, context = '', phrasebook = '', glossary = ''): string {
+export function textTranslateInstruction(blocks: BlockForTranslation[], hintsByBlock: Record<string, string[]>, context = '', phrasebook = '', glossary = '', names: string[] = []): string {
+  // The speaker's name from the picture is a guess of the vision model (in one chapter it gave the
+  // same girl's name to half of all lines): only the gender goes along.
   const data = blocks.map((b) => ({
     id: b.id,
     type: b.type,
     text: joinLines(b.text),
-    ...(b.speaker ? { speaker: b.speaker } : {}),
     ...(b.gender && b.gender !== 'unknown' ? { speakerGender: b.gender } : {}),
+    ...(b.joinsNext ? { continuesInNextBlock: true } : {}),
     ...(hintsByBlock[b.id]?.length ? { glossary: hintsByBlock[b.id] } : {}),
   }));
+  const joined = blocks.some((b) => b.joinsNext);
   return [
     ...(glossary ? [glossary, ''] : []),
     ...(context ? [context, ''] : []),
     ...(phrasebook ? [phrasebook, ''] : []),
+    ...(names.length ? [`Names on this page (people and places): ${names.map((n) => sanitizeLine(n, 40)).join(', ')}. They are names, never words to translate by meaning: transliterate them (or use the spelling in <context>), the same way every time.`, ''] : []),
     'Translate the blocks below. They are listed in reading order and belong to one page: read them all first, as one scene, then translate each so the conversation stays coherent (a sentence may continue in the next bubble).',
+    ...(joined ? ['A block marked "continuesInNextBlock" stops mid-sentence and the sentence goes on in the next block: translate the two parts as ONE sentence, then split your translation at a natural point so each block gets its own part, in the same order (never the whole sentence in one block and a repeat or nothing in the other).'] : []),
     'Return JSON: {"translations":[{"id":"b1","text":"translation","type":"DIALOGUE"}],"entities":[],"summary":""} with exactly one entry per input id.',
     'You may correct "type" if it is clearly wrong. ' + TEXT_TYPE_HELP,
     ENTITY_HELP,

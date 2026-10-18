@@ -411,3 +411,33 @@ describe('other fonts for a translated page', () => {
     expect(second.result.page.blocks.map((b) => b.translatedText)).toEqual(first.result.page.blocks.map((b) => b.translatedText));
   });
 });
+
+describe('a sentence that goes on on the next picture', () => {
+  it('is translated again as one sentence; the previous page is redrawn with its half', async () => {
+    const one = await makeMangaPage(800, 1100, [{ cx: 400, cy: 900, rx: 150, ry: 120, text: 'あいうえ' }]);
+    const two = await makeMangaPage(800, 1100, [{ cx: 400, cy: 200, rx: 150, ry: 120, text: 'かきくけ' }]);
+    let page = 0;
+    const m = mock((body) => {
+      const user = JSON.stringify(body.messages);
+      if (body.messages.every((x: { content: unknown }) => typeof x.content === 'string')) {
+        expect(user).toContain('continuesInNextBlock');
+        return JSON.stringify({ translations: [{ id: 'a', text: 'Я никак не могу' }, { id: 'b', text: 'понять.' }] });
+      }
+      const p = [one, two][page++];
+      const text = page === 1 ? "I CAN'T" : 'FIGURE IT OUT.';
+      const tr = page === 1 ? 'Я не могу.' : 'Придумай что-нибудь.';
+      return JSON.stringify({ blocks: p.bubbles.map((b) => ({ box: toNorm(b.textBox, 800, 1100), text, translation: tr, type: 'DIALOGUE' })), entities: [], summary: '' });
+    });
+    const svc = new TranslateService(memoryDb(), secrets, napiBackend, async () => settingsWith({ sourceLang: 'en' }), m.fetchImpl);
+    svc.compactTiles = false;
+    const changed: string[] = [];
+    svc.onResultChanged = (k) => changed.push(k);
+    const url = 'https://site.example/manga/one/ch1';
+    const a = await svc.translate(one.bytes, 'image/png', { sourceUrl: url });
+    expect(a.result.page.blocks[0].translatedText).toBe('Я не могу.');
+    const b = await svc.translate(two.bytes, 'image/png', { sourceUrl: url });
+    expect(b.result.page.blocks[0].translatedText).toBe('понять.');
+    expect((await svc.getResult(a.result.key))!.page.blocks[0].translatedText).toBe('Я никак не могу');
+    expect(changed).toEqual([a.result.key]);
+  });
+});

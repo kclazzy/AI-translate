@@ -2,6 +2,7 @@ import type { AppSettings } from './settings';
 import { providerById } from './settings';
 import { isLocalProvider } from './llm/privacy';
 import { tr } from './i18n';
+import { qaModeOf } from './pipeline/config';
 
 /**
  * «Оптимально для локальной модели»: the settings that give the best translation a model on this
@@ -18,7 +19,9 @@ export function optimalLocalSettings(s: AppSettings): { patch: Partial<AppSettin
     quality: vram >= 8 ? 'balanced' : 'fast',
     // Reading, then translating the text with the series context: better meaning and endings.
     twoStepTranslation: vram >= 12,
-    qaMode: vram >= 8 ? 'fix' : 'off',
+    // The model's review with fixes changes good lines as often as bad ones on a small local model:
+    // the checks without a model stay (untranslated text, numbers, glossary, names).
+    qaMode: 'rules',
     qaBatch: true,
     translateSfx: true,
     sfxStyle: 'translated',
@@ -36,7 +39,7 @@ export function optimalLocalSettings(s: AppSettings): { patch: Partial<AppSettin
     fastLocal: () => tr('Ускорение Ollama: выкл'),
     quality: (v) => tr('Качество: {0}', v === 'balanced' ? tr('Баланс') : v === 'fast' ? tr('Быстро') : tr('Максимум')),
     twoStepTranslation: (v) => (v ? tr('Перевод отдельным шагом: вкл') : tr('Перевод отдельным шагом: выкл')),
-    qaMode: (v) => (v === 'fix' ? tr('Проверка перевода: исправлять') : tr('Проверка перевода: выкл')),
+    qaMode: (v) => (v === 'fix' ? tr('Проверка перевода: исправлять') : v === 'rules' ? tr('Проверка перевода: только без модели') : tr('Проверка перевода: выкл')),
     qaBatch: () => tr('Проверять короткие страницы вместе: вкл'),
     translateSfx: () => tr('Переводить звуки: вкл'),
     sfxStyle: () => tr('Звуки: перевод'),
@@ -53,7 +56,7 @@ export function optimalLocalSettings(s: AppSettings): { patch: Partial<AppSettin
   const patch: Partial<AppSettings> = {};
   const changes: string[] = [];
   const cur = s as unknown as Record<string, unknown>;
-  const defaults: Partial<Record<keyof AppSettings, unknown>> = { twoStepTranslation: !(s.fastLocal || s.quality === 'fast'), qaMode: 'fix', stitchStrips: true, skipEmptyPages: true, selfCheck: true, detectorMode: 'off', lamaMode: 'off', gpuKeepAliveMin: 5 };
+  const defaults: Partial<Record<keyof AppSettings, unknown>> = { twoStepTranslation: !(s.fastLocal || s.quality === 'fast'), qaMode: qaModeOf(s), stitchStrips: true, skipEmptyPages: true, selfCheck: true, detectorMode: 'off', lamaMode: 'off', gpuKeepAliveMin: 5 };
   for (const [k, v] of Object.entries(want) as [keyof AppSettings, unknown][]) {
     if (v === undefined) continue;
     const now = cur[k] ?? defaults[k];

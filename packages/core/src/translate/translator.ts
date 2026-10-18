@@ -5,6 +5,9 @@ import type { TextType, Usage } from '../types';
 import { withRetry } from '../util/retry';
 import { applyForbiddenFixes, findGlossaryHits, findViolations, type GlossaryHit } from './glossary';
 import { isDegenerate, parseTranslationAnswer, tameRuns } from './parse';
+import { isAllCaps, sentenceCase, unshout } from './caseNorm';
+import { learnCharacters, namesIn } from './names';
+import { continuesNext } from './continuation';
 import { completeFitted, CONTEXT_LEVELS, estimateTokens, fitRequest, growRoom, SAFETY, windowOf } from './budget';
 import { buildSystemPrompt, contextData, glossaryExtra, phrasebookData, repairInstruction, textTranslateInstruction, type BlockForTranslation, type PromptInput } from './prompt';
 
@@ -42,6 +45,20 @@ export async function translateBlocks(
   opts: { signal?: AbortSignal; retries?: number } = {},
 ): Promise<TranslateBlocksResult> {
   if (!blocks.length) return { translations: new Map(), entities: [], summary: '', usage: [] };
+  // Lettered in capitals: normal case for the model (names keep their capital), see sentenceCase.
+  const keepWords = new Set([...(input.context?.entities ?? []).map((e) => e.source), ...input.glossary.map((g) => g.source)].flatMap((w) => w.toLowerCase().split(/\s+/)));
+  const shouted = new Set(blocks.filter((b) => isAllCaps(b.text)).map((b) => b.id));
+  const original = new Map(blocks.map((b) => [b.id, b.text]));
+  // Speech answered in capitals reads as shouting in the text list; labels of game windows stay as they are.
+  const speech = new Set(blocks.filter((b) => b.type === 'DIALOGUE').map((b) => b.id));
+  blocks = blocks.map((b) => (shouted.has(b.id) ? { ...b, text: sentenceCase(b.text, (w) => keepWords.has(w.toLowerCase())) } : b));
+  // A line that goes on in the next speech block: translated as one sentence (continuesNext).
+  blocks = blocks.map((b, i) => {
+    const next = blocks[i + 1];
+    const speech = (t: TextType) => t === 'DIALOGUE' || t === 'NARRATION';
+    return next && speech(b.type) && next.type === b.type && continuesNext(b.text) ? { ...b, joinsNext: true } : b;
+  });
+  const names = namesIn(blocks.map((b) => b.text), (input.context?.entities ?? []).filter((e) => e.kind === 'character').map((e) => e.source));
   const hitsByBlock = new Map<string, GlossaryHit[]>();
   const allHits = new Map<string, GlossaryHit>();
   for (const b of blocks) {
@@ -57,7 +74,7 @@ export async function translateBlocks(
   const texts = blocks.map((b) => b.text);
   const userAt = (level: number) => {
     const lv = CONTEXT_LEVELS[level];
-    return textTranslateInstruction(blocks, hintStrings, contextData(input, lv, texts), lv.phrasebook ? phrasebookData(input, blocks) : '', glossaryExtra(input, [...allHits.values()]));
+    return textTranslateInstruction(blocks, hintStrings, contextData(input, lv, texts), lv.phrasebook ? phrasebookData(input, blocks) : '', glossaryExtra(input, [...allHits.values()]), names);
   };
   const systemTokens = estimateTokens(system);
   const inputAt = (level: number) => systemTokens + estimateTokens(userAt(level));
@@ -94,7 +111,7 @@ export async function translateBlocks(
       let answer = parseTranslationAnswer(first.text, blocks, last);
       // Ids whose translation comes from a cut-off or mended answer.
       const low = new Set<string>(answer.repaired || first.truncated ? answer.translations.keys() : []);
-      const sources = new Map(blocks.map((b) => [b.id, b.text]));
+      const sources = original;
       let problems = collectProblems(answer.translations, hitsByBlock, answer.missing, sources);
       // The repair round re-sends the request and the first answer: only when that still fits the window.
       const repairFits = !win || sent.inputTokens + estimateTokens(first.text) + 400 + sent.maxTokens <= win * (1 - SAFETY);
@@ -118,17 +135,22 @@ export async function translateBlocks(
         }
         problems = collectProblems(answer.translations, hitsByBlock, answer.missing, sources);
       }
+      const targetNames = (input.context?.entities ?? []).filter((e) => e.kind === 'character' || e.kind === 'place').map((e) => e.target);
       // Deterministic last resort for forbidden forms.
       const translations: TranslateBlocksResult['translations'] = new Map();
       for (const [id, t] of answer.translations) {
         // Still a run of one letter: no translation is better than «Хххххх» in the bubble.
         if (isDegenerate(t.text, sources.get(id) ?? '')) continue;
-        const text = tameRuns(t.text);
+        // The model copied the capitals: normal case (the picture shows capitals by the style anyway).
+        const text = shouted.has(id) && speech.has(id) ? unshout(tameRuns(t.text), targetNames) : tameRuns(t.text);
         const v = findViolations(text, hitsByBlock.get(id) ?? []);
         const fixed = v.length ? applyForbiddenFixes(text, v) : text;
         translations.set(id, { ...t, text: fixed, ...(low.has(id) ? { lowConfidence: true } : {}) });
       }
-      return { translations, entities: answer.entities, summary: answer.summary, usage };
+      // Names found on the page with their spelling in the translation and the gender the words tell.
+      const learned = learnCharacters(blocks.map((b) => ({ text: b.text, translation: translations.get(b.id)?.text })), input.context?.entities ?? []);
+      const entities = [...learned.filter((l) => !answer.entities.some((e) => (e as { source?: string }).source?.toLowerCase() === l.source.toLowerCase() && !l.gender)), ...answer.entities];
+      return { translations, entities, summary: answer.summary, usage };
     },
     { retries, signal: opts.signal },
   );

@@ -181,6 +181,12 @@ export interface PageResult {
   /** LaMa redrew those places (in the engine or in the browser). */
   artRedrawn?: boolean;
   /**
+   * How LaMa went when it was on: ok; engine-down — the local engine did not answer (and no LaMa in the
+   * browser to stand in); browser-instead — the browser's LaMa stood in; not-downloaded — LaMa in the
+   * browser is chosen but not downloaded.
+   */
+  lama?: 'ok' | 'engine-down' | 'browser-instead' | 'not-downloaded';
+  /**
    * The local check found no lettering, so the model was not asked (settings → skipEmptyPages).
    * The UI offers «Текста не найдено — ⟳ перевести всё равно»: ⟳ translates with `force`.
    */

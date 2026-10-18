@@ -12,6 +12,7 @@ import {
   maskKey,
   optimalLocalSettings,
   PROVIDER_PRESETS,
+  qaModeOf,
   readsLocally,
   shortId,
   type AppSettings,
@@ -529,9 +530,10 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
                 <small>{tr('Чем выше, тем крупнее картинка уходит модели и дольше ответ')}</small>
               </div>
               <Field label={tr('Проверка перевода')} hint={tr('Ещё один короткий запрос на страницу: смысл, контекст, эмоции, персонажи, грамматика, термины')}>
-                <select className="ait-select" value={s.qaMode ?? 'fix'} onChange={(e) => update({ qaMode: e.target.value as AppSettings['qaMode'] })}>
+                <select className="ait-select" data-testid="qa-mode" value={qaModeOf(s)} onChange={(e) => update({ qaMode: e.target.value as AppSettings['qaMode'] })}>
                   <option value="fix">{tr('Исправлять ошибки автоматически')}</option>
                   <option value="report">{tr('Только показывать замечания')}</option>
+                  <option value="rules">{tr('Только проверки без модели (для локальной модели)')}</option>
                   <option value="off">{tr('Выключена (быстрее)')}</option>
                 </select>
               </Field>
