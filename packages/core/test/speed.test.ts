@@ -372,3 +372,25 @@ describe('an edit saved while a background change is drawn', () => {
     expect(stored!.rev).toBe(1);
   });
 });
+
+describe('the page journal', () => {
+  it('records the time of every stage, the model requests and tokens of each page; no text', async () => {
+    const page = await makeMangaPage(800, 1100, [{ cx: 220, cy: 260, rx: 120, ry: 170, text: 'たなかさん' }]);
+    const m = mock(() => mangaAnswer(page.bubbles));
+    const db = memoryDb();
+    const svc = new TranslateService(db, secrets, napiBackend, async () => settingsWith(), m.fetchImpl);
+    svc.compactTiles = false;
+    await svc.translate(page.bytes, 'image/png');
+    await new Promise((r) => setTimeout(r, 50));
+    const journal = (await db.get('kv', 'journal')) as any[];
+    expect(journal).toHaveLength(1);
+    const t = journal[0].timings;
+    expect(t.llmCalls).toBeGreaterThanOrEqual(1);
+    expect(t.inputTokens).toBeGreaterThan(0);
+    expect(t.llmMs).toBeGreaterThanOrEqual(0);
+    expect(t.renderMs).toBeGreaterThanOrEqual(0);
+    expect(t.storeMs).toBeGreaterThanOrEqual(0);
+    expect(journal[0].size).toBe('800x1100');
+    expect(JSON.stringify(journal)).not.toContain('たなか');
+  });
+});

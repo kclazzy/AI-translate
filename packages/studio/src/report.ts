@@ -23,6 +23,8 @@ export async function buildReport(opts: { db: IdbStore; settings: AppSettings; v
   try {
     // The last errors the extension met (code and message only), newest first.
     zip.file('errors.json', JSON.stringify((await opts.db.get('kv', 'errors')) ?? [], null, 2));
+    // Per page: size, blocks, time of every stage, model requests, tokens, memory (no pictures, no text).
+    zip.file('journal.json', JSON.stringify((await opts.db.get('kv', 'journal')) ?? [], null, 2));
   } catch {
     /* none */
   }

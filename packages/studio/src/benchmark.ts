@@ -15,6 +15,8 @@ export interface Benchmark {
   rows: BenchRow[];
   model: string;
   tokens: { input: number; output: number } | null;
+  /** Generation speed of the local model (Ollama), tokens per second; null when not reported. */
+  tps: number | null;
   /** The slowest stage and what would speed it up most. */
   slowest: BenchStage | null;
   hint: string | null;
@@ -68,7 +70,7 @@ export function benchmarkOf(page: Pick<PageResult, 'timings' | 'usage'>, wallMs:
   const usage: Usage[] = page.usage ?? [];
   const tokens = usage.length ? { input: usage.reduce((a, u) => a + (u.inputTokens || 0), 0), output: usage.reduce((a, u) => a + (u.outputTokens || 0), 0) } : null;
   const models = [...new Set(usage.map((u) => u.model).filter(Boolean))];
-  return { rows, model: models.join(' + ') || fallbackModel, tokens, slowest, hint: slowest ? BENCH_HINT[slowest] : null };
+  return { rows, model: models.join(' + ') || fallbackModel, tokens, tps: num(t.tokensPerSec), slowest, hint: slowest ? BENCH_HINT[slowest] : null };
 }
 
 /** Seconds with one decimal ("—" when not measured). */

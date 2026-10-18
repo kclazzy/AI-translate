@@ -58,6 +58,7 @@ export function SpeedBenchmark({ settings }: { settings: AppSettings }) {
           <small className="ait-muted">
             {tr('Модель: {0}', bench.model || '—')}
             {bench.tokens ? ` · ${tr('токенов: {0} на входе, {1} на выходе', fmtNumber(bench.tokens.input), fmtNumber(bench.tokens.output))}` : ''}
+            {bench.tps ? ` · ${tr('скорость модели: {0} токенов/с', fmtNumber(Math.round(bench.tps)))}` : ''}
           </small>
           {bench.hint ? <small data-testid="speed-hint">{tr('Быстрее всего ускорит: {0}', bench.hint)}</small> : null}
         </div>

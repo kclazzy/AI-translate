@@ -119,6 +119,10 @@ export interface Usage {
   costUsd: number;
   /** Part of inputTokens read from the provider's prompt cache (billed at a tenth of the price). */
   cachedTokens?: number;
+  /** Wall time of the request, ms. */
+  ms?: number;
+  /** Generation speed reported by the server (Ollama), tokens per second. */
+  tps?: number;
 }
 
 /** Time per stage of one page, ms (shown by the speed benchmark). */
@@ -140,8 +144,18 @@ export interface PageTimings {
   inpaintMs?: number;
   /** The neural text / bubble detector (browser), when it is on. */
   detectorMs?: number;
-  /** Typesetting the translation and encoding the tiles. */
+  /** Typesetting the translation and encoding the tiles (selfCheckMs included). */
   renderMs?: number;
+  /** The check after typesetting (pipeline/selfcheck.ts), part of renderMs. */
+  selfCheckMs?: number;
+  /** All model requests of the page together: wall time, count, tokens, mean generation speed. */
+  llmMs?: number;
+  llmCalls?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  tokensPerSec?: number;
+  /** Encoding the pictures and writing the result to the cache, after typesetting. */
+  storeMs?: number;
   /** The whole page, from the bytes to the stored result. */
   totalMs?: number;
   /** The page was decoded and checked ahead of time (prefetch). */

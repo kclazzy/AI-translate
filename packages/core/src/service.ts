@@ -18,7 +18,7 @@ import { translateBlocks } from './translate/translator';
 import { createProvider } from './llm/presets';
 import { assertPrivacy, isLocalProvider } from './llm/privacy';
 import { isOllama } from './llm/openai';
-import { ollamaUnloadAll } from './llm/discover';
+import { ollamaLoaded, ollamaUnloadAll } from './llm/discover';
 import { cropRows, pageForSpan, planChunks, planStrip, shiftBlock, stitchChunk, type StripPart } from './image/strip';
 import { KeyedMutex } from './util/mutex';
 
@@ -108,6 +108,8 @@ export interface TranslateOptions {
 }
 
 export const MAX_INPUT_BYTES = 60 * 1024 * 1024;
+/** Pages kept in the journal (a 300-page chapter fits). */
+export const JOURNAL_MAX = 400;
 
 /** Series key used to share a translation context between pages of the same manga. */
 export function seriesKeyFromUrl(url: string | undefined): string | undefined {
@@ -236,6 +238,7 @@ export class TranslateService {
       if (lighter) key = `${baseKey}:lite`;
       opts.onStage?.({ stage: 'rendering' });
       const rendered = await renderOutput(this.backend, out, styleDefaultsFor(config, settings.fonts));
+      const tStore = performance.now();
       const cleanedTiles = await Promise.all(out.cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') })));
       const now = new Date().toISOString();
       const page = { ...rendered.page, timings: { ...rendered.page.timings, totalMs: Math.round(performance.now() - tStart) } };
@@ -255,6 +258,7 @@ export class TranslateService {
         ...(lighter ? { degraded: true } : {}),
       };
       await this.putResult(key, result);
+      void this.journal({ key, page, storeMs: Math.round(performance.now() - tStore), vision: config.vision }).catch(() => undefined);
       if (out.reviewLater) this.queueReview({ key, seriesKey, config, context: out.context ?? context, blocks: structuredClone(page.blocks) });
       if (seriesKey && !opts.generic) {
         if (out.contextUpdate) {
@@ -574,6 +578,34 @@ export class TranslateService {
     if (!r) return;
     r.lastHitAt = new Date().toISOString();
     await this.markUsed(key, r);
+  }
+
+  /**
+   * The page journal (kv 'journal', newest first, at most JOURNAL_MAX pages) for «Сообщить о
+   * проблеме» and a long run's profile: size, blocks, the time of every stage, model requests and
+   * tokens, the browser's memory and what Ollama holds in video memory. No picture or text.
+   */
+  private async journal(e: { key: string; page: PageResult; storeMs: number; vision: PipelineConfig['vision'] }): Promise<void> {
+    const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+    let vram: { model: string; vramGb: number; sizeGb: number }[] | undefined;
+    if (e.vision && isOllama(e.vision)) {
+      const loaded = await ollamaLoaded(e.vision.baseUrl, this.fetchImpl);
+      vram = loaded.map((m) => ({ model: m.name, vramGb: Math.round(m.sizeVram / 1e8) / 10, sizeGb: Math.round(m.size / 1e8) / 10 }));
+    }
+    const entry = {
+      at: new Date().toISOString(),
+      key: e.key.slice(0, 12),
+      size: `${e.page.width}x${e.page.height}`,
+      blocks: e.page.blocks.length,
+      skipped: e.page.skippedNoText || undefined,
+      timings: { ...e.page.timings, storeMs: e.storeMs },
+      ...(mem ? { heapMb: Math.round(mem.usedJSHeapSize / 1e6) } : {}),
+      ...(vram ? { ollama: vram } : {}),
+    };
+    await this.locks.run('journal', async () => {
+      const list = (await this.db.get<unknown[]>('kv', 'journal')) ?? [];
+      await this.db.put('kv', 'journal', [entry, ...list].slice(0, JOURNAL_MAX));
+    });
   }
 
   /** Remember that a cached result was used now (cache pruning goes by the size records). */

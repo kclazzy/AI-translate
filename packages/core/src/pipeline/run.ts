@@ -1,3 +1,4 @@
+import type { PageTimings } from '../types';
 import type { ImageBackend, ImageMime } from '../image/backend';
 import { renderTilesAsync, encodeTiles } from '../render/render';
 import { DEFAULT_STYLE_DEFAULTS, type StyleDefaults } from '../render/style';
@@ -70,7 +71,9 @@ export interface RenderedPage {
 export async function renderOutput(backend: ImageBackend, out: Pick<PipelineOutput, 'page' | 'cleaned'> & Partial<Pick<PipelineOutput, 'original' | 'selfCheck'>>, defaults: StyleDefaults, mime: ImageMime = 'image/png'): Promise<RenderedPage> {
   const t0 = performance.now();
   let src = out.page;
+  let selfCheckMs: number | undefined;
   if (out.selfCheck && out.original && !src.selfCheck) {
+    const ts = performance.now();
     try {
       const r = await selfCheckPageAsync({ backend, original: out.original, cleaned: out.cleaned, page: src, defaults });
       src = { ...src, blocks: r.blocks, selfCheck: { fixed: r.fixed, flagged: r.flagged } };
@@ -78,13 +81,27 @@ export async function renderOutput(backend: ImageBackend, out: Pick<PipelineOutp
       // The check never fails a page.
       addStep(src.debug, `selfcheck failed: ${(e as Error)?.message ?? e}`);
     }
+    selfCheckMs = Math.round(performance.now() - ts);
   }
   const { tiles, overflow } = await renderTilesAsync(backend, out.cleaned, src.blocks, defaults);
   const encoded = await encodeTiles(backend, tiles, mime, mime === 'image/png' ? undefined : 0.92);
   const page: PageResult = {
     ...src,
     blocks: src.blocks.map((b) => ({ ...b, overflow: overflow.has(b.id) })),
-    timings: { ...src.timings, renderMs: Math.round(performance.now() - t0) },
+    timings: { ...src.timings, ...llmSummary(src.usage), renderMs: Math.round(performance.now() - t0), ...(selfCheckMs !== undefined ? { selfCheckMs } : {}) },
   };
   return { page, tiles: encoded, mime };
+}
+
+/** The page's model requests summed up for its timings (see PageTimings.llmMs). */
+export function llmSummary(usage: PageResult['usage']): Pick<PageTimings, 'llmMs' | 'llmCalls' | 'inputTokens' | 'outputTokens' | 'tokensPerSec'> {
+  if (!usage.length) return {};
+  const tps = usage.filter((u) => u.tps);
+  return {
+    llmCalls: usage.length,
+    llmMs: usage.reduce((n, u) => n + (u.ms ?? 0), 0),
+    inputTokens: usage.reduce((n, u) => n + u.inputTokens, 0),
+    outputTokens: usage.reduce((n, u) => n + u.outputTokens, 0),
+    ...(tps.length ? { tokensPerSec: Math.round((tps.reduce((n, u) => n + u.tps!, 0) / tps.length) * 10) / 10 } : {}),
+  };
 }

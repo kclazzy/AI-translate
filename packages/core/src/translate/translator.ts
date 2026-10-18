@@ -17,7 +17,7 @@ export interface TranslateBlocksResult {
 }
 
 /** Tokens and price of one answer (prompt-cache reads and writes priced apart, see estimateCost). */
-export function usageFrom(provider: LlmProvider, res: Pick<CompletionResult, 'model' | 'inputTokens' | 'outputTokens' | 'cachedInputTokens' | 'cacheWriteTokens'>): Usage {
+export function usageFrom(provider: LlmProvider, res: Pick<CompletionResult, 'model' | 'inputTokens' | 'outputTokens' | 'cachedInputTokens' | 'cacheWriteTokens' | 'ms' | 'tokensPerSecond'>): Usage {
   const cached = res.cachedInputTokens ?? 0;
   return {
     provider: provider.config.label,
@@ -26,6 +26,8 @@ export function usageFrom(provider: LlmProvider, res: Pick<CompletionResult, 'mo
     outputTokens: res.outputTokens,
     costUsd: estimateCost(provider.config, res.inputTokens, res.outputTokens, cached, res.cacheWriteTokens ?? 0),
     ...(cached > 0 ? { cachedTokens: cached } : {}),
+    ...(res.ms !== undefined ? { ms: res.ms } : {}),
+    ...(res.tokensPerSecond ? { tps: Math.round(res.tokensPerSecond * 10) / 10 } : {}),
   };
 }
 
