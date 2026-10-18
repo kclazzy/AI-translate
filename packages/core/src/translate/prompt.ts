@@ -207,15 +207,20 @@ export function visionFullInstruction(width: number, height: number): string {
 }
 
 /** Vision OCR only (translation done by a separate text model). */
-export function visionOcrInstruction(width: number, height: number): string {
+export function visionOcrInstruction(width: number, height: number, sourceLang = 'auto', strict = false): string {
+  const lang = sourceLang === 'auto' ? 'the language it is written in' : `${languageName(sourceLang)}, as printed`;
   return [
     `The image is ${width}×${height} pixels. Find every piece of text (speech bubbles, captions, sound effects, signs), in reading order, and transcribe it exactly.`,
+    `Do NOT translate in this step: "text" is the letters exactly as they stand in the image, in ${lang}. A translation here is an error — another step translates.`,
+    strict ? 'Your previous answer gave a translation instead of the text in the image. Copy the original letters this time.' : '',
     'Return JSON: {"blocks":[{"box":[x0,y0,x1,y1],"text":"original text","type":"DIALOGUE","vertical":true,"speaker":"","gender":"unknown"}]}.',
     'box is the tight bounding box of the text in coordinates normalised to 0–1000 on both axes.',
     VISION_RULES,
     SPEAKER_HELP,
     TEXT_TYPE_HELP,
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 export interface BlockForTranslation {

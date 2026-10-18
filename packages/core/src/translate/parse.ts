@@ -210,6 +210,8 @@ export interface VisionBlock {
   vertical: boolean;
   speaker?: string;
   gender?: 'male' | 'female' | 'unknown';
+  /** The reading step gave the translation instead of the original (see readView): `translation` is it. */
+  pretranslated?: boolean;
 }
 
 export interface VisionAnswer {

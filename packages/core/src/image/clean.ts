@@ -1242,6 +1242,11 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     // A bubble's inside fills most of its box (light letters flooded by mistake do not).
     if (tentative && flood.area < floodArea * 0.5) return false;
     const share = floodArea / (image.width * image.height);
+    {
+      // Running from the picture's left edge to its right edge: the page's ground, not a bubble.
+      const [fx, , fw] = [flood.box[0] + region[0], flood.box[1] + region[1], flood.box[2]];
+      if (!known && fx <= 0 && fx + fw >= image.width && floodArea > boxArea(local) * 4) return false;
+    }
     if (share < 0.35) return true;
     // A big part of a small picture: still a bubble when the picture's edge cuts it on one side
     // only (or two that meet in a corner) — open background spans the picture from edge to edge.
@@ -1255,6 +1260,18 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
   const dom = dominantColor(img, around);
   bg = dom.color;
   flat = dom.share >= 0.45;
+  {
+    // A model box reaching past a light bubble onto a dark page: the dark around it dominates, but
+    // inside the box it is the bubble's light ground that dominates. That light shape is the bubble
+    // (otherwise the dark page would be taken for one, the bubble's white for letters to erase,
+    // and white «lettering» drawn huge over the art).
+    const inside = dominantColor(img, clampBox(local, img.width, img.height));
+    const far = Math.hypot(inside.color[0] - bg[0], inside.color[1] - bg[1], inside.color[2] - bg[2]) > 90;
+    if (inside.share >= 0.5 && luminance(...inside.color) >= 190 && luminance(...bg) < 110 && far) {
+      bg = inside.color;
+      flat = true;
+    }
+  }
   if (flat) floodFrom(bg);
   let closed = flat && isClosed(false);
   if (flat && !closed && !opts.sfx) {

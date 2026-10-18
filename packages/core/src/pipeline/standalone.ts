@@ -161,6 +161,8 @@ interface Located {
   gender?: 'male' | 'female' | 'unknown';
   /** Read from an answer that was cut off or had to be mended. */
   low?: boolean;
+  /** The reading step gave the translation instead of the original (see readTranslated). */
+  pre?: boolean;
 }
 
 /** One view of the picture as the vision model gets it: scaled to the quality's size, JPEG. */
@@ -183,7 +185,10 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
   const { jpeg, dw, dh } = encoded ?? (await encodeView(image, view, config, provider.config.model, deps));
   const input = promptInput(config, context);
   const system = buildSystemPrompt(input);
-  const instruction = withTranslation ? visionFullInstruction(dw, dh) : visionOcrInstruction(dw, dh);
+  // Reading only: a model that translated anyway is asked again more firmly (see below).
+  let strict = false;
+  const instructionNow = () => (withTranslation ? visionFullInstruction(dw, dh) : visionOcrInstruction(dw, dh, config.sourceLang, strict));
+  let instruction = instructionNow();
   // Reading only (two-step): the names help spelling; the story and earlier lines would only be echoed.
   const levelOf = (i: number) => (withTranslation ? CONTEXT_LEVELS[i] : i === 0 ? OCR_LEVEL : CONTEXT_LEVELS[CONTEXT_LEVELS.length - 1]);
   // Single call: the page's text is not known yet, so the hints come from the previous pages' lines.
@@ -221,6 +226,22 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
       }
       const answer = parseVisionAnswer(res.text, withTranslation, last);
       if (res.truncated) answer.repaired = true;
+      // The reading step answered with the translation (Russian where the page is English): the
+      // original is needed for the translation step and the filters. Asked once more, firmly; when
+      // the model insists, what it gave is used as the translation (marked unsure).
+      if (!withTranslation && readTranslated(answer.blocks, config)) {
+        if (!last && !strict) {
+          strict = true;
+          instruction = instructionNow();
+          addStep(debug, 'reading step answered with a translation → asked again for the original text');
+          throw new AppError('TRANSLATION_INVALID_OUTPUT', { retryable: true, detail: 'Translated instead of transcribing' });
+        }
+        addStep(debug, 'reading step gave a translation again → used as the translation');
+        for (const b of answer.blocks) if (scriptFits(detectScript(b.text), config.targetLang)) {
+          b.translation = b.text;
+          b.pretranslated = true;
+        }
+      }
       // Some families answer in pixels of the picture they got: bring them to 0–1000.
       if (family?.coords === 'pixels') for (const b of answer.blocks) b.box = [(b.box[0] / dw) * 1000, (b.box[1] / dh) * 1000, (b.box[2] / dw) * 1000, (b.box[3] / dh) * 1000];
       return { answer, usage: usageFrom(provider, res) };
@@ -228,6 +249,21 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
     // A local model that timed out will time out again: report it instead of waiting 3× longer.
     { retries: 2, signal, shouldRetry: (e) => e.retryable && !(e.code === 'TIMEOUT' && isLocalProvider(config.vision!)) },
   );
+}
+
+/**
+ * Most of what the reading step returned is written in the target language's script and not in the
+ * source's (Cyrillic for an English page): the model translated instead of transcribing.
+ */
+export function readTranslated(blocks: { text: string }[], config: Pick<PipelineConfig, 'sourceLang' | 'targetLang'>): boolean {
+  if (config.sourceLang === 'auto' || config.sourceLang.split('-')[0] === config.targetLang.split('-')[0]) return false;
+  const lettered = blocks.filter((b) => /\p{L}{2,}/u.test(b.text));
+  if (!lettered.length) return false;
+  const translated = lettered.filter((b) => {
+    const sc = detectScript(b.text);
+    return scriptFits(sc, config.targetLang) && !scriptFits(sc, config.sourceLang);
+  });
+  return translated.length * 2 >= lettered.length;
 }
 
 /** A LaMa-like inpainter: picture region (RGBA) and its mask (1 = redraw) → the redrawn region. */
@@ -652,7 +688,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     for (const b of answer.blocks) {
       const box: Box = [(b.box[0] / 1000) * original.width, view.y + (b.box[1] / 1000) * view.h, ((b.box[2] - b.box[0]) / 1000) * original.width, ((b.box[3] - b.box[1]) / 1000) * view.h];
       if (debug.modelBlocks.length < 200) debug.modelBlocks.push({ box: box.map(Math.round) as Box, text: b.text, ...(b.translation !== undefined ? { translation: b.translation } : {}) });
-      located.push({ box: clampBox(box, original.width, original.height), text: b.text, translation: b.translation, type: b.type, vertical: b.vertical, view, speaker: b.speaker, gender: b.gender, ...(answer.repaired ? { low: true } : {}) });
+      located.push({ box: clampBox(box, original.width, original.height), text: b.text, translation: b.translation, type: b.type, vertical: b.vertical, view, speaker: b.speaker, gender: b.gender, ...(answer.repaired || b.pretranslated ? { low: true } : {}), ...(b.pretranslated ? { pre: true } : {}) });
     }
   }
   tDetected = performance.now();
@@ -668,7 +704,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     const script = detectScript(l.text);
     const language = config.sourceLang !== 'auto' ? config.sourceLang : script === 'latin' ? 'en' : script === 'cyrillic' ? 'ru' : script === 'other' ? 'und' : script;
     // The user's filters: only bubbles, only the chosen language.
-    const skip = !wanted(config, l.type, l.text);
+    // Already the translation: the source-language filter does not apply to it.
+    const skip = l.pre ? !wanted({ ...config, onlySourceLang: undefined }, l.type, l.text) : !wanted(config, l.type, l.text);
     return {
       id: `b${i + 1}`,
       textType: req.generic && l.type === 'DIALOGUE' ? 'OTHER' : l.type,
@@ -698,12 +735,15 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   stage('translating');
   if (separate) {
     const translator = recording(createProvider(translatorCfg!, deps.fetchImpl), 'translate', debug);
-    const toTranslate = blocks.filter((b) => b.translate).map((b) => ({ id: b.id, type: b.textType, text: b.originalText, speaker: b.speaker, gender: b.speakerGender }));
+    // Blocks the reading step already translated (see readTranslated) keep that translation.
+    const pre = new Set(merged.flatMap((l, i) => (l.pre ? [`b${i + 1}`] : [])));
+    const toTranslate = blocks.filter((b) => b.translate && !pre.has(b.id)).map((b) => ({ id: b.id, type: b.textType, text: b.originalText, speaker: b.speaker, gender: b.speakerGender }));
     const res = await translateBlocks(translator, promptInput(config, req.context), toTranslate, { signal });
     usage.push(...res.usage);
     entities = entities.concat(res.entities);
     if (res.summary) summaries.push(res.summary);
     for (const b of blocks) {
+      if (pre.has(b.id)) continue;
       const t = res.translations.get(b.id);
       if (t) {
         b.translatedText = t.text;
