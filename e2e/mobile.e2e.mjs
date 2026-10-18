@@ -86,7 +86,8 @@ try {
   // The picture is read once (with the image), then the page is translated in a text step.
   const withImage = reads.filter((c) => /image_url|"images"|base64/.test(JSON.stringify(c)));
   check('picture translated on the phone without a PC engine', withImage.length === 1 && reads.length === 2, `model calls=${reads.length}, with the image=${withImage.length}`);
-  check('translation checked on the phone too', calls.length - reads.length === 1, `reviews=${calls.length - reads.length}`);
+  // A model on the user's PC: the translation is checked without the model (no review request, see qaModeOf).
+  check('a local model: checks without a second request to it', calls.length - reads.length === 0, `reviews=${calls.length - reads.length}`);
   await page.screenshot({ path: join(OUT, 'mobile-result.png'), fullPage: true });
 
   await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Править')?.click());

@@ -23,6 +23,8 @@ export interface TranslationContext {
   summaries: string[];
   /** Recent dialogue lines for continuity. */
   recentLines: { src: string; dst: string }[];
+  /** Longer lines and signs already translated in the series: the same text gets the same translation (see rememberedTranslation). */
+  memory?: { src: string; dst: string; type?: string }[];
   styleNotes: string;
   pagesSeen: number;
   /** Pages already merged (image hash prefixes, newest last): a page translated again adds no second summary or lines. */
@@ -33,6 +35,7 @@ export interface TranslationContext {
 export const CONTEXT_LIMITS = {
   summaries: 8,
   recentLines: 16,
+  memory: 400,
   entities: 300,
   summaryChars: 400,
 };
@@ -67,6 +70,8 @@ export interface ContextUpdate {
   entities?: unknown[];
   summary?: string;
   lines?: { src: string; dst: string }[];
+  /** Lines for the series memory (see TranslationContext.memory). */
+  memory?: { src: string; dst: string; type?: string }[];
 }
 
 /**
@@ -109,7 +114,9 @@ export function mergeContext(ctx: TranslationContext, update: ContextUpdate): Tr
   const lines = (update.lines ?? []).map((l) => ({ src: sanitizeLine(l.src, 300), dst: sanitizeLine(l.dst, 300) })).filter((l) => l.src && l.dst);
   const recentLines = [...ctx.recentLines, ...lines].slice(-CONTEXT_LIMITS.recentLines);
   const mergedPages = update.page ? [...(ctx.mergedPages ?? []), update.page].slice(-400) : ctx.mergedPages;
-  return { ...ctx, entities, summaries, recentLines, pagesSeen: ctx.pagesSeen + 1, ...(mergedPages ? { mergedPages } : {}), updatedAt: new Date().toISOString() };
+  const fresh = (update.memory ?? []).map((m) => ({ src: sanitizeLine(m.src, 300), dst: sanitizeLine(m.dst, 300), ...(m.type ? { type: m.type } : {}) })).filter((m) => m.src && m.dst);
+  const memory = [...(ctx.memory ?? []).filter((m) => !fresh.some((f) => memoryKey(f.src) === memoryKey(m.src))), ...fresh].slice(-CONTEXT_LIMITS.memory);
+  return { ...ctx, entities, summaries, recentLines, ...(memory.length ? { memory } : {}), pagesSeen: ctx.pagesSeen + 1, ...(mergedPages ? { mergedPages } : {}), updatedAt: new Date().toISOString() };
 }
 
 export function upsertEntity(ctx: TranslationContext, entity: ContextEntity): TranslationContext {
@@ -120,4 +127,32 @@ export function upsertEntity(ctx: TranslationContext, entity: ContextEntity): Tr
 
 export function removeEntity(ctx: TranslationContext, source: string): TranslationContext {
   return { ...ctx, entities: ctx.entities.filter((e) => e.source !== source), updatedAt: new Date().toISOString() };
+}
+
+/** The text as compared in the series memory: letters and digits only, lower case. */
+export function memoryKey(text: string): string {
+  return text.toLowerCase().replace(/[’']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+/**
+ * A translation the series already has for this text: the same line (12 letters or more) word for
+ * word, or a sign read with a letter or a word different (a background sign seen on many pages:
+ * one translation for all of them).
+ */
+export function rememberedTranslation(ctx: TranslationContext | undefined, text: string, type: string): string | undefined {
+  const k = memoryKey(text);
+  if (!ctx?.memory?.length || k.replace(/\s/g, '').length < 12) return undefined;
+  const exact = ctx.memory.findLast((m) => memoryKey(m.src) === k);
+  if (exact) return exact.dst;
+  if (type !== 'SIGN' && type !== 'OTHER') return undefined;
+  const words = new Set(k.split(' '));
+  let best: { dst: string; score: number } | undefined;
+  for (const m of ctx.memory) {
+    if (m.type !== 'SIGN' && m.type !== 'OTHER') continue;
+    const mw = memoryKey(m.src).split(' ');
+    const common = mw.filter((w) => words.has(w)).length;
+    const score = common / Math.max(mw.length, words.size);
+    if (score >= 0.7 && (!best || score > best.score)) best = { dst: m.dst, score };
+  }
+  return best?.dst;
 }

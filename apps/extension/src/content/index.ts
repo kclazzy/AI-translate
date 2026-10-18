@@ -3,7 +3,7 @@ import { dominantLanguage, nativeName } from '@ait/core/languages';
 import type { SerializedError } from '@ait/core/errors';
 import { CANCELLED_ALL, PAGE_PORT, type BackgroundToContent, type ChapterFormat, type ContentToBackground, type ImageRef, type JobStatus, type PageLangs, type RenderedTile, type RenderedTiles, type UiStrings } from '../shared/messages';
 import { Overlay } from './overlay';
-import { asCandidate, candidateAt, chapterColumn, imgSrc, inlineData, lazySrc, markUi, scanPage, shownChanged, shownIdentity, viewportRect, type Candidate } from './scanner';
+import { asCandidate, candidateAt, chapterColumn, imgSrc, inlineData, lazySrc, markUi, scanPage, shownChanged, shownIdentity, viewportRect, withoutThumbnails, type Candidate } from './scanner';
 import { fmtNumber, fmtUsd, registerDictionary, setUiLang, tr } from '@ait/core/i18n';
 
 /**
@@ -280,12 +280,16 @@ function main() {
       tr('Время: {0} с', sec),
       stages.length && !r.cached ? tr('По этапам: {0}', stages.map(([n, ms]) => `${n} ${s1(ms)} с`).join(', ')) : '',
       slowest && !r.cached && (t.totalMs ?? 0) > 3000 ? tr('Дольше всего: {0}', slowest[0]) : '',
+      t.detectorWindows && !r.cached
+        ? tr('Поиск текста: считал {0} с на {1}, ждал видеокарту {2} с', s1(t.detectorRunMs), t.detectorEp === 'webgpu' ? tr('видеокарте') : tr('процессоре'), s1(t.detectorWaitMs))
+        : '',
       t.llmCalls && !r.cached ? tr('Запросов к модели: {0}, модель отвечала {1} с', t.llmCalls, s1(t.llmMs)) + (t.tokensPerSec ? tr(', {0} токенов/с', fmtNumber(Math.round(t.tokensPerSec))) : '') : '',
       tr('Токены: {0} на входе, {1} на выходе', fmtNumber(tokIn), fmtNumber(tokOut)),
       fromCache ? tr('Из кэша провайдера: {0} токенов', fmtNumber(fromCache)) : '',
       tr('Стоимость: {0}', fmtUsd(cost, 4)),
       models ? tr('Модель: {0}', models) : '',
       tr('Текстов на картинке: {0}', r.page.blocks.length),
+      ((n) => (n ? tr('Осталось без перевода: {0} — ⟳ переведёт заново', n) : ''))(r.page.blocks.filter((b) => b.translate && b.textType !== 'SFX' && (!b.translatedText.trim() || b.translatedText.trim() === b.originalText.trim())).length),
       r.page.lama === 'engine-down'
         ? tr('LaMa: локальный движок не отвечает — фон закрашен упрощённо')
         : r.page.lama === 'not-downloaded'
@@ -913,7 +917,7 @@ ${chapterStats(list)}`;
     pageMode = true;
     dismissed = new WeakSet();
     // For a chapter download only the chapter's own column of pictures (no banners, other episodes).
-    const cands = chapter ? chapterColumn(scanPage(minSize)) : scanPage(minSize);
+    const cands = chapter ? chapterColumn(scanPage(minSize)) : withoutThumbnails(scanPage(minSize));
     if (!cands.length) toastOnce(tr('На странице не найдено подходящих изображений'));
     // Pictures on screen first, then the rest of the chapter in reading order.
     for (const c of cands) void translate(c);
@@ -1029,7 +1033,7 @@ ${chapterStats(list)}`;
       if (enabled) void applyCached();
       if (!autoTranslate && !pageMode) return;
       if (!enabled) return;
-      const found = scanPage(minSize);
+      const found = withoutThumbnails(scanPage(minSize));
       const inChapter = chapter ? new Set(chapterColumn(found).map((c) => c.el)) : null;
       for (const c of found) {
         if (dismissed.has(c.el)) continue;

@@ -73,6 +73,8 @@ export interface BubbleRows {
 
 export interface TextBlock {
   id: string;
+  /** A title logo joined from letters drawn one by one (see joinLetterBlocks). */
+  logo?: boolean;
   textType: TextType;
   originalText: string;
   translatedText: string;
@@ -144,6 +146,11 @@ export interface PageTimings {
   inpaintMs?: number;
   /** The neural text / bubble detector (browser), when it is on. */
   detectorMs?: number;
+  /** Of that: computing (all windows of the page), waiting for the video card (Ollama on it), windows, where it ran. */
+  detectorRunMs?: number;
+  detectorWaitMs?: number;
+  detectorWindows?: number;
+  detectorEp?: 'webgpu' | 'wasm';
   /** Typesetting the translation and encoding the tiles (selfCheckMs included). */
   renderMs?: number;
   /** The check after typesetting (pipeline/selfcheck.ts), part of renderMs. */

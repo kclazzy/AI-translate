@@ -537,6 +537,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
                   <option value="off">{tr('Выключена (быстрее)')}</option>
                 </select>
               </Field>
+              <SetSwitch testId="translate-logo" checked={!!s.translateLogo} onChange={(translateLogo) => update({ translateLogo })} label={tr('Переводить логотип названия')} hint={tr('Выключено: логотип, титры авторов и названия магазинов остаются как нарисованы.')} />
               <SetSwitch testId="qa-batch" checked={!!s.qaBatch} onChange={(qaBatch) => update({ qaBatch })} label={tr('Проверять несколько коротких страниц за раз')} hint={tr('Быстрее в режимах „Быстро“ и „Баланс“; в „Максимум“ каждая страница проверяется отдельно.')} />
               <SetSwitch
                 checked={s.twoStepTranslation ?? (s.quality !== 'fast' && !s.fastLocal)}

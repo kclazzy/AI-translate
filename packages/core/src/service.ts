@@ -268,7 +268,7 @@ export class TranslateService {
       };
       await this.putResult(key, result);
       if (seriesKey && !opts.generic) this.rememberTail(seriesKey, key, page);
-      void this.journal({ key, page, storeMs: Math.round(performance.now() - tStore), vision: config.vision }).catch(() => undefined);
+      void this.journal({ key, page, storeMs: Math.round(performance.now() - tStore), vision: config.vision, force: opts.force }).catch(() => undefined);
       if (out.reviewLater) this.queueReview({ key, seriesKey, config, context: out.context ?? context, blocks: structuredClone(page.blocks) });
       if (seriesKey && !opts.generic) {
         if (out.contextUpdate) {
@@ -653,7 +653,7 @@ export class TranslateService {
    * проблеме» and a long run's profile: size, blocks, the time of every stage, model requests and
    * tokens, the browser's memory and what Ollama holds in video memory. No picture or text.
    */
-  private async journal(e: { key: string; page: PageResult; storeMs: number; vision: PipelineConfig['vision'] }): Promise<void> {
+  private async journal(e: { key: string; page: PageResult; storeMs: number; vision: PipelineConfig['vision']; force?: boolean }): Promise<void> {
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
     let vram: { model: string; vramGb: number; sizeGb: number }[] | undefined;
     if (e.vision && isOllama(e.vision)) {
@@ -666,6 +666,10 @@ export class TranslateService {
       size: `${e.page.width}x${e.page.height}`,
       blocks: e.page.blocks.length,
       skipped: e.page.skippedNoText || undefined,
+      // Left without a translation (the source text shown) and unsure ones, by block id: what a
+      // translation run again (⟳, force) was for.
+      ...untranslatedOf(e.page),
+      ...(e.force ? { again: true } : {}),
       timings: { ...e.page.timings, storeMs: e.storeMs },
       ...(mem ? { heapMb: Math.round(mem.usedJSHeapSize / 1e6) } : {}),
       ...(vram ? { ollama: vram } : {}),
@@ -984,6 +988,12 @@ export class TranslateService {
       }
     }
   }
+}
+
+function untranslatedOf(page: PageResult): { untranslated?: string[]; unsure?: string[] } {
+  const left = page.blocks.filter((b) => b.translate && b.textType !== 'SFX' && (!b.translatedText.trim() || b.translatedText.trim() === b.originalText.trim())).map((b) => b.id);
+  const unsure = page.blocks.filter((b) => b.translate && b.lowConfidence).map((b) => b.id);
+  return { ...(left.length ? { untranslated: left } : {}), ...(unsure.length ? { unsure } : {}) };
 }
 
 /** A background change found that the result was edited after it was read (see saveEdited ifRev). */

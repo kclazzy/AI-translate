@@ -41,6 +41,8 @@ export interface PipelineConfig {
   lamaEngine?: boolean;
   /** Where LaMa runs: the local engine, or the browser (needs `inpaint` in the pipeline deps). */
   lama?: 'engine' | 'browser';
+  /** Translate a title logo drawn in the picture (off: it stays as drawn). */
+  translateLogo?: boolean;
   /** Neural text/bubble detector in this browser (needs `detect` in the pipeline deps). */
   detector?: boolean;
   /** Разговорник: hints for recurring expressions (see translate/phrasebook). */
@@ -138,6 +140,7 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     skipEmptyPages: s.skipEmptyPages ?? true,
     qaBatch: s.qaBatch || undefined,
     selfCheck: s.selfCheck ?? true,
+    translateLogo: s.translateLogo || undefined,
   };
 }
 
@@ -170,6 +173,7 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     qb: c.qaBatch ? 1 : undefined,
     det: c.detector ? 1 : undefined,
     nsc: c.selfCheck === false ? 1 : undefined,
+    tl: c.translateLogo ? 1 : undefined,
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);
 }

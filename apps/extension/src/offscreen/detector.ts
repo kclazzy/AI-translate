@@ -91,7 +91,10 @@ let idle: ReturnType<typeof setTimeout> | undefined;
 
 export const textDetector: TextDetector = (img) => {
   clearTimeout(idle);
+  const queued = performance.now();
+  let started = 0;
   const job = chain.then(() => onGpu(GPU_NETS, async () => {
+    started = performance.now();
     try {
       return await runOnce(img);
     } catch (e) {
@@ -108,7 +111,11 @@ export const textDetector: TextDetector = (img) => {
     clearTimeout(idle);
     idle = setTimeout(() => void releaseDetector(), IDLE_RELEASE_MS);
   }).catch(() => undefined);
-  return job.then((boxes) => ({ boxes }));
+  // Where the time goes (journal, ⓘ): waiting for the video card (Ollama on it) or computing, and where.
+  return job.then(async (boxes) => {
+    const ep = (await session?.catch(() => null))?.ep;
+    return { boxes, waitMs: started ? started - queued : 0, runMs: started ? performance.now() - started : 0, ...(ep ? { ep } : {}) };
+  });
 };
 
 /** Free the session (memory on the video card); the next picture loads it again. */

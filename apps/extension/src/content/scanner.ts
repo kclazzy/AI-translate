@@ -174,6 +174,18 @@ export function chapterColumn<T extends { el: Element }>(cands: T[]): T[] {
 }
 
 /**
+ * Pictures far narrower than the chapter's own column (covers of other episodes, avatars, icons:
+ * 218 px beside an 800 px strip) are left out of automatic translation; a click still translates them.
+ * Only when the page has a column of three pictures or more.
+ */
+export function withoutThumbnails<T extends { el: Element }>(cands: T[]): T[] {
+  const col = chapterColumn(cands);
+  if (col.length < 3 || col === cands) return cands;
+  const width = Math.max(...col.map((c) => c.el.getBoundingClientRect().width));
+  return cands.filter((c) => col.includes(c) || c.el.getBoundingClientRect().width >= width * 0.4);
+}
+
+/**
  * What a candidate element shows right now, to tell when a reader swapped the picture under an
  * overlay: the address for <img> (the lazy one while its placeholder shows) and CSS backgrounds,
  * a 16×16 thumbnail of the pixels for a canvas. undefined when it cannot be told (a canvas the

@@ -20,7 +20,15 @@ export interface Detection {
 }
 
 /** Picture (RGBA, any size; the pipeline sends 640×640) → boxes in that picture's pixels. */
-export type TextDetector = (img: PixelData, signal?: AbortSignal) => Promise<{ boxes: Detection[] }>;
+export type TextDetector = (img: PixelData, signal?: AbortSignal) => Promise<{ boxes: Detection[]; ep?: 'webgpu' | 'wasm'; runMs?: number; waitMs?: number }>;
+
+/** Where the detector's time went on one page (journal, ⓘ): computing, waiting its turn on the video card. */
+export interface DetectorStats {
+  windows: number;
+  runMs: number;
+  waitMs: number;
+  ep?: 'webgpu' | 'wasm';
+}
 
 /** The model's input side. */
 export const DETECTOR_SIZE = 640;
@@ -162,7 +170,7 @@ function interArea(a: Box, b: Box): number {
  * Run the detector over the page: each window is scaled to 640×640, the boxes are mapped back to
  * page pixels, weak ones dropped (text < 0.35, bubbles < 0.4) and the windows' boxes merged.
  */
-export async function detectPage(image: TiledImage, detect: TextDetector, backend: ImageBackend, signal?: AbortSignal): Promise<Detection[]> {
+export async function detectPage(image: TiledImage, detect: TextDetector, backend: ImageBackend, signal?: AbortSignal, stats?: DetectorStats): Promise<Detection[]> {
   const all: (Detection & { cut?: boolean })[] = [];
   const S = DETECTOR_SIZE;
   for (const win of detectorWindows(image.width, image.height)) {
@@ -172,7 +180,14 @@ export async function detectPage(image: TiledImage, detect: TextDetector, backen
     ctx.imageSmoothingQuality = 'high';
     image.drawRegion(ctx, win.x, win.y, win.w, win.h, S, S);
     const px: PixelData = ctx.getImageData(0, 0, S, S);
-    const { boxes } = await detect(px, signal);
+    const res = await detect(px, signal);
+    const boxes = res.boxes;
+    if (stats) {
+      stats.windows++;
+      stats.runMs += Math.round(res.runMs ?? 0);
+      stats.waitMs += Math.round(res.waitMs ?? 0);
+      if (res.ep) stats.ep = res.ep;
+    }
     const sx = win.w / px.width;
     const sy = win.h / px.height;
     for (const d of boxes) {

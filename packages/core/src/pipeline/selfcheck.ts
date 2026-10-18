@@ -443,6 +443,18 @@ function fixBlock(ctx: Ctx, b: TextBlock, issue: SelfCheckIssue): { block: TextB
         if (issue === 'too_small' && l.fontSize < l0.fontSize) continue;
         return { block: t, note: 're-laid out in the bubble' };
       }
+      if (issue === 'outside' && !b.style?.fontSize) {
+        // Still sticking out (and the size not fixed in the style): a little smaller, step by step, never below the readable size.
+        const base = inner ? { ...b, textBox: inner } : b;
+        for (const k of [0.9, 0.8, 0.7, 0.6]) {
+          const size = Math.max(ctx.minReadable, Math.floor(l0.fontSize * k));
+          if (size >= l0.fontSize) continue;
+          const t = { ...base, style: { ...(b.style ?? {}), fontSize: size } };
+          const { l, box } = layoutOf(ctx, t);
+          if (!outside(ctx, t, l, box)) return { block: t, note: `re-laid out in the bubble, ${size} px` };
+          if (size === ctx.minReadable) break;
+        }
+      }
       return { block: b };
     }
     case 'style': {

@@ -235,7 +235,7 @@ export interface BlockForTranslation {
 }
 
 /** Text-only translation of already recognised blocks. */
-export function textTranslateInstruction(blocks: BlockForTranslation[], hintsByBlock: Record<string, string[]>, context = '', phrasebook = '', glossary = '', names: string[] = []): string {
+export function textTranslateInstruction(blocks: BlockForTranslation[], hintsByBlock: Record<string, string[]>, context = '', phrasebook = '', glossary = '', names: string[] = [], sounds: string[] = []): string {
   // The speaker's name from the picture is a guess of the vision model (in one chapter it gave the
   // same girl's name to half of all lines): only the gender goes along.
   const data = blocks.map((b) => ({
@@ -251,6 +251,7 @@ export function textTranslateInstruction(blocks: BlockForTranslation[], hintsByB
     ...(glossary ? [glossary, ''] : []),
     ...(context ? [context, ''] : []),
     ...(phrasebook ? [phrasebook, ''] : []),
+    ...(sounds.length ? [`Sound effects on this page and the sounds to use for them: ${sounds.map((x) => sanitizeLine(x, 80)).join('; ')}. A sound is never a verb or a made-up word.`, ''] : []),
     ...(names.length ? [`Names on this page (people and places): ${names.map((n) => sanitizeLine(n, 40)).join(', ')}. They are names, never words to translate by meaning: transliterate them (or use the spelling in <context>), the same way every time.`, ''] : []),
     'Translate the blocks below. They are listed in reading order and belong to one page: read them all first, as one scene, then translate each so the conversation stays coherent (a sentence may continue in the next bubble).',
     ...(joined ? ['A block marked "continuesInNextBlock" stops mid-sentence and the sentence goes on in the next block: translate the two parts as ONE sentence, then split your translation at a natural point so each block gets its own part, in the same order (never the whole sentence in one block and a repeat or nothing in the other).'] : []),

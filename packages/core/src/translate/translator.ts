@@ -8,6 +8,7 @@ import { isDegenerate, parseTranslationAnswer, tameRuns } from './parse';
 import { isAllCaps, sentenceCase, unshout } from './caseNorm';
 import { learnCharacters, namesIn } from './names';
 import { continuesNext } from './continuation';
+import { sfxVariants } from './sfx';
 import { completeFitted, CONTEXT_LEVELS, estimateTokens, fitRequest, growRoom, SAFETY, windowOf } from './budget';
 import { buildSystemPrompt, contextData, glossaryExtra, phrasebookData, repairInstruction, textTranslateInstruction, type BlockForTranslation, type PromptInput } from './prompt';
 
@@ -58,6 +59,10 @@ export async function translateBlocks(
     const speech = (t: TextType) => t === 'DIALOGUE' || t === 'NARRATION';
     return next && speech(b.type) && next.type === b.type && continuesNext(b.text) ? { ...b, joinsNext: true } : b;
   });
+  const sounds = blocks.flatMap((b) => {
+    const v = b.type === 'SFX' ? sfxVariants(b.text, input.targetLang) : null;
+    return v ? [`${b.text.trim()} → ${v.join(' / ')}`] : [];
+  });
   const names = namesIn(blocks.map((b) => b.text), (input.context?.entities ?? []).filter((e) => e.kind === 'character').map((e) => e.source));
   const hitsByBlock = new Map<string, GlossaryHit[]>();
   const allHits = new Map<string, GlossaryHit>();
@@ -74,7 +79,7 @@ export async function translateBlocks(
   const texts = blocks.map((b) => b.text);
   const userAt = (level: number) => {
     const lv = CONTEXT_LEVELS[level];
-    return textTranslateInstruction(blocks, hintStrings, contextData(input, lv, texts), lv.phrasebook ? phrasebookData(input, blocks) : '', glossaryExtra(input, [...allHits.values()]), names);
+    return textTranslateInstruction(blocks, hintStrings, contextData(input, lv, texts), lv.phrasebook ? phrasebookData(input, blocks) : '', glossaryExtra(input, [...allHits.values()]), names, sounds);
   };
   const systemTokens = estimateTokens(system);
   const inputAt = (level: number) => systemTokens + estimateTokens(userAt(level));

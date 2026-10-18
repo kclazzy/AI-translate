@@ -140,6 +140,8 @@ export interface AppSettings {
   lamaEngine?: boolean;
   /** Text over artwork redrawn by LaMa: in the local engine or right in the browser (model downloaded once). */
   lamaMode?: 'off' | 'engine' | 'browser';
+  /** Translate a title logo drawn in the picture as a whole; off: it stays as drawn. */
+  translateLogo?: boolean;
   /** The user said «Не предлагать» to the LaMa offer shown after a page with text over artwork. */
   lamaOfferDismissed?: boolean;
   /** Neural text/bubble detector running in the browser (model downloaded once): 'browser' after the download. */
@@ -392,6 +394,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     inpaintExpand: 'number',
     lamaEngine: 'boolean',
     lamaMode: 'string',
+    translateLogo: 'boolean',
     lamaOfferDismissed: 'boolean',
     detectorMode: 'string',
     modelCatalog: 'object',

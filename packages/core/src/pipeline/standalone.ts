@@ -2,12 +2,12 @@ import { familyFor } from '../llm/catalog';
 import { AppError } from '../errors';
 import type { ImageBackend, PixelData } from '../image/backend';
 import { cleanBlock, findLeftoverText, findLetterClusters, findTextRegions, luminance, parseHex, type LetterCluster, type Lettering, type LeftoverProbe } from '../image/clean';
-import { boxToPolygon, clampBox, expandBox, overlapRatio, TiledImage } from '../image/tiled';
+import { boxArea, boxToPolygon, clampBox, expandBox, overlapRatio, TiledImage } from '../image/tiled';
 import { detectScript } from '../languages';
 import { assertPrivacy, isLocalProvider, isLocalUrl } from '../llm/privacy';
 import { createProvider } from '../llm/presets';
 import type { FetchLike, LlmProvider } from '../llm/types';
-import { mergeContext, type ContextUpdate, type TranslationContext } from '../translate/context';
+import { memoryKey, mergeContext, rememberedTranslation, type ContextUpdate, type TranslationContext } from '../translate/context';
 import { applyForbiddenFixes, findGlossaryHits, findViolations } from '../translate/glossary';
 import { isDegenerate, parseVisionAnswer, tameRuns, type VisionAnswer } from '../translate/parse';
 import { buildSystemPrompt, contextData, visionFullInstruction, visionOcrInstruction, visionPhrasebook, type PromptInput } from '../translate/prompt';
@@ -24,7 +24,7 @@ import { EngineClient } from './engine';
 import { addStep, createDebug, recording } from './debug';
 import { dedupeReads, dropRepeatedParts, echoesContext, nearBoxes, normText, sameText } from './dupes';
 import { backgroundUnder, colourFor } from './selfcheck';
-import { bubbleAround, detectedTextNear, detectorFindsText, detectPage, ellipseBubble, missedDetections, snapBlocksToDetections, type Detection, type TextDetector } from './detect';
+import { bubbleAround, detectedTextNear, detectorFindsText, detectPage, ellipseBubble, missedDetections, snapBlocksToDetections, type Detection, type DetectorStats, type TextDetector } from './detect';
 
 export interface PipelineRequest {
   bytes: Uint8Array;
@@ -53,6 +53,7 @@ export interface PreparedPage {
   /** The neural detector's boxes (when it is on and here), page px. */
   detections?: Detection[];
   detectorMs?: number;
+  detectorStats?: DetectorStats;
   /** The views as sent to the vision model, for `viewsFor` (model + quality). */
   views?: EncodedView[];
   viewsFor?: string;
@@ -85,8 +86,10 @@ export async function preparePage(req: Pick<PipelineRequest, 'bytes' | 'mime' | 
     // The neural detector: its boxes help place the text, and it replaces the heuristic text check.
     const t1 = performance.now();
     try {
-      prep.detections = await detectPage(original, deps.detect!, deps.backend);
+      const stats: DetectorStats = { windows: 0, runMs: 0, waitMs: 0 };
+      prep.detections = await detectPage(original, deps.detect!, deps.backend, undefined, stats);
       prep.detectorMs = Math.round(performance.now() - t1);
+      prep.detectorStats = stats;
       if (checksText(req)) prep.textCheck = { lines: prep.detections.length, letters: 0, noText: !detectorFindsText(prep.detections), ms: prep.detectorMs };
     } catch (e) {
       if ((e as Error)?.name === 'AbortError') throw e;
@@ -374,6 +377,8 @@ export function scriptFits(script: ReturnType<typeof detectScript>, lang: string
 
 /** Letters with case (Latin, Cyrillic, Greek) and all of them capitals: comic lettering. */
 export { isAllCaps } from '../translate/caseNorm';
+import { joinLetterBlocks, keepAsDrawn } from './asDrawn';
+import { fixSfx } from '../translate/sfx';
 import { isAllCaps } from '../translate/caseNorm';
 
 /** Make the translation look like the original: capitals, weight and colour of the letters. */
@@ -430,7 +435,9 @@ export function mergeSharedBubbles(blocks: TextBlock[], closed: Map<string, bool
   const groups: TextBlock[][] = [];
   for (const b of blocks) {
     // Only speech joins speech: a sound effect next to a bubble keeps its own block (and type).
-    const g = b.bubble && closed.get(b.id) && b.textType !== 'SFX' ? groups.find((gr) => gr[0].bubble && gr[0].textType !== 'SFX' && closed.get(gr[0].id) && overlapRatio(gr[0].bubble.box, b.bubble!.box) > 0.6) : undefined;
+    // A sign on the wall behind a bubble is not part of the speech either (it would be split into a lobe of the bubble).
+    const speech = (t: TextBlock['textType']) => t === 'DIALOGUE' || t === 'NARRATION';
+    const g = b.bubble && closed.get(b.id) && speech(b.textType) ? groups.find((gr) => gr[0].bubble && speech(gr[0].textType) && closed.get(gr[0].id) && overlapRatio(gr[0].bubble.box, b.bubble!.box) > 0.6) : undefined;
     if (g) g.push(b);
     else groups.push([b]);
   }
@@ -620,7 +627,10 @@ export function fontFromLettering(box: Box, text: string, l: Lettering | undefin
   if (!l || l.letterHeight < 6 || l.colorShare < 0.6) return byArea;
   const script = detectScript(text);
   const ratio = script === 'latin' || script === 'cyrillic' ? (isAllCaps(text) ? 0.72 : 0.6) : 0.9;
-  return Math.max(8, Math.min(byArea, Math.round(l.letterHeight / ratio)));
+  // The measured height can only lower the area estimate a little: dots and commas («...AND THEN...»,
+  // «HAHA!») count as short letters and pull the median down, and the translation came out a third
+  // of the original's size.
+  return Math.max(8, Math.min(byArea, Math.max(Math.round(l.letterHeight / ratio), Math.round(byArea * 0.8))));
 }
 
 /** Rough font size from box area and character count. */
@@ -740,6 +750,20 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     };
   });
 
+  // A logo drawn letter by letter → one block; credits, the logo and brand names stay as drawn.
+  const letters = joinLetterBlocks(blocks);
+  if (letters.joined.length) {
+    blocks = letters.blocks;
+    for (const g of letters.joined) addStep(debug, `letters ${g.join(', ')} joined into one block`);
+  }
+  for (const b of blocks) {
+    const why = b.translate ? keepAsDrawn(b, { translateLogo: config.translateLogo }) : null;
+    if (!why) continue;
+    b.translate = false;
+    b.translatedText = '';
+    addStep(debug, `${b.id} kept as drawn (${why})`);
+  }
+
   // Lines of the previous pages the model copied into this page (it got them as context): kept
   // only where lettering really stands under the box (see cleanOne), never drawn over the art.
   const echoes = new Set(blocks.filter((b) => echoesContext(b.originalText, req.context?.recentLines ?? [])).map((b) => b.id));
@@ -751,6 +775,14 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     const translator = recording(createProvider(translatorCfg!, deps.fetchImpl), 'translate', debug);
     // Blocks the reading step already translated (see readTranslated) keep that translation.
     const pre = new Set(merged.flatMap((l, i) => (l.pre ? [`b${i + 1}`] : [])));
+    // Translated on an earlier page of the series (a sign on the wall, a line said again): the same words.
+    for (const b of blocks) {
+      const known = b.translate && !pre.has(b.id) ? rememberedTranslation(req.context, b.originalText, b.textType) : undefined;
+      if (!known) continue;
+      b.translatedText = known;
+      pre.add(b.id);
+      addStep(debug, `${b.id} translated as on an earlier page`);
+    }
     const toTranslate = blocks.filter((b) => b.translate && !pre.has(b.id)).map((b) => ({ id: b.id, type: b.textType, text: b.originalText, speaker: b.speaker, gender: b.speakerGender }));
     const res = await translateBlocks(translator, promptInput(config, req.context), toTranslate, { signal });
     usage.push(...res.usage);
@@ -803,6 +835,24 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       b.translatedText = tameRuns(b.translatedText);
       const v = findViolations(b.translatedText, findGlossaryHits(b.originalText, config.glossary));
       if (v.length) b.translatedText = applyForbiddenFixes(b.translatedText, v);
+    }
+  }
+  for (const b of blocks) {
+    if (b.textType !== 'SFX' || !b.translate || !b.translatedText) continue;
+    const fixed = fixSfx(b.originalText, b.translatedText, config.targetLang);
+    if (fixed !== b.translatedText) {
+      addStep(debug, `${b.id}: sound «${b.translatedText}» → «${fixed}»`);
+      b.translatedText = fixed;
+    }
+  }
+  if (!separate) {
+    // One request read and translated the page: a text the series already has keeps its translation.
+    for (const b of blocks) {
+      const known = b.translate ? rememberedTranslation(req.context, b.originalText, b.textType) : undefined;
+      if (known && known !== b.translatedText) {
+        b.translatedText = known;
+        addStep(debug, `${b.id} translated as on an earlier page`);
+      }
     }
   }
   tTranslated = performance.now();
@@ -862,12 +912,28 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         addStep(debug, `bubble of ${b.id} taken from the detector`);
       }
       if (r.artMask) artMasks.push(r.artMask);
+      if (r.bubble && b.textType !== 'DIALOGUE' && b.textType !== 'NARRATION') {
+        // A sign or a sound effect lies inside its own plate or over the art: a "bubble" that does not even
+        // hold the middle of the text is a neighbour's bubble, and the translation would go into it.
+        const [bx, by, bw, bh] = r.bubble.box;
+        const cx = b.bbox[0] + b.bbox[2] / 2;
+        const cy = b.bbox[1] + b.bbox[3] / 2;
+        if (cx < bx || cx > bx + bw || cy < by || cy > by + bh) {
+          addStep(debug, `bubble of ${b.id} lies beside its text → not used`);
+          r.bubble = null;
+          r.closed = false;
+        }
+      }
       if (!r.bubble && b.textType !== 'SFX') addStep(debug, `bubble not found for ${b.id} → text over art`);
       b.bubble = r.bubble;
       closedBubble.set(b.id, r.closed);
       if (r.lettering) letterHeight.set(b.id, r.lettering.letterHeight);
       if (r.textBox && b.textType === 'SFX' && !b.textBox) {
-        // Sound effects go where the original letters were, not in the middle of a loose model box.
+        // Two sounds side by side (STOMP STOMP): the letters found may take in the neighbour's too, or
+        // only a scrap of this one's — each sound keeps to its own box then, with its own size.
+        const others = blocks.filter((o) => o !== b && o.textType === 'SFX');
+        if (boxArea(r.textBox) < boxArea(b.bbox) * 0.05) r.textBox = b.bbox;
+        else if (others.some((o) => overlapRatio(o.bbox, r.textBox!) > 0.3)) r.textBox = intersectBox(r.textBox, clampBox(expandBox(b.bbox, Math.round(b.bbox[2] * 0.15)), original.width, original.height)) ?? b.bbox;
         const [x, y, w, h] = r.textBox;
         b.textBox = clampBox([x - w * 0.08, y - h * 0.15, w * 1.16, h * 1.3].map(Math.round) as Box, original.width, original.height);
       }
@@ -1077,6 +1143,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         cleanMs: blocksOut.length ? Math.round(tCleaned - tTranslated) : 0,
         inpaintMs,
         ...(detectorMs ? { detectorMs } : {}),
+        ...(prep.detectorStats?.windows ? { detectorRunMs: prep.detectorStats.runMs, detectorWaitMs: prep.detectorStats.waitMs, detectorWindows: prep.detectorStats.windows, ...(prep.detectorStats.ep ? { detectorEp: prep.detectorStats.ep } : {}) } : {}),
         totalMs: Math.round(performance.now() - t0),
         ...(prepared ? { prefetched: true } : {}),
       },
@@ -1094,6 +1161,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       summary,
       // Only lines that stand where they were read: an unsure one would be echoed on later pages.
       lines: blocksOut.filter((b) => b.textType === 'DIALOGUE' && b.translate && !b.lowConfidence && !b.continued).slice(-8).map((b) => ({ src: b.originalText, dst: b.translatedText })),
+      memory: blocksOut.filter((b) => b.translate && !b.lowConfidence && !b.continued && b.translatedText.trim() && memoryKey(b.originalText).replace(/\s/g, '').length >= 12).map((b) => ({ src: b.originalText, dst: b.translatedText, type: b.textType })),
     };
     // A skipped picture adds nothing to the story (and is not counted as a page of it).
     const context = req.context && !skipped ? mergeContext(req.context, contextUpdate) : undefined;
