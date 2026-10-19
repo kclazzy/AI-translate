@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AppSettings } from '@ait/core';
+import { isLocalProvider, providerById, type AppSettings } from '@ait/core';
 import { tr } from '@ait/core/i18n';
 import { usePlatform } from './platform';
 import { Switch } from './ui';
@@ -59,6 +59,11 @@ export function DetectorGetButton({ update, label, primary, downloaded, onDone, 
   );
 }
 
+function localVision(s: AppSettings): boolean {
+  const p = providerById(s, s.visionProviderId);
+  return !!p && isLocalProvider(p);
+}
+
 /** Settings: the neural text / bubble detector — download, switch on or off, remove. Hidden where it cannot run. */
 export function DetectorChoice({ settings: s, update }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void }) {
   const platform = usePlatform();
@@ -90,6 +95,18 @@ export function DetectorChoice({ settings: s, update }: { settings: AppSettings;
         </span>
       ) : have === false ? (
         <DetectorGetButton update={update} downloaded={have} label={tr('Скачать')} onDone={() => setHave(true)} testId="detector-download" />
+      ) : null}
+      {have && on ? (
+        <span data-testid="read-crops">
+          <Switch
+            checked={s.readCrops ?? localVision(s)}
+            onChange={(readCrops) => update({ readCrops })}
+            label={tr('Читать только найденный текст — быстрее с локальной моделью')}
+          />
+          <small className="ait-muted ait-set-hint" style={{ display: 'block' }}>
+            {tr('Модели отправляется не вся страница, а коллаж из кусочков с текстом. Текст, который нейросеть не нашла, не прочитается.')}
+          </small>
+        </span>
       ) : null}
     </div>
   );

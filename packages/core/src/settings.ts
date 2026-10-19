@@ -142,6 +142,8 @@ export interface AppSettings {
   lamaMode?: 'off' | 'engine' | 'browser';
   /** Translate a title logo drawn in the picture as a whole; off: it stays as drawn. */
   translateLogo?: boolean;
+  /** Read only the pieces with text (a collage) instead of the whole page; default: on with a local model. */
+  readCrops?: boolean;
   /** The user said «Не предлагать» to the LaMa offer shown after a page with text over artwork. */
   lamaOfferDismissed?: boolean;
   /** Neural text/bubble detector running in the browser (model downloaded once): 'browser' after the download. */
@@ -395,6 +397,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     lamaEngine: 'boolean',
     lamaMode: 'string',
     translateLogo: 'boolean',
+    readCrops: 'boolean',
     lamaOfferDismissed: 'boolean',
     detectorMode: 'string',
     modelCatalog: 'object',

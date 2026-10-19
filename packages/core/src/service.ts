@@ -163,6 +163,8 @@ export class TranslateService {
   private reviewRuns = new Set<Promise<void>>();
   /** Strip results being cut into pictures: a late review of one waits for that. */
   private deriving = new Map<string, Promise<unknown>>();
+  /** Per series: done when the latest started page has its context merged (see freshContext). */
+  private turns = new Map<string, Promise<void>>();
   /** The last speech line at the bottom of the series' latest page (a sentence may go on on the next one). */
   private tails = new Map<string, { key: string; blockId: string; src: string; dst: string; type: TextBlock['textType']; at: number }>();
   private compactQueue: string[] = [];
@@ -236,10 +238,28 @@ export class TranslateService {
     const prepared = await this.takeAhead(aheadId);
     const context = opts.generic ? undefined : await this.getContext(seriesKey);
     let key = baseKey;
+    // Pages of one series in order: this one may read while the previous is still being finished,
+    // but translates with the context the previous one leaves.
+    let releaseTurn = () => {};
+    const turnKey = seriesKey && !opts.generic ? seriesKey : undefined;
+    const before = turnKey ? this.turns.get(turnKey) : undefined;
+    if (turnKey) {
+      const mine = new Promise<void>((r) => (releaseTurn = r));
+      this.turns.set(turnKey, mine);
+      const done = releaseTurn;
+      releaseTurn = () => {
+        done();
+        if (this.turns.get(turnKey) === mine) this.turns.delete(turnKey);
+      };
+    }
+    const freshContext = before ? async () => {
+      await before;
+      return this.getContext(seriesKey);
+    } : undefined;
     try {
       const { value: out, lighter } = await this.runFitting(config, opts, (cfg) =>
         runPipeline(
-          { bytes, mime: realMime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic, noSkip, prepared, batchReview: !!config.qaBatch && !opts.generic },
+          { bytes, mime: realMime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic, noSkip, prepared, batchReview: !!config.qaBatch && !opts.generic, freshContext },
           { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector },
         ),
       );
@@ -294,6 +314,8 @@ export class TranslateService {
         await this.addHistory({ key, url: opts.sourceUrl, title: opts.title, date: new Date().toISOString(), pages: 1, targetLang: config.targetLang, model: (config.translator ?? config.vision)?.model ?? 'engine', status: 'error', error: err.code });
       }
       throw err;
+    } finally {
+      releaseTurn();
     }
   }
 

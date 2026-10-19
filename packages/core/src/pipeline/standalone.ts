@@ -10,7 +10,7 @@ import type { FetchLike, LlmProvider } from '../llm/types';
 import { memoryKey, mergeContext, rememberedTranslation, withoutPage, type ContextUpdate, type TranslationContext } from '../translate/context';
 import { applyForbiddenFixes, findGlossaryHits, findViolations } from '../translate/glossary';
 import { isDegenerate, parseVisionAnswer, tameRuns, type VisionAnswer } from '../translate/parse';
-import { buildSystemPrompt, contextData, visionFullInstruction, visionOcrInstruction, visionPhrasebook, type PromptInput } from '../translate/prompt';
+import { buildSystemPrompt, contextData, visionCollageInstruction, visionFullInstruction, visionOcrInstruction, visionPhrasebook, type PromptInput } from '../translate/prompt';
 import { completeFitted, CONTEXT_LEVELS, estimateTokens, growRoom, imageTokens, OCR_LEVEL, windowOf } from '../translate/budget';
 import { translateBlocks, usageFrom } from '../translate/translator';
 import type { Box, BubbleInfo, PageDebug, PageResult, StageEvent, TextBlock, TextStyle, Usage } from '../types';
@@ -42,6 +42,12 @@ export interface PipelineRequest {
   noSkip?: boolean;
   /** The picture decoded / checked / encoded ahead of time (see preparePage); must match bytes and config. */
   prepared?: PreparedPage;
+  /**
+   * Two pages of a series in work at once (the next one reads while the previous one is erased and
+   * typeset): the series context as it is once the previous page is done, asked for just before the
+   * translation step, so the names and lines of the previous page are in it.
+   */
+  freshContext?: () => Promise<TranslationContext | undefined>;
 }
 
 /** A picture made ready for the model while the previous one was still in it (prefetch). */
@@ -193,14 +199,25 @@ async function encodeView(image: TiledImage, view: View, config: PipelineConfig,
   return { view, jpeg, dw, dh };
 }
 
-async function readView(provider: LlmProvider, image: TiledImage, view: View, config: PipelineConfig, context: TranslationContext | undefined, withTranslation: boolean, deps: StandaloneDeps, signal?: AbortSignal, encoded?: EncodedView, debug?: PageDebug): Promise<{ answer: VisionAnswer; usage: Usage }> {
+/** The collage of the page's text pieces, drawn (see pipeline/collage.ts). */
+interface CollageView {
+  jpeg: Uint8Array;
+  dw: number;
+  dh: number;
+  pieces: CollagePiece[];
+}
+
+async function readView(provider: LlmProvider, image: TiledImage, view: View, config: PipelineConfig, context: TranslationContext | undefined, withTranslation: boolean, deps: StandaloneDeps, signal?: AbortSignal, encoded?: EncodedView, debug?: PageDebug, collage?: CollageView): Promise<{ answer: VisionAnswer; usage: Usage }> {
   const family = familyFor(provider.config.model);
-  const { jpeg, dw, dh } = encoded ?? (await encodeView(image, view, config, provider.config.model, deps));
+  const { jpeg, dw, dh } = collage ?? encoded ?? (await encodeView(image, view, config, provider.config.model, deps));
   const input = promptInput(config, context);
   const system = buildSystemPrompt(input);
   // Reading only: a model that translated anyway is asked again more firmly (see below).
   let strict = false;
-  const instructionNow = () => (withTranslation ? visionFullInstruction(dw, dh) : visionOcrInstruction(dw, dh, config.sourceLang, strict));
+  const instructionNow = () =>
+    collage
+      ? visionCollageInstruction(dw, dh, collage.pieces.length, config.sourceLang, withTranslation, strict)
+      : withTranslation ? visionFullInstruction(dw, dh) : visionOcrInstruction(dw, dh, config.sourceLang, strict);
   let instruction = instructionNow();
   // Reading only (two-step): the names help spelling; the story and earlier lines would only be echoed.
   const levelOf = (i: number) => (withTranslation ? CONTEXT_LEVELS[i] : i === 0 ? OCR_LEVEL : CONTEXT_LEVELS[CONTEXT_LEVELS.length - 1]);
@@ -237,7 +254,8 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
         room = win ? more : 12000;
         throw new AppError('TRANSLATION_INVALID_OUTPUT', { retryable: true, detail: 'Answer cut off at the output limit' });
       }
-      const answer = parseVisionAnswer(res.text, withTranslation, last);
+      // The collage's answer names pieces by number: they get their places on the page.
+      const answer = parseVisionAnswer(collage ? withPieceBoxes(res.text, collage.pieces, image.width, image.height) : res.text, withTranslation, last);
       if (res.truncated) answer.repaired = true;
       // The reading step answered with the translation (Russian where the page is English): the
       // original is needed for the translation step and the filters. Asked once more, firmly; when
@@ -256,7 +274,7 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
         }
       }
       // Some families answer in pixels of the picture they got: bring them to 0–1000.
-      if (family?.coords === 'pixels') for (const b of answer.blocks) b.box = [(b.box[0] / dw) * 1000, (b.box[1] / dh) * 1000, (b.box[2] / dw) * 1000, (b.box[3] / dh) * 1000];
+      if (family?.coords === 'pixels' && !collage) for (const b of answer.blocks) b.box = [(b.box[0] / dw) * 1000, (b.box[1] / dh) * 1000, (b.box[2] / dw) * 1000, (b.box[3] / dh) * 1000];
       return { answer, usage: usageFrom(provider, res) };
     },
     // A local model that timed out will time out again: report it instead of waiting 3× longer.
@@ -378,6 +396,7 @@ export function scriptFits(script: ReturnType<typeof detectScript>, lang: string
 /** Letters with case (Latin, Cyrillic, Greek) and all of them capitals: comic lettering. */
 export { isAllCaps } from '../translate/caseNorm';
 import { joinLetterBlocks, keepAsDrawn } from './asDrawn';
+import { drawCollage, pieceBoxes, planCollage, withPieceBoxes, type CollagePiece } from './collage';
 import { fixSfx } from '../translate/sfx';
 import { isAllCaps } from '../translate/caseNorm';
 
@@ -648,7 +667,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   const t0 = performance.now();
   // This picture translated before (⟳, the chapter again): its own lines in the series context are not
   // «earlier pages» — they would be taken for echoes and removed, and the old translation forced back.
-  if (req.context) req = { ...req, context: withoutPage(req.context, (await sha256Hex(req.bytes)).slice(0, 16)) };
+  const pageKey = (await sha256Hex(req.bytes)).slice(0, 16);
+  if (req.context) req = { ...req, context: withoutPage(req.context, pageKey) };
   const { config, signal } = req;
   const stage = (s: StageEvent['stage'], progress?: number) => req.onStage?.({ stage: s, progress });
   if (!config.vision) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: 'No vision provider' });
@@ -699,15 +719,51 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     detectorMs = Math.round(performance.now() - t1);
   }
   if (dets) addStep(debug, `detector: ${dets.filter((d) => d.kind !== 'bubble').length} text box(es), ${dets.filter((d) => d.kind === 'bubble').length} bubble(s)`);
-  const views = planViews(original.width, original.height);
-  const encoded = prep.viewsFor === viewsKey(config) ? prep.views : undefined;
+  // One request reads and translates: it needs the previous page's context already.
+  async function takeFreshContext(): Promise<void> {
+    const get = req.freshContext;
+    if (!get) return;
+    req = { ...req, freshContext: undefined };
+    const fresh = await get();
+    req = { ...req, context: fresh ? withoutPage(fresh, pageKey) : req.context };
+  }
+  if (!separate) await takeFreshContext();
   const located: Located[] = [];
-  // A local server runs one request at a time anyway; parallel requests only split the GPU.
-  const answers = await mapLimit(views, isLocalProvider(config.vision) ? 1 : 2, async (view, i) => {
-    const r = await readView(vision, original, view, config, req.context, !separate, deps, signal, encoded?.find((e) => e.view.y === view.y && e.view.h === view.h), debug);
-    stage('ocr', (i + 1) / views.length);
-    return { view, ...r };
-  });
+  // Only the text, as a collage of the pieces the detector found (settings → read crops): a much
+  // smaller picture for the model than the whole page.
+  let collageUsed = false;
+  let answers: { view: View; answer: VisionAnswer; usage: Usage }[] = [];
+  const textDets = config.collage && dets && !req.generic ? dets.filter((d) => isTextKind(d.kind)) : [];
+  if (textDets.length) {
+    const boxes = pieceBoxes(textDets.map((d) => d.box), original.width, original.height);
+    const area = boxes.reduce((a, b) => a + b[2] * b[3], 0);
+    // Text over most of the page (a title page, a wall of captions): the page as it is reads as well.
+    if (boxes.length <= 40 && area <= original.width * original.height * 0.6) {
+      const plan = planCollage(boxes, 1024, textDets.map((d) => d.box));
+      const drawn = await drawCollage(deps.backend, original, plan);
+      addStep(debug, `collage: ${plan.pieces.length} piece(s), ${drawn.width}×${drawn.height} (${Math.round((area / (original.width * original.height)) * 100)}% of the page)`);
+      const view = { y: 0, h: original.height };
+      const r = await readView(vision, original, view, config, req.context, !separate, deps, signal, undefined, debug, { jpeg: drawn.jpeg, dw: drawn.width, dh: drawn.height, pieces: plan.pieces });
+      stage('ocr', 1);
+      if (r.answer.blocks.length) {
+        answers = [{ view, ...r }];
+        collageUsed = true;
+      } else {
+        usage.push(r.usage);
+        addStep(debug, 'collage: nothing read → the whole page');
+      }
+    }
+  }
+  if (!collageUsed) {
+    const views = planViews(original.width, original.height);
+    const encoded = prep.viewsFor === viewsKey(config) ? prep.views : undefined;
+    // A local server runs one request at a time anyway; parallel requests only split the GPU.
+    answers = await mapLimit(views, isLocalProvider(config.vision) ? 1 : 2, async (view, i) => {
+      const r = await readView(vision, original, view, config, req.context, !separate, deps, signal, encoded?.find((e) => e.view.y === view.y && e.view.h === view.h), debug);
+      stage('ocr', (i + 1) / views.length);
+      return { view, ...r };
+    });
+  }
   for (const { view, answer, usage: u } of answers) {
     usage.push(u);
     entities = entities.concat(answer.entities);
@@ -766,6 +822,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     b.translatedText = '';
     addStep(debug, `${b.id} kept as drawn (${why})`);
   }
+
+  await takeFreshContext();
 
   // Lines of the previous pages the model copied into this page (it got them as context): kept
   // only where lettering really stands under the box (see cleanOne), never drawn over the art.
@@ -1070,7 +1128,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         }
       }
       // Text the detector is sure of that no block covers: the model skipped it; read it from there.
-      for (const [k, det] of (dets ? missedDetections(blocks, dets) : []).entries()) {
+      // Read as a collage: every text the detector found was a piece of it already (a piece read as empty has no letters).
+      for (const [k, det] of (dets && !collageUsed ? missedDetections(blocks, dets) : []).entries()) {
         const box = det.box;
         try {
           addStep(debug, `text found by the detector read again at [${box.map(Math.round).join(',')}]`);

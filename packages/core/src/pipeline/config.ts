@@ -45,6 +45,8 @@ export interface PipelineConfig {
   translateLogo?: boolean;
   /** Neural text/bubble detector in this browser (needs `detect` in the pipeline deps). */
   detector?: boolean;
+  /** Read a collage of the text the detector found instead of the whole page (pipeline/collage.ts). */
+  collage?: boolean;
   /** Разговорник: hints for recurring expressions (see translate/phrasebook). */
   phrasebook?: PhrasebookSettings;
   /** Pictures without lettering (local check) are not sent to the model; default on. */
@@ -141,7 +143,14 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     qaBatch: s.qaBatch || undefined,
     selfCheck: s.selfCheck ?? true,
     translateLogo: s.translateLogo || undefined,
+    // Default: on with a local model (the picture is most of its time), off for a cloud one.
+    collage: (s.detectorMode === 'browser' && (s.readCrops ?? isLocalVision(s))) || undefined,
   };
+}
+
+function isLocalVision(s: AppSettings): boolean {
+  const p = providerById(s, s.visionProviderId);
+  return !!p && isLocalProvider(p);
 }
 
 /** Stable hash of the output-affecting settings (API keys excluded). */
@@ -174,6 +183,7 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     det: c.detector ? 1 : undefined,
     nsc: c.selfCheck === false ? 1 : undefined,
     tl: c.translateLogo ? 1 : undefined,
+    col: c.collage && c.detector ? 1 : undefined,
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);
 }

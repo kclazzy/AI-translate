@@ -294,10 +294,11 @@ async function prepare() {
   setUiLang(settings.interfaceLang, false);
   const vision = settings.providers.find((p) => p.id === settings.visionProviderId);
   const local = settings.pipeline !== 'engine' && (!vision || isLocalProvider(vision));
-  // Running two pages at once on a local server makes both twice as slow and can push a single
-  // page past the timeout.
-  // A local server works on one picture at a time; a cloud one gets at most 3 at once.
-  queue.concurrency = local ? 1 : Math.min(3, Math.max(1, settings.concurrency));
+  // A local server: two pictures in work, as a conveyor — the model's requests still take turns on the
+  // video card (gpuLane), so the next picture reads while the previous one is erased and typeset on
+  // the processor, and translates once the previous one has left its context (service turns).
+  // A cloud one gets at most 3 at once.
+  queue.concurrency = local ? 2 : Math.min(3, Math.max(1, settings.concurrency));
   return local;
 }
 

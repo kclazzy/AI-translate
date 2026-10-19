@@ -163,7 +163,8 @@ try {
   check('the lazy picture (not loaded yet) is translated too', t1.length === 3, `overlays=${t1.length}`);
   check('waiting pictures show how many are ahead', t1.some((t) => /перед ней \d|следующая/.test(t)), JSON.stringify(t1));
   check('the running picture shows a timer', t1.some((t) => /\d:\d\d/.test(t)), JSON.stringify(t1));
-  check('a local model runs one picture at a time', t1.filter((t) => /\d:\d\d/.test(t)).length === 1, JSON.stringify(t1));
+  // Two pictures at once (the conveyor: one is read while the other is translated); the model itself takes one request at a time.
+  check('a local model runs at most two pictures at a time', [1, 2].includes(t1.filter((t) => /\d:\d\d/.test(t)).length), JSON.stringify(t1));
   {
     // «Перевести страницу» shows a progress panel with a bar.
     const c = await page.target().createCDPSession();

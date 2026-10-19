@@ -207,6 +207,31 @@ export function visionFullInstruction(width: number, height: number): string {
   ].join('\n');
 }
 
+/**
+ * The collage of a page's text pieces (see pipeline/collage.ts): read piece by piece, by number. With
+ * `withTranslation` the same request translates too (single-call mode).
+ */
+export function visionCollageInstruction(width: number, height: number, pieces: number, sourceLang = 'auto', withTranslation = false, strict = false): string {
+  const lang = sourceLang === 'auto' ? 'the language it is written in' : `${languageName(sourceLang)}, as printed`;
+  const shape = withTranslation
+    ? '{"blocks":[{"id":1,"text":"original text","translation":"translated text","type":"DIALOGUE","vertical":false}],"entities":[],"summary":""}'
+    : '{"blocks":[{"id":1,"text":"original text","type":"DIALOGUE","vertical":false}]}';
+  return [
+    `The image is ${width}×${height} pixels: a collage of ${pieces} pieces cut out of ONE comic page, in the page's reading order. Each piece has its number in a grey box on its left and a frame around it.`,
+    withTranslation
+      ? 'For every piece: copy the text exactly as printed ("text"), then translate it ("translation") — the original first.'
+      : `For every piece transcribe the text in it exactly. Do NOT translate in this step: "text" is the letters as they stand, in ${lang}.`,
+    strict ? 'Your previous answer gave a translation instead of the text in the image. Copy the original letters this time.' : '',
+    `Return JSON: ${shape}.`,
+    '"id" is the number of the piece. One entry per bubble or caption; a piece holding two separate bubbles gives two entries with the same id; a piece with no letters gives none. Join the lines of one bubble into one text. Never read the grey numbers or the frames as text.',
+    'The pieces come from one scene: read them in order, a sentence may go on in the next piece.',
+    TEXT_TYPE_HELP,
+    ...(withTranslation ? [ENTITY_HELP] : []),
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 /** Vision OCR only (translation done by a separate text model). */
 export function visionOcrInstruction(width: number, height: number, sourceLang = 'auto', strict = false): string {
   const lang = sourceLang === 'auto' ? 'the language it is written in' : `${languageName(sourceLang)}, as printed`;

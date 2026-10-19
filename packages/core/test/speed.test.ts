@@ -518,3 +518,30 @@ describe('cut bubbles at two seams in a row', () => {
     expect((await svc.getResult(parent))!.parts).toEqual(keys);
   });
 });
+
+describe('two pages of a series at once (conveyor)', () => {
+  it('the second reads meanwhile but translates with what the first left in the context', async () => {
+    const one = await makeMangaPage(800, 1100, [{ cx: 400, cy: 300, rx: 150, ry: 120, text: 'あいうえ' }]);
+    const two = await makeMangaPage(800, 1000, [{ cx: 400, cy: 300, rx: 150, ry: 120, text: 'かきくけ' }]);
+    const order: string[] = [];
+    const m = mock((body) => {
+      const isText = body.messages.every((x: { content: unknown }) => typeof x.content === 'string');
+      const user = JSON.stringify(body.messages);
+      if (isText) {
+        const blocks = JSON.parse(/<blocks>\n(.*)\n<\/blocks>/s.exec(body.messages.at(-1).content)?.[1] ?? '[]');
+        const second = blocks.some((b: any) => /second/i.test(b.text));
+        order.push(second ? (user.includes('FIRST LINE') ? 'translate-2-with-1' : 'translate-2') : 'translate-1');
+        return JSON.stringify({ translations: blocks.map((b: any) => ({ id: b.id, text: `RU ${b.text}` })), entities: [], summary: 'стр' });
+      }
+      order.push('read');
+      const text = user.includes('800×1000') ? 'SECOND LINE.' : 'FIRST LINE HERE.';
+      return JSON.stringify({ blocks: [{ box: [375, 200, 625, 345], text, type: 'DIALOGUE' }] });
+    }, 30);
+    const svc = new TranslateService(memoryDb(), secrets, napiBackend, async () => settingsWith({ sourceLang: 'en', twoStepTranslation: true }), m.fetchImpl);
+    svc.compactTiles = false;
+    const url = 'https://site.example/manga/one/ch1';
+    await Promise.all([svc.translate(one.bytes, 'image/png', { sourceUrl: url }), svc.translate(two.bytes, 'image/png', { sourceUrl: url })]);
+    expect(order).toContain('translate-2-with-1');
+    expect(order.indexOf('translate-1')).toBeLessThan(order.indexOf('translate-2-with-1'));
+  });
+});
