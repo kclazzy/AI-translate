@@ -33,7 +33,7 @@ const LANG: Record<string, LangPrompt> = {
   uk: {
     rules: [
       'Target reader: Ukrainian manga/manhwa readers. Write real Ukrainian, not Russian words in Ukrainian spelling (не «приймати участь», а «брати участь»).',
-      'Past tense agrees with the speaker\'s gender: «я прийшов / я прийшла». Use the vocative for names and address: «Сарангу!», «пане», «пані».',
+      'Past tense agrees with the speaker\'s gender: «я прийшов / я прийшла». Use the vocative for names and address: «Олено!», «пане», «пані».',
       'Address: peers — «ти»; strangers, elders, nobles — «ви».',
       'Punctuation: «ялинки» for quotes, an em dash «—» in speech.',
       'Sound effects: short Ukrainian onomatopoeia (БАХ, ГУП, ТРІСЬ, ЦМОК), never a verb or a made-up word.',
@@ -105,14 +105,6 @@ const LANG: Record<string, LangPrompt> = {
       'Address: peers — ty; strangers, elders, nobles — pan / pani (third person).',
       'Quotes „tak”, an em dash in speech.',
       'Sound effects: Polish onomatopoeia (BUM, TRZASK, CMOK, TUP), never a verb.',
-    ],
-  },
-  cs: {
-    rules: [
-      'Target reader: Czech readers. Natural spoken Czech.',
-      'Past tense agrees with gender: "udělal jsem / udělala jsem". Vocative for names: "Petře!", "pane".',
-      'Address: peers — ty; strangers, elders, nobles — vy.',
-      'Sound effects: Czech onomatopoeia (BUM, PRÁSK, MLASK), never a verb.',
     ],
   },
   tr: {
@@ -190,17 +182,18 @@ const LANG: Record<string, LangPrompt> = {
       'Sound effects: short Kazakh onomatopoeia (ГҮРС, ТАРС, ШОП), never a verb.',
     ],
   },
-  hi: {
-    rules: [
-      'Target reader: Hindi readers. Simple spoken Hindi (Hindustani), Devanagari script.',
-      'Address: peers — तुम; elders, nobles — आप. Verbs agree with gender (मैं गया / मैं गई).',
-      'Sound effects: Hindi onomatopoeia (धड़ाम, ठक), never a verb.',
-    ],
-  },
 };
 
 /** Languages with a ready instruction (base codes and zh-TW). */
 export const LANG_PROMPT_CODES = Object.keys(LANG);
+
+/** The rules every language gets (after its own). */
+export const COMMON_RULES = COMMON;
+
+/** Only the language's own rules (without the common ones). */
+export function languageRules(targetLang: string): string[] {
+  return (LANG[targetLang] ?? LANG[targetLang.split('-')[0]])?.rules ?? [];
+}
 
 /** The ready instruction for a target language, or a general one for a language without its own. */
 export function languageInstruction(targetLang: string): string {
