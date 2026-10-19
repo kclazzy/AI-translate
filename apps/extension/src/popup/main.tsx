@@ -1,7 +1,7 @@
 import '@ait/core/i18n/all';
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { applyPreset, checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, modelTiers, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
+import { applyPreset, checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, modelTiers, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, profilesForLanguage, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
@@ -313,7 +313,7 @@ function Popup() {
       <div className="pp-grid">
         <label className="ait-field">
           <span>{tr('Язык перевода')}</span>
-          <select className="ait-select" value={s.targetLang} onChange={(e) => update({ targetLang: e.target.value })}>
+          <select className="ait-select" value={s.targetLang} onChange={(e) => update({ targetLang: e.target.value, profiles: profilesForLanguage(s.profiles, s.targetLang, e.target.value) })}>
             {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
           </select>
         </label>

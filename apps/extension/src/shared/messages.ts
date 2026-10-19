@@ -44,6 +44,7 @@ export type ContentToBackground =
   | { type: 'get-page-state'; host: string }
   | { type: 'open-editor'; key: string; chapter?: string[] }
   | { type: 'get-result'; key: string }
+  | { type: 'repair-seam'; upper: string; lower: string }
   | { type: 'status'; ids: string[] }
   | { type: 'open-setup' }
   /** Should the page offer LaMa (text over artwork was painted over simply)? */
@@ -120,6 +121,7 @@ export type ToOffscreen =
   | { target: 'offscreen'; type: 'build-file'; keys: string[]; title: string; format: ChapterFormat; lang: string; version?: string }
   | { target: 'offscreen'; type: 'build-problem-report'; key: string; comment?: string; pageUrl?: string; version: string }
   | { target: 'offscreen'; type: 'get-result'; key: string }
+  | { target: 'offscreen'; type: 'repair-seam'; upper: string; lower: string }
   | { target: 'offscreen'; type: 'get-tile'; key: string; index: number }
   | { target: 'offscreen'; type: 'lookup-cached'; srcs: string[] }
   | { target: 'offscreen'; type: 'free-memory' };

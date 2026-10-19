@@ -7,7 +7,7 @@ import { renderOutput, runPipeline, styleDefaultsFor, type RenderedPage } from '
 import { DEFAULT_CACHE_MAX_MB, type AppSettings } from './settings';
 import type { IdbStore } from './storage/idb';
 import type { SecretStore } from './storage/secrets';
-import { emptyContext, mergeContext, type TranslationContext } from './translate/context';
+import { emptyContext, mergeContext, withoutPage, type TranslationContext } from './translate/context';
 import type { PageResult, StageEvent, TextBlock, Usage } from './types';
 import { sha256Hex, sniffImageMime } from './util/bytes';
 import { tr } from './i18n';
@@ -43,6 +43,10 @@ export interface StoredResult {
   strip?: { parent: string; index: number; y: number; h: number };
   /** A glued strip: the keys of the pictures cut back out of it. */
   parts?: string[];
+  /** Neighbour pictures whose shared seam was translated as one band (see repairSeam). */
+  seams?: string[];
+  /** A strip glued after the fact from pictures translated one by one (see repairSeam): it grows at its ends. */
+  seamGroup?: boolean;
   /** Text size scale the picture was drawn with (settings → fonts.scale). */
   fontScale?: number;
   /**
@@ -293,6 +297,128 @@ export class TranslateService {
     }
   }
 
+  /**
+   * Two neighbouring pictures of a strip were translated one by one, and a bubble is cut by the seam
+   * between them (the site cut the strip through a line of text: «WHAT IS THE USE» half on each).
+   * The band around the seam — the cut part of the upper picture and of the lower one — is translated
+   * as one picture (one small request), and the pictures become one glued strip, like pictures that
+   * arrived together: the band's text goes in once, is drawn once across the seam, and each picture
+   * shows its part. A picture already joined at its other seam brings its whole group along.
+   * Returns false when there is nothing to do (no cut, done before, a strip of another kind, other widths).
+   */
+  async repairSeam(upperKey: string, lowerKey: string, opts: { signal?: AbortSignal } = {}): Promise<boolean> {
+    const up = await this.getResult(upperKey);
+    const lo = await this.getResult(lowerKey);
+    if (!up || !lo || up.generic || lo.generic || up.parts?.length || lo.parts?.length) return false;
+    if (up.seams?.includes(lowerKey) || (up.strip && lo.strip && up.strip.parent === lo.strip.parent)) return false;
+    const groupOf = async (r: StoredResult): Promise<StoredResult[] | null> => {
+      if (!r.strip) return [r];
+      const parent = await this.getResult(r.strip.parent);
+      // Pictures glued because they arrived together are left as they are; seam groups grow.
+      if (!parent?.seamGroup || !parent.parts) return null;
+      const all = await Promise.all(parent.parts.map((k) => this.getResult(k)));
+      return all.every(Boolean) ? (all as StoredResult[]) : null;
+    };
+    const left = await groupOf(up);
+    const right = await groupOf(lo);
+    if (!left || !right || left[left.length - 1].key !== upperKey || right[0].key !== lowerKey) return false;
+    const members = [...left, ...right];
+    const W = up.page.width;
+    if (members.some((m) => m.page.width !== W)) return false;
+    const H = up.page.height;
+    const cutUp = up.page.blocks.filter((b) => touchesEdge(b, H, 'bottom'));
+    const cutLo = lo.page.blocks.filter((b) => touchesEdge(b, lo.page.height, 'top'));
+    if (!cutUp.length && !cutLo.length) return false;
+    // The band: from the top of what is cut in the upper picture to the bottom of what is cut in the
+    // lower one (a third of the width on a side where nothing was read).
+    const topOf = (b: TextBlock) => Math.min(b.bbox[1], b.bubble?.box[1] ?? Infinity);
+    const bottomOf = (b: TextBlock) => Math.max(b.bbox[1] + b.bbox[3], b.bubble ? b.bubble.box[1] + b.bubble.box[3] : 0);
+    const pad = Math.round(W * 0.03);
+    const side = Math.round(W * 0.35);
+    const yA = Math.max(0, Math.min(H - 40, (cutUp.length ? Math.min(...cutUp.map(topOf)) : H - side) - pad));
+    const hB = Math.min(lo.page.height, Math.max(40, (cutLo.length ? Math.max(...cutLo.map(bottomOf)) : side) + pad));
+    const hA = H - yA;
+    const originals = await Promise.all(members.map((m) => TiledImage.fromBytes(this.backend, m.original.bytes, m.original.mime)));
+    const upImg = originals[left.length - 1];
+    const loImg = originals[left.length];
+    const band = new TiledImage(this.backend, W, hA + hB);
+    band.putRegion(upImg.getRegion(0, yA, W, hA), 0, 0);
+    band.putRegion(loImg.getRegion(0, 0, W, hB), 0, hA);
+    const seriesKey = up.seriesKey ?? lo.seriesKey;
+    const { settings, config } = await this.config(seriesKey);
+    // The pictures' own lines are in the context: the band repeats them and must not take them for echoes.
+    let context = await this.getContext(seriesKey);
+    for (const m of members) if (context && m.page.pageId) context = withoutPage(context, m.page.pageId.slice(0, 16));
+    const bytes = await this.backend.encode(band.toSingleCanvas(), 'image/png');
+    const out = await runPipeline({ bytes, mime: 'image/png', config, context, signal: opts.signal, noSkip: true }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector });
+    // Nothing read in the band: the pictures keep what they have.
+    if (!out.page.blocks.length) return false;
+
+    // One strip of all the members: their own blocks (not the copies drawn across a seam), the band's in place of what it covers.
+    const offsets: number[] = [];
+    let total = 0;
+    for (const m of members) {
+      offsets.push(total);
+      total += m.page.height;
+    }
+    const seamY = offsets[left.length];
+    const bandTop = seamY - hA;
+    const bandBottom = seamY + hB;
+    const owned = members.flatMap((m, i) => m.page.blocks.filter((b) => !b.continued).map((b) => shiftBlock(b, -offsets[i])));
+    const kept = owned.filter((b) => b.edited || b.bbox[1] + b.bbox[3] <= bandTop || b.bbox[1] >= bandBottom);
+    const n = members.length;
+    const fromBand = out.page.blocks.map((b) => ({ ...shiftBlock(b, -bandTop), id: `s${n}${b.id}` }));
+    const glued = new TiledImage(this.backend, W, total);
+    const cleaned = new TiledImage(this.backend, W, total);
+    for (const [i, m] of members.entries()) {
+      glued.putRegion(originals[i].getRegion(0, 0, W, m.page.height), 0, offsets[i]);
+      const c = await tilesToImage(this.backend, W, m.page.height, m.cleaned);
+      cleaned.putRegion(c.getRegion(0, 0, W, m.page.height), 0, offsets[i]);
+    }
+    cleaned.putRegion(out.cleaned.getRegion(0, 0, W, hA + hB), 0, bandTop);
+    const page: PageResult = {
+      ...up.page,
+      pageId: `${members[0].page.pageId}~seam${n}`,
+      height: total,
+      blocks: [...kept, ...fromBand].sort((x, y) => x.bbox[1] - y.bbox[1]),
+      usage: out.page.usage,
+      debug: { ...(out.page.debug ?? { answers: [], modelBlocks: [], steps: [] }), steps: [...(out.page.debug?.steps ?? []), `seam between pictures ${left.length} and ${left.length + 1} translated as one band`] },
+    };
+    const rendered = await renderOutput(this.backend, { page, cleaned }, styleDefaultsFor(config, settings.fonts));
+    const parentKey = `${members[0].key}~seam`;
+    const now = new Date().toISOString();
+    const parent: StoredResult = {
+      key: parentKey,
+      page: rendered.page,
+      rendered: rendered.tiles,
+      mime: rendered.mime,
+      original: { bytes: await this.backend.encode(glued.toSingleCanvas(), 'image/png'), mime: 'image/png' },
+      cleaned: await Promise.all(cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') }))),
+      sourceUrl: up.sourceUrl,
+      title: up.title,
+      seriesKey,
+      createdAt: now,
+      lastHitAt: now,
+      fontScale: settings.fonts.scale,
+      parts: members.map((m) => m.key),
+      seamGroup: true,
+    };
+    for (const g of [left, right]) {
+      const old = g[0].strip?.parent;
+      if (old && old !== parentKey) await this.dropResult(old);
+    }
+    await this.putResult(parentKey, parent);
+    const parts = await this.deriveParts(parent, members.map((m, i) => ({ y: offsets[i], h: m.page.height })));
+    // Each picture keeps its own id (the series context knows it by it) and remembers the seam.
+    for (const [i, p] of parts.entries()) {
+      const m = members[i];
+      await this.putResult(p.key, { ...p, seamGroup: undefined, page: { ...p.page, pageId: m.page.pageId }, original: m.original, seams: [...new Set([...(m.seams ?? []), ...(i === left.length - 1 ? [lowerKey] : i === left.length ? [upperKey] : [])])] });
+    }
+    await this.recordUsage(out.page.usage, false);
+    for (const p of parts) this.onResultChanged?.(p.key);
+    return true;
+  }
+
   private rememberTail(seriesKey: string, key: string, page: PageResult): void {
     const speech = page.blocks.filter((b) => b.translate && b.originalText.trim() && (b.textType === 'DIALOGUE' || b.textType === 'NARRATION'));
     const last = speech[speech.length - 1];
@@ -472,7 +598,8 @@ export class TranslateService {
     const encode = (img: TiledImage, mime: ImageMime) => Promise.all(img.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, mime) })));
     const out: StoredResult[] = [];
     for (const [i, s] of spans.entries()) {
-      const key = `${parent.key}~${i}`;
+      // A strip cut again (after an edit, or one glued at a seam) keeps the keys of its pictures.
+      const key = parent.parts?.[i] ?? `${parent.key}~${i}`;
       const prev = await this.getResult(key);
       const original = originals?.[i] ? { bytes: originals[i].bytes, mime: originals[i].mime ?? 'image/png' } : prev?.original ?? parent.original;
       const r: StoredResult = {
@@ -994,6 +1121,13 @@ function untranslatedOf(page: PageResult): { untranslated?: string[]; unsure?: s
   const left = page.blocks.filter((b) => b.translate && b.textType !== 'SFX' && (!b.translatedText.trim() || b.translatedText.trim() === b.originalText.trim())).map((b) => b.id);
   const unsure = page.blocks.filter((b) => b.translate && b.lowConfidence).map((b) => b.id);
   return { ...(left.length ? { untranslated: left } : {}), ...(unsure.length ? { unsure } : {}) };
+}
+
+/** A block cut by the picture's top or bottom edge: its bubble (or its text) reaches the edge. */
+export function touchesEdge(b: TextBlock, height: number, edge: 'top' | 'bottom'): boolean {
+  if (!b.translate && b.textType === 'SFX') return false;
+  const boxes = [b.bbox, ...(b.bubble ? [b.bubble.box] : [])];
+  return boxes.some((x) => (edge === 'top' ? x[1] <= 2 : x[1] + x[3] >= height - 2));
 }
 
 /** A background change found that the result was edited after it was read (see saveEdited ifRev). */

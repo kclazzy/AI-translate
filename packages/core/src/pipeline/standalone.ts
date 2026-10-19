@@ -7,7 +7,7 @@ import { detectScript } from '../languages';
 import { assertPrivacy, isLocalProvider, isLocalUrl } from '../llm/privacy';
 import { createProvider } from '../llm/presets';
 import type { FetchLike, LlmProvider } from '../llm/types';
-import { memoryKey, mergeContext, rememberedTranslation, type ContextUpdate, type TranslationContext } from '../translate/context';
+import { memoryKey, mergeContext, rememberedTranslation, withoutPage, type ContextUpdate, type TranslationContext } from '../translate/context';
 import { applyForbiddenFixes, findGlossaryHits, findViolations } from '../translate/glossary';
 import { isDegenerate, parseVisionAnswer, tameRuns, type VisionAnswer } from '../translate/parse';
 import { buildSystemPrompt, contextData, visionFullInstruction, visionOcrInstruction, visionPhrasebook, type PromptInput } from '../translate/prompt';
@@ -24,7 +24,7 @@ import { EngineClient } from './engine';
 import { addStep, createDebug, recording } from './debug';
 import { dedupeReads, dropRepeatedParts, echoesContext, nearBoxes, normText, sameText } from './dupes';
 import { backgroundUnder, colourFor } from './selfcheck';
-import { bubbleAround, detectedTextNear, detectorFindsText, detectPage, ellipseBubble, missedDetections, snapBlocksToDetections, type Detection, type DetectorStats, type TextDetector } from './detect';
+import { bubbleAround, detectedTextNear, detectorFindsText, detectPage, ellipseBubble, isTextKind, missedDetections, snapBlocksToDetections, type Detection, type DetectorStats, type TextDetector } from './detect';
 
 export interface PipelineRequest {
   bytes: Uint8Array;
@@ -646,6 +646,9 @@ export function estimateFontSize(box: Box, text: string): number {
  */
 export async function runStandalonePipeline(req: PipelineRequest, deps: StandaloneDeps): Promise<PipelineOutput> {
   const t0 = performance.now();
+  // This picture translated before (⟳, the chapter again): its own lines in the series context are not
+  // «earlier pages» — they would be taken for echoes and removed, and the old translation forced back.
+  if (req.context) req = { ...req, context: withoutPage(req.context, (await sha256Hex(req.bytes)).slice(0, 16)) };
   const { config, signal } = req;
   const stage = (s: StageEvent['stage'], progress?: number) => req.onStage?.({ stage: s, progress });
   if (!config.vision) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: 'No vision provider' });
@@ -882,7 +885,9 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         b.bubble = r.bubble ? { ...r.bubble, shape: 'rect', safeArea: [...b.bbox] as Box } : null;
         return;
       }
-      if (echoes.has(b.id) && !lettersUnder(b)) {
+      // The detector sees text right there: a line said again, not an echo of the context.
+      const detectorSees = !!dets?.some((d) => isTextKind(d.kind) && overlapRatio(d.box, b.bbox) > 0.4);
+      if (echoes.has(b.id) && !lettersUnder(b) && !detectorSees) {
         dropped.add(b.id);
         addStep(debug, `${b.id} repeats an earlier page and no lettering stands under it → removed`);
         return;
@@ -991,8 +996,16 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       return marks >= Math.max(3, chars * 0.4) && marks <= chars * 3 + 6;
     };
     /** A re-read that repeats a block already there (the same words nearby or in its bubble), or an earlier page. */
+    // A re-read of a scrap of a line already read (the cut half of a bubble: «GOING MARRY THE SOMEDAY
+    // BECOME» beside «I AM GOING TO MARRY THE PRINCE SOMEDAY…»): its words are mostly that line's.
+    const wordsOf = (t: string) => t.toLowerCase().split(/[^\p{L}\p{N}']+/u).filter(Boolean);
+    const scrapOf = (nb: TextBlock, o: TextBlock) => {
+      const w = wordsOf(nb.originalText);
+      const known = new Set(wordsOf(o.originalText));
+      return w.length >= 2 && known.size > w.length && w.filter((x) => known.has(x)).length >= w.length * 0.75;
+    };
     const repeatsKnown = (nb: TextBlock): boolean =>
-      blocks.some((o) => (sameText(o.originalText, nb.originalText) && (nearBoxes(o.bbox, nb.bbox) || (!!o.bubble && intersects(o.bubble.box, nb.bbox)))) || sameText(o.originalText, nb.originalText, 0.9)) ||
+      blocks.some((o) => (sameText(o.originalText, nb.originalText) && (nearBoxes(o.bbox, nb.bbox) || (!!o.bubble && intersects(o.bubble.box, nb.bbox)))) || sameText(o.originalText, nb.originalText, 0.9) || scrapOf(nb, o)) ||
       echoesContext(nb.originalText, req.context?.recentLines ?? []);
     const groupsOf = new Map<string, { groups: Box[]; lettering?: Lettering }>();
     for (const b of blocks) {

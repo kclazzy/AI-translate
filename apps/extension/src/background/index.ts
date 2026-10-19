@@ -604,6 +604,8 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       return null;
     case 'get-result':
       return toOffscreen({ target: 'offscreen', type: 'get-result', key: msg.key });
+    case 'repair-seam':
+      return toOffscreen({ target: 'offscreen', type: 'repair-seam', upper: msg.upper, lower: msg.lower });
     case 'get-tile':
       return toOffscreen({ target: 'offscreen', type: 'get-tile', key: msg.key, index: msg.index });
   }

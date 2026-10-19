@@ -198,6 +198,7 @@ export async function logError(error: { code: string; message?: string; detail?:
   }
 }
 
+let seamChain: Promise<unknown> = Promise.resolve();
 let lamaLogged = 0;
 /** LaMa was on but did not run (the engine is not started): into the error log, once in a while. */
 async function lamaProblem(kind: 'engine-down' | 'not-downloaded'): Promise<void> {
@@ -541,6 +542,21 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
     case 'get-result': {
       const r = await service.getResult(msg.key);
       return r ? toRendered(r, true) : null;
+    }
+    case 'repair-seam': {
+      // A bubble cut by the seam of two pictures translated one by one: one at a time, after the
+      // translations waiting now (the model is busy with them anyway).
+      const run = seamChain.then(async () => {
+        await prepare();
+        return service.repairSeam(msg.upper, msg.lower);
+      });
+      seamChain = run.catch(() => false);
+      try {
+        return { ok: await run };
+      } catch (e) {
+        void logError(toAppError(e).toJSON(), 'seam');
+        return { ok: false };
+      }
     }
     case 'get-tile': {
       const r = await service.getResult(msg.key);

@@ -52,3 +52,24 @@ describe('sound effects', () => {
     expect(sfxVariants('SHHH', 'ru')).toEqual(['ТСС']);
   });
 });
+
+describe('ready instructions per language', () => {
+  it('exist for the app languages and follow a change of the target language', async () => {
+    const { languageInstruction, profilesForLanguage, LANG_PROMPT_CODES } = await import('../src/translate/langPrompts');
+    for (const l of ['ru', 'uk', 'en', 'es', 'pt', 'de', 'fr', 'ja', 'ko', 'zh', 'zh-TW']) expect(LANG_PROMPT_CODES).toContain(l);
+    expect(languageInstruction('ru')).toContain('«вы»');
+    expect(languageInstruction('xx')).toContain('(xx)');
+    const mine = { customPrompt: 'my own words' };
+    const ready = { customPrompt: languageInstruction('ru') };
+    expect(profilesForLanguage([mine, ready], 'ru', 'en').map((p) => p.customPrompt)).toEqual(['my own words', languageInstruction('en')]);
+  });
+  it('a picture translated again does not take its own old lines for echoes', async () => {
+    const { emptyContext, mergeContext, withoutPage, rememberedTranslation } = await import('../src/translate/context');
+    let ctx = mergeContext(emptyContext('s'), { page: 'p1', lines: [{ src: 'MY WEDDING!', dst: 'Моя свадьба!' }], memory: [{ src: 'A rather long sign text here', dst: 'старый перевод', type: 'SIGN' }] });
+    ctx = mergeContext(ctx, { page: 'p2', lines: [{ src: 'Other line', dst: 'Другая' }] });
+    const again = withoutPage(ctx, 'p1');
+    expect(again.recentLines.map((l) => l.src)).toEqual(['Other line']);
+    expect(rememberedTranslation(again, 'A rather long sign text here', 'SIGN')).toBeUndefined();
+    expect(withoutPage(ctx, 'p9')).toBe(ctx);
+  });
+});

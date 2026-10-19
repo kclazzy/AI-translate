@@ -441,3 +441,80 @@ describe('a sentence that goes on on the next picture', () => {
     expect(changed).toEqual([a.result.key]);
   });
 });
+
+describe('a bubble cut by the seam between two pictures', () => {
+  it('the band around the seam is translated once and goes into both pictures', async () => {
+    const tall = await makeMangaPage(800, 1400, [{ cx: 400, cy: 700, rx: 200, ry: 150, text: 'あいうえおかきくけこ' }]);
+    const img = await loadImage(Buffer.from(tall.bytes));
+    const half = async (y: number) => {
+      const c = createCanvas(800, 700);
+      c.getContext('2d').drawImage(img, 0, y, 800, 700, 0, 0, 800, 700);
+      return new Uint8Array(await c.encode('png'));
+    };
+    const top = await half(0);
+    const bottom = await half(700);
+    let n = 0;
+    const m = mock(() => {
+      n++;
+      // Reading: the upper picture sees the top of the bubble, the lower one its bottom, the band all of it.
+      if (n === 1) return JSON.stringify({ blocks: [{ box: toNorm([300, 600, 200, 100], 800, 700), text: 'あいう', translation: 'ВЕРХ', type: 'DIALOGUE' }], entities: [], summary: '' });
+      if (n === 2) return JSON.stringify({ blocks: [{ box: toNorm([300, 0, 200, 100], 800, 700), text: 'けこ', translation: 'НИЗ', type: 'DIALOGUE' }], entities: [], summary: '' });
+      return JSON.stringify({ blocks: [{ box: toNorm([300, 120, 200, 200], 800, 440), text: 'あいうえおかきくけこ', translation: 'ЦЕЛАЯ ФРАЗА', type: 'DIALOGUE' }], entities: [], summary: '' });
+    });
+    const svc = new TranslateService(memoryDb(), secrets, napiBackend, async () => settingsWith({ skipEmptyPages: false }), m.fetchImpl);
+    svc.compactTiles = false;
+    const changed: string[] = [];
+    svc.onResultChanged = (k) => changed.push(k);
+    const a = await svc.translate(top, 'image/png', { noSkip: true });
+    const b = await svc.translate(bottom, 'image/png', { noSkip: true });
+    expect(await svc.repairSeam(a.result.key, b.result.key)).toBe(true);
+    const up = (await svc.getResult(a.result.key))!;
+    const lo = (await svc.getResult(b.result.key))!;
+    expect(up.page.blocks.map((x) => x.translatedText)).toEqual(['ЦЕЛАЯ ФРАЗА']);
+    expect(lo.page.blocks.map((x) => x.translatedText)).toEqual(['ЦЕЛАЯ ФРАЗА']);
+    // One of them draws it as its own, the other as a continued copy of the same block.
+    expect([up.page.blocks[0].continued, lo.page.blocks[0].continued].filter(Boolean)).toHaveLength(1);
+    expect(changed.sort()).toEqual([a.result.key, b.result.key].sort());
+    // Done once.
+    expect(await svc.repairSeam(a.result.key, b.result.key)).toBe(false);
+  });
+});
+
+describe('cut bubbles at two seams in a row', () => {
+  it('the three pictures become one glued strip', async () => {
+    const tall = await makeMangaPage(800, 2100, [
+      { cx: 400, cy: 700, rx: 200, ry: 150, text: 'あいうえおかき' },
+      { cx: 400, cy: 1400, rx: 200, ry: 150, text: 'さしすせそたち' },
+    ]);
+    const img = await loadImage(Buffer.from(tall.bytes));
+    const piece = async (y: number) => {
+      const c = createCanvas(800, 700);
+      c.getContext('2d').drawImage(img, 0, y, 800, 700, 0, 0, 800, 700);
+      return new Uint8Array(await c.encode('png'));
+    };
+    const pics = [await piece(0), await piece(700), await piece(1400)];
+    let n = 0;
+    const blk = (y0: number, y1: number, h: number, t: string) => ({ box: toNorm([300, y0, 200, y1 - y0], 800, h), text: t, translation: t, type: 'DIALOGUE' });
+    const m = mock((body) => {
+      n++;
+      const h = Number(/The image is \d+×(\d+)/.exec(JSON.stringify(body.messages))?.[1] ?? 700);
+      if (n === 1) return JSON.stringify({ blocks: [blk(600, 700, h, 'A1')], entities: [], summary: '' });
+      if (n === 2) return JSON.stringify({ blocks: [blk(0, 80, h, 'A2'), blk(620, 700, h, 'B1')], entities: [], summary: '' });
+      if (n === 3) return JSON.stringify({ blocks: [blk(0, 80, h, 'B2')], entities: [], summary: '' });
+      return JSON.stringify({ blocks: [blk(Math.round(h * 0.2), Math.round(h * 0.8), h, n === 4 ? 'BAND1' : 'BAND2')], entities: [], summary: '' });
+    });
+    const svc = new TranslateService(memoryDb(), secrets, napiBackend, async () => settingsWith({ skipEmptyPages: false }), m.fetchImpl);
+    svc.compactTiles = false;
+    const keys: string[] = [];
+    for (const p of pics) keys.push((await svc.translate(p, 'image/png', { noSkip: true })).result.key);
+    expect(await svc.repairSeam(keys[0], keys[1])).toBe(true);
+    expect(await svc.repairSeam(keys[1], keys[2])).toBe(true);
+    const parts = await Promise.all(keys.map((k) => svc.getResult(k)));
+    const parent = parts[0]!.strip!.parent;
+    expect(parts.map((p) => p!.strip?.parent)).toEqual([parent, parent, parent]);
+    const owners = parts.flatMap((p) => p!.page.blocks.filter((b) => !b.continued).map((b) => b.translatedText));
+    expect(owners.sort()).toEqual(['BAND1', 'BAND2']);
+    expect(parts[1]!.page.blocks.map((b) => b.translatedText).sort()).toEqual(['BAND1', 'BAND2']);
+    expect((await svc.getResult(parent))!.parts).toEqual(keys);
+  });
+});

@@ -154,8 +154,32 @@ function main() {
     // No lettering found, the model was not asked: say so (⟳ translates it anyway).
     if (result.page.skippedNoText) it.overlay.setSkipped(tr('Текста не найдено'));
     it.overlay.position();
+    checkSeams(it);
     if (result.page.lama === 'engine-down' || result.page.lama === 'not-downloaded') void offerLama(result.page.lama);
     else if (artPlain(result)) void offerLama();
+  }
+
+  // ---- a bubble cut by the seam between two pictures translated one by one -----------------
+  // (the site cut its strip through a line of text, and the pictures did not arrive together to be
+  // glued): the band around the seam is translated once and goes into both pictures.
+  const seamsAsked = new Set<string>();
+  const cutAt = (r: RenderedTiles, edge: 'top' | 'bottom') =>
+    r.page.blocks.some((b) => b.translate && [b.bbox, ...(b.bubble ? [b.bubble.box] : [])].some((x) => (edge === 'top' ? x[1] <= 2 : x[1] + x[3] >= r.height - 2)));
+  function checkSeams(it: Item) {
+    if (!stitch || !it.result || it.cand.kind !== 'img') return;
+    const r0 = it.cand.el.getBoundingClientRect();
+    for (const o of items.values()) {
+      if (o === it || o.status !== 'done' || !o.result || o.cand.kind !== 'img') continue;
+      if (it.group?.includes(o.cand)) continue;
+      const r1 = o.cand.el.getBoundingClientRect();
+      if (Math.abs(r0.left - r1.left) > 2 || Math.abs(r0.width - r1.width) > 2) continue;
+      const [upper, lower] = Math.abs(r1.top - r0.bottom) <= 6 ? [it, o] : Math.abs(r0.top - r1.bottom) <= 6 ? [o, it] : [null, null];
+      if (!upper || !lower) continue;
+      const key = `${upper.result!.key}|${lower.result!.key}`;
+      if (seamsAsked.has(key) || (!cutAt(upper.result!, 'bottom') && !cutAt(lower.result!, 'top'))) continue;
+      seamsAsked.add(key);
+      void send({ type: 'repair-seam', upper: upper.result!.key, lower: lower.result!.key }).catch(() => undefined);
+    }
   }
 
   /** A problem the self-check after typesetting left for the reader (same notes as in the editor). */

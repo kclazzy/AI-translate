@@ -13,6 +13,9 @@ import {
   optimalLocalSettings,
   PROVIDER_PRESETS,
   qaModeOf,
+  languageInstruction,
+  profilesForLanguage,
+  nativeName,
   readsLocally,
   shortId,
   type AppSettings,
@@ -161,7 +164,13 @@ function ProviderEditor({ cfg, onChange, onRemove, onUse, inUse }: { cfg: Provid
   );
 }
 
-function ProfileEditor({ p, onChange }: { p: PromptProfile; onChange: (p: PromptProfile) => void }) {
+/** The instruction replaced by the ready one (one step back). */
+let instructionUndo: { id: string; text: string } | null = null;
+
+function ProfileEditor({ p, onChange, targetLang }: { p: PromptProfile; onChange: (p: PromptProfile) => void; targetLang: string }) {
+  const [, redraw] = useState(0);
+  const ready = languageInstruction(targetLang);
+  const canUndo = instructionUndo?.id === p.id && p.customPrompt === ready;
   return (
     <div className="ait-grid2">
       <Field label={tr('Название профиля')}>
@@ -188,6 +197,35 @@ function ProfileEditor({ p, onChange }: { p: PromptProfile; onChange: (p: Prompt
         <Field label={tr('Инструкции для модели')}>
           <textarea className="ait-textarea" value={p.customPrompt} onChange={(e) => onChange({ ...p, customPrompt: e.target.value })} />
         </Field>
+        <div className="ait-row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+          <button
+            type="button"
+            className="ait-btn small"
+            data-testid="lang-instruction"
+            disabled={p.customPrompt === ready}
+            title={tr('Правила для небольших локальных моделей (Qwen, Gemma, Llama): естественная речь, обращения, пунктуация и звуки этого языка. Заменяет текст выше.')}
+            onClick={() => {
+              instructionUndo = { id: p.id, text: p.customPrompt };
+              onChange({ ...p, customPrompt: ready });
+              redraw((n) => n + 1);
+            }}
+          >
+            {tr('Готовая инструкция: {0}', nativeName(targetLang))}
+          </button>
+          {canUndo ? (
+            <button
+              type="button"
+              className="ait-btn small ghost"
+              onClick={() => {
+                const back = instructionUndo!.text;
+                instructionUndo = null;
+                onChange({ ...p, customPrompt: back });
+              }}
+            >
+              {tr('Вернуть прежнюю')}
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -517,7 +555,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
             </select>
           </Field>
           <Field label={tr('Язык перевода')}>
-            <select className="ait-select" value={s.targetLang} onChange={(e) => update({ targetLang: e.target.value })}>
+            <select className="ait-select" value={s.targetLang} onChange={(e) => update({ targetLang: e.target.value, profiles: profilesForLanguage(s.profiles, s.targetLang, e.target.value) })}>
               {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
             </select>
           </Field>
@@ -744,7 +782,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
             </button>
           </div>
         </div>
-        <ProfileEditor p={profile} onChange={(np) => update({ profiles: s.profiles.map((x) => (x.id === np.id ? np : x)) })} />
+        <ProfileEditor p={profile} targetLang={s.targetLang} onChange={(np) => update({ profiles: s.profiles.map((x) => (x.id === np.id ? np : x)) })} />
         <h3>{tr('Профиль для конкретного сайта или серии')}</h3>
         <div className="ait-row">
           <Field label={tr('Сайт или серия')} hint={tr('Например: mangadex.org/title/abc')}>

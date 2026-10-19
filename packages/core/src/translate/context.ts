@@ -22,9 +22,9 @@ export interface TranslationContext {
   /** Rolling summaries of previous pages, oldest first. */
   summaries: string[];
   /** Recent dialogue lines for continuity. */
-  recentLines: { src: string; dst: string }[];
+  recentLines: { src: string; dst: string; page?: string }[];
   /** Longer lines and signs already translated in the series: the same text gets the same translation (see rememberedTranslation). */
-  memory?: { src: string; dst: string; type?: string }[];
+  memory?: { src: string; dst: string; type?: string; page?: string }[];
   styleNotes: string;
   pagesSeen: number;
   /** Pages already merged (image hash prefixes, newest last): a page translated again adds no second summary or lines. */
@@ -71,7 +71,7 @@ export interface ContextUpdate {
   summary?: string;
   lines?: { src: string; dst: string }[];
   /** Lines for the series memory (see TranslationContext.memory). */
-  memory?: { src: string; dst: string; type?: string }[];
+  memory?: { src: string; dst: string; type?: string; page?: string }[];
 }
 
 /**
@@ -111,10 +111,10 @@ export function mergeContext(ctx: TranslationContext, update: ContextUpdate): Tr
     const merged = `${summaries[0]} ${summaries[1]}`.slice(0, CONTEXT_LIMITS.summaryChars);
     summaries.splice(0, 2, merged);
   }
-  const lines = (update.lines ?? []).map((l) => ({ src: sanitizeLine(l.src, 300), dst: sanitizeLine(l.dst, 300) })).filter((l) => l.src && l.dst);
+  const lines = (update.lines ?? []).map((l) => ({ src: sanitizeLine(l.src, 300), dst: sanitizeLine(l.dst, 300), ...(update.page ? { page: update.page } : {}) })).filter((l) => l.src && l.dst);
   const recentLines = [...ctx.recentLines, ...lines].slice(-CONTEXT_LIMITS.recentLines);
   const mergedPages = update.page ? [...(ctx.mergedPages ?? []), update.page].slice(-400) : ctx.mergedPages;
-  const fresh = (update.memory ?? []).map((m) => ({ src: sanitizeLine(m.src, 300), dst: sanitizeLine(m.dst, 300), ...(m.type ? { type: m.type } : {}) })).filter((m) => m.src && m.dst);
+  const fresh = (update.memory ?? []).map((m) => ({ src: sanitizeLine(m.src, 300), dst: sanitizeLine(m.dst, 300), ...(m.type ? { type: m.type } : {}), ...(update.page ? { page: update.page } : {}) })).filter((m) => m.src && m.dst);
   const memory = [...(ctx.memory ?? []).filter((m) => !fresh.some((f) => memoryKey(f.src) === memoryKey(m.src))), ...fresh].slice(-CONTEXT_LIMITS.memory);
   return { ...ctx, entities, summaries, recentLines, ...(memory.length ? { memory } : {}), pagesSeen: ctx.pagesSeen + 1, ...(mergedPages ? { mergedPages } : {}), updatedAt: new Date().toISOString() };
 }
@@ -155,4 +155,10 @@ export function rememberedTranslation(ctx: TranslationContext | undefined, text:
     if (score >= 0.7 && (!best || score > best.score)) best = { dst: m.dst, score };
   }
   return best?.dst;
+}
+
+/** The context without what one picture added to it before (its lines and remembered texts). */
+export function withoutPage(ctx: TranslationContext, page: string): TranslationContext {
+  if (!ctx.mergedPages?.includes(page)) return ctx;
+  return { ...ctx, recentLines: ctx.recentLines.filter((l) => l.page !== page), ...(ctx.memory ? { memory: ctx.memory.filter((m) => m.page !== page) } : {}) };
 }
