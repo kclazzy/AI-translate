@@ -540,6 +540,7 @@ describe('two pages of a series at once (conveyor)', () => {
     const svc = new TranslateService(memoryDb(), secrets, napiBackend, async () => settingsWith({ sourceLang: 'en', twoStepTranslation: true }), m.fetchImpl);
     svc.compactTiles = false;
     const url = 'https://site.example/manga/one/ch1';
+    // Started together: the one started first keeps its turn (taken before anything is awaited).
     await Promise.all([svc.translate(one.bytes, 'image/png', { sourceUrl: url }), svc.translate(two.bytes, 'image/png', { sourceUrl: url })]);
     expect(order).toContain('translate-2-with-1');
     expect(order.indexOf('translate-1')).toBeLessThan(order.indexOf('translate-2-with-1'));
@@ -569,6 +570,7 @@ describe('a stuck page does not hold the next one', () => {
     svc.turnWaitMs = 300;
     const url = 'https://site.example/manga/one/ch1';
     const first = svc.translate(one.bytes, 'image/png', { sourceUrl: url });
+    while (!stuckText) await new Promise((r) => setTimeout(r, 5));
     const second = await svc.translate(two.bytes, 'image/png', { sourceUrl: url });
     expect(second.result.page.blocks.map((b) => b.translatedText)).toEqual(['RU Second line.']);
     (stuckText as unknown as () => void)();

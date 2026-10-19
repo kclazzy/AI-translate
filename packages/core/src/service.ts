@@ -209,6 +209,29 @@ export class TranslateService {
     if (realMime === 'image/tiff') throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: tr('TIFF браузер не открывает — сохраните картинку как PNG или JPG.') });
     if (!realMime) throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: mime });
     const seriesKey = opts.seriesKey ?? seriesKeyFromUrl(opts.sourceUrl);
+    // Pages of one series in order: this one may read while the previous is still being finished,
+    // but translates with the context the previous one leaves. The turn is taken at once (before any
+    // await), so pages started one after another keep their order.
+    let releaseTurn = () => {};
+    const turnKey = seriesKey && !opts.generic ? seriesKey : undefined;
+    const before = turnKey ? this.turns.get(turnKey) : undefined;
+    if (turnKey) {
+      const mine = new Promise<void>((r) => (releaseTurn = r));
+      this.turns.set(turnKey, mine);
+      const done = releaseTurn;
+      releaseTurn = () => {
+        done();
+        if (this.turns.get(turnKey) === mine) this.turns.delete(turnKey);
+      };
+    }
+    try {
+      return await this.translateInTurn(bytes, realMime, opts, seriesKey, tStart, before, releaseTurn);
+    } finally {
+      releaseTurn();
+    }
+  }
+
+  private async translateInTurn(bytes: Uint8Array, realMime: string, opts: TranslateOptions, seriesKey: string | undefined, tStart: number, before: Promise<void> | undefined, releaseTurn: () => void): Promise<{ result: StoredResult; cached: boolean }> {
     const { settings, config } = await this.config(seriesKey);
     if (opts.keepAliveMin !== undefined) {
       for (const k of ['vision', 'translator'] as const) {
@@ -240,20 +263,6 @@ export class TranslateService {
     const prepared = await this.takeAhead(aheadId);
     const context = opts.generic ? undefined : await this.getContext(seriesKey);
     let key = baseKey;
-    // Pages of one series in order: this one may read while the previous is still being finished,
-    // but translates with the context the previous one leaves.
-    let releaseTurn = () => {};
-    const turnKey = seriesKey && !opts.generic ? seriesKey : undefined;
-    const before = turnKey ? this.turns.get(turnKey) : undefined;
-    if (turnKey) {
-      const mine = new Promise<void>((r) => (releaseTurn = r));
-      this.turns.set(turnKey, mine);
-      const done = releaseTurn;
-      releaseTurn = () => {
-        done();
-        if (this.turns.get(turnKey) === mine) this.turns.delete(turnKey);
-      };
-    }
     // Never wait for ever: a previous page that is stuck (or slow) does not hold this one; it
     // translates with the context there is.
     const waitMs = this.turnWaitMs ?? (config.vision && isLocalProvider(config.vision) ? TURN_WAIT_LOCAL_MS : TURN_WAIT_MS);
