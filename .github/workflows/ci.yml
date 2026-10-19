@@ -29,6 +29,8 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk fonts-dejavu-core >/dev/null
       - name: Unit and pipeline tests (core, including the golden set)
         run: pnpm --filter @ait/core test
+      - name: Extension unit tests (video card lane)
+        run: pnpm --filter @ait/extension test
       - name: Golden set pictures and report (when something failed)
         if: failure()
         uses: actions/upload-artifact@v4

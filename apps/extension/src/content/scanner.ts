@@ -125,17 +125,35 @@ export function candidateAt(x: number, y: number, min: number): Candidate | null
   return null;
 }
 
+/** A canvas as a data URL, encoded off the main thread (toDataURL would freeze scrolling on a big page). */
+function canvasData(canvas: HTMLCanvasElement): Promise<string> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) return reject(new Error('toBlob'));
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(blob);
+    }, 'image/png');
+  });
+}
+
 /** Read inline image data when fetching by URL is impossible (blob:, same-origin canvas). */
 export async function inlineData(c: Candidate): Promise<string | undefined> {
   try {
-    if (c.kind === 'canvas') return (c.el as HTMLCanvasElement).toDataURL('image/png');
+    if (c.kind === 'canvas') return await canvasData(c.el as HTMLCanvasElement);
     if (c.kind === 'img' && c.src?.startsWith('blob:')) {
       const img = c.el as HTMLImageElement;
       const canvas = document.createElement('canvas');
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
-      canvas.getContext('2d')!.drawImage(img, 0, 0);
-      return canvas.toDataURL('image/png');
+      try {
+        canvas.getContext('2d')!.drawImage(img, 0, 0);
+        return await canvasData(canvas);
+      } finally {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
     }
   } catch {
     /* tainted canvas: the background falls back to a screenshot */

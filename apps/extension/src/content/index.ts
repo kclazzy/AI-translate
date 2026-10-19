@@ -473,7 +473,11 @@ function main() {
   async function neighboursBelow(last: Candidate, priority: number): Promise<Pending[]> {
     const out: Pending[] = [];
     if (dead) return out;
-    const col = scanPage(minSize).filter((c) => c.kind === 'img' && !dismissed.has(c.el));
+    // Pictures only (no scan of every block for backgrounds: that forces a layout of the whole page).
+    const col = [...document.images].flatMap((el) => {
+      const c = dismissed.has(el) ? null : asCandidate(el, minSize);
+      return c ? [c] : [];
+    });
     let cur = last.el.getBoundingClientRect();
     for (let k = 0; k < AHEAD; k++) {
       const r0 = cur;

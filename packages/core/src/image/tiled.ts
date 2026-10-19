@@ -1,6 +1,6 @@
 import { AppError } from '../errors';
 import type { Box } from '../types';
-import { MAX_PIXELS, TILE_HEIGHT, type AnyCanvas, type DecodedImage, type ImageBackend, type PixelData } from './backend';
+import { MAX_PIXELS, releaseCanvas, TILE_HEIGHT, type AnyCanvas, type DecodedImage, type ImageBackend, type PixelData } from './backend';
 
 export interface Tile {
   y: number;
@@ -164,6 +164,12 @@ export class TiledImage {
   }
 
   /** Copy into one canvas (only for images that fit). */
+  /** Let the tiles' canvases go (see releaseCanvas); the picture is not used after this. */
+  dispose(): void {
+    for (const t of this.tiles) releaseCanvas(t.canvas);
+    this.pixels = null;
+  }
+
   toSingleCanvas(): AnyCanvas {
     const c = this.backend.createCanvas(this.width, this.height);
     const ctx = c.getContext('2d');

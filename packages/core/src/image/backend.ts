@@ -56,6 +56,20 @@ export const browserBackend: ImageBackend = {
   },
 };
 
+/**
+ * Let a canvas go at once: a browser keeps a canvas's memory (often on the video card) until it is
+ * collected, and a long chapter makes hundreds of them. Shrinking it frees that now.
+ */
+export function releaseCanvas(c: AnyCanvas | null | undefined): void {
+  if (!c) return;
+  try {
+    c.width = 0;
+    c.height = 0;
+  } catch {
+    /* a canvas that cannot be resized is left to the collector */
+  }
+}
+
 export const MAX_CANVAS_SIDE = 16384;
 export const MAX_PIXELS = 150_000_000;
 export const TILE_HEIGHT = 4096;

@@ -818,6 +818,7 @@
  "С учётом регистра": "Match case",
  "С японскими honorifics": "With Japanese honorifics",
  "Сайт или серия": "Site or series",
+ "Сайт не отдал картинку за {0} с.": "The site did not send the picture within {0} s.",
  "Самопроверка": "Self-check",
  "Самопроверка после вёрстки": "Self-check after typesetting",
  "Самопроверка: вкл": "Self-check: on",

@@ -1,5 +1,5 @@
 import type { Inpainter, PixelData } from '@ait/core';
-import { GPU_NETS, IDLE_RELEASE_MS, onGpu } from './gpuLane';
+import { GPU_NETS, GpuTimeout, IDLE_RELEASE_MS, NETS_LIMIT_MS, NETS_LOAD_LIMIT_MS, onGpu, withLimit } from './gpuLane';
 import { cached, downloadWithRuntime, LAMA_URL, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, resizePixels, type Ort } from './ortRuntime';
 
 /**
@@ -24,6 +24,16 @@ export async function deleteLama(): Promise<void> {
   await removeModel([LAMA_URL]);
 }
 
+/** After a run on the card stopped answering: on the processor from now on (until the extension restarts). */
+let gpuBroken = false;
+
+function abandon(): void {
+  gpuBroken = true;
+  const s = session;
+  session = null;
+  void s?.then((L) => L.s.release()).catch(() => undefined);
+}
+
 /** Free the session (video memory); the next picture loads it again. */
 export async function releaseLama(): Promise<void> {
   const s = session;
@@ -44,7 +54,7 @@ function load() {
     if (!hit || !(await cached(ORT_WASM_URL))) throw new Error('LaMa is not downloaded');
     const ort = await loadOrt();
     const bytes = new Uint8Array(await hit.arrayBuffer());
-    const gpu = typeof navigator !== 'undefined' && 'gpu' in navigator;
+    const gpu = !gpuBroken && typeof navigator !== 'undefined' && 'gpu' in navigator;
     let s: import('onnxruntime-web').InferenceSession;
     try {
       s = await ort.InferenceSession.create(bytes, { executionProviders: gpu ? ['webgpu', 'wasm'] : ['wasm'] });
@@ -62,7 +72,14 @@ function load() {
 const resize = resizePixels;
 
 export const lamaInpainter: Inpainter = (img, mask) => {
-  const job = chain.then(() => onGpu(GPU_NETS, () => runOnce(img, mask)));
+  const limitMs = session ? NETS_LIMIT_MS : NETS_LOAD_LIMIT_MS;
+  const job = chain.then(() =>
+    (gpuBroken ? withLimit(() => runOnce(img, mask), NETS_LOAD_LIMIT_MS) : onGpu(GPU_NETS, () => runOnce(img, mask), { limitMs })).catch((e: unknown) => {
+      // The card stopped answering: this picture is painted over simply, the next ones use the processor.
+      if (e instanceof GpuTimeout) abandon();
+      throw e;
+    }),
+  );
   chain = job.catch(() => undefined);
   void job.finally(() => {
     // Not used for a while: give the video memory back to the model.

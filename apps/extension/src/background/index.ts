@@ -328,7 +328,28 @@ async function readCapped(res: Response): Promise<Uint8Array> {
  * only when the picture is on the page's own site. Addresses inside the local network are fetched
  * only for a page on that same address (a site cannot use the extension to read the user's router).
  */
-async function fetchImage(src: string, pageUrl: string): Promise<{ bytes: Uint8Array; mime: string }> {
+/** Picture downloads at once, over all tabs: a chapter of 300 pictures must not open 300 connections. */
+const FETCH_SLOTS = 3;
+let fetching = 0;
+const fetchWaiting: (() => void)[] = [];
+
+/** A picture server that stops answering must not hold the queue: the download gives up after this. */
+const FETCH_TIMEOUT_MS = 30_000;
+/** A neighbour fetched only to look at the seam: not worth waiting for (it goes without it). */
+const NEIGHBOUR_FETCH_TIMEOUT_MS = 5_000;
+
+async function fetchImage(src: string, pageUrl: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<{ bytes: Uint8Array; mime: string }> {
+  while (fetching >= FETCH_SLOTS) await new Promise<void>((r) => fetchWaiting.push(r));
+  fetching++;
+  try {
+    return await fetchImageNow(src, pageUrl, timeoutMs);
+  } finally {
+    fetching--;
+    fetchWaiting.shift()?.();
+  }
+}
+
+async function fetchImageNow(src: string, pageUrl: string, timeoutMs: number): Promise<{ bytes: Uint8Array; mime: string }> {
   if (src.startsWith('data:')) return dataUrlToBytes(src);
   let url: URL;
   try {
@@ -344,12 +365,18 @@ async function fetchImage(src: string, pageUrl: string): Promise<{ bytes: Uint8A
   const sameSite = !!pageHost && siteOf(url.hostname) === siteOf(pageHost);
   const rule = pageUrl.startsWith('http') ? await acquireReferer(url.hostname, pageUrl) : null;
   try {
-    const res = await fetch(url.href, { credentials: sameSite ? 'include' : 'omit', cache: 'force-cache' });
+    // The time limit covers the body too (a stream that stalls half way).
+    const res = await fetch(url.href, { credentials: sameSite ? 'include' : 'omit', cache: 'force-cache', signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new AppError('IMAGE_FETCH_FAILED', { detail: `HTTP ${res.status}` });
     const len = Number(res.headers.get('content-length') ?? 0);
     if (len > MAX_FETCH_BYTES) throw new AppError('IMAGE_TOO_LARGE', { retryable: false, detail: tr('Картинка больше {0} МБ — такую не перевести.', MAX_FETCH_BYTES / 1024 / 1024) });
     const bytes = await readCapped(res);
     return { bytes, mime: res.headers.get('content-type') ?? '' };
+  } catch (e) {
+    if (e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+      throw new AppError('IMAGE_FETCH_FAILED', { detail: tr('Сайт не отдал картинку за {0} с.', Math.round(timeoutMs / 1000)) });
+    }
+    throw e;
   } finally {
     if (rule) releaseReferer(url.hostname, rule);
   }
@@ -482,7 +509,7 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
         for (const [i, image] of msg.images.entries()) {
           let got: { bytes: Uint8Array; mime: string } | null = null;
           if (image.dataUrl) got = dataUrlToBytes(image.dataUrl);
-          else if (image.src) got = await fetchImage(image.src, msg.pageUrl).catch(() => null);
+          else if (image.src) got = await fetchImage(image.src, msg.pageUrl, i >= own ? NEIGHBOUR_FETCH_TIMEOUT_MS : FETCH_TIMEOUT_MS).catch(() => null);
           if (!got && i >= own) {
             // A neighbour that cannot be fetched (not loaded yet, protected): go without it.
             images = msg.images.slice(0, i);

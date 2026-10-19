@@ -1,4 +1,4 @@
-import type { ImageBackend } from '../image/backend';
+import { releaseCanvas, type ImageBackend } from '../image/backend';
 import { clampBox, type TiledImage } from '../image/tiled';
 import type { Box } from '../types';
 import { extractJson, findBlocksArray } from '../translate/parse';
@@ -101,7 +101,11 @@ export async function drawCollage(backend: ImageBackend, image: TiledImage, plan
     ctx.textBaseline = 'middle';
     ctx.fillText(String(p.id), ax - LABEL / 2 - 1, ay + 14);
   }
-  return { jpeg: await backend.encode(canvas, 'image/jpeg', 0.9), width: plan.width, height: plan.height };
+  try {
+    return { jpeg: await backend.encode(canvas, 'image/jpeg', 0.9), width: plan.width, height: plan.height };
+  } finally {
+    releaseCanvas(canvas);
+  }
 }
 
 /**

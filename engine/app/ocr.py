@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import re
+import threading
 from typing import Protocol
 
 import cv2
@@ -25,6 +26,16 @@ def crop_block(rgb: np.ndarray, b: RawBlock, pad: int = 6) -> np.ndarray:
     x, y, w, h = b.bbox
     return rgb[max(0, y - pad) : min(H, y + h + pad), max(0, x - pad) : min(W, x + w + pad)]
 
+
+
+# The OCR models are not safe to call from two threads at once (two pages in work): one call at a time,
+# loading included. Runs inside asyncio.to_thread, so the event loop never waits on it.
+_ocr_lock = threading.Lock()
+
+
+def _locked(fn, *args):
+    with _ocr_lock:
+        return fn(*args)
 
 class OcrProvider(Protocol):
     name: str
@@ -100,10 +111,10 @@ class MangaOcrProvider:
     async def recognize(self, rgb: np.ndarray, blocks: list[RawBlock], lang_hint: str) -> list[Usage]:
         import asyncio
 
-        model = await asyncio.to_thread(self._get)
+        model = await asyncio.to_thread(_locked, self._get)
         for b in blocks:
             crop = Image.fromarray(crop_block(rgb, b))
-            b.text = sanitize(await asyncio.to_thread(model, crop), 1000)
+            b.text = sanitize(await asyncio.to_thread(_locked, model, crop), 1000)
         return []
 
 
@@ -128,10 +139,10 @@ class PaddleOcrProvider:
     async def recognize(self, rgb: np.ndarray, blocks: list[RawBlock], lang_hint: str) -> list[Usage]:
         import asyncio
 
-        model = await asyncio.to_thread(self._get, lang_hint)
+        model = await asyncio.to_thread(_locked, self._get, lang_hint)
         for b in blocks:
             crop = crop_block(rgb, b)
-            result = await asyncio.to_thread(model.ocr, crop, True)  # type: ignore[attr-defined]
+            result = await asyncio.to_thread(_locked, model.ocr, crop, True)  # type: ignore[attr-defined]
             lines: list[str] = []
             for page in result or []:
                 for item in page or []:

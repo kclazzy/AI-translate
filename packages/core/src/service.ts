@@ -1,5 +1,5 @@
 import { AppError, toAppError } from './errors';
-import { losslessWebp, type ImageBackend, type ImageMime } from './image/backend';
+import { losslessWebp, releaseCanvas, type ImageBackend, type ImageMime } from './image/backend';
 import { TiledImage } from './image/tiled';
 import type { FetchLike } from './llm/types';
 import { pipelineConfigFromSettings, pipelineHash, type PipelineConfig } from './pipeline/config';
@@ -165,6 +165,8 @@ export class TranslateService {
   private deriving = new Map<string, Promise<unknown>>();
   /** Per series: done when the latest started page has its context merged (see freshContext). */
   private turns = new Map<string, Promise<void>>();
+  /** How long a page waits for the previous one's context (tests make it short). */
+  turnWaitMs?: number;
   /** The last speech line at the bottom of the series' latest page (a sentence may go on on the next one). */
   private tails = new Map<string, { key: string; blockId: string; src: string; dst: string; type: TextBlock['textType']; at: number }>();
   private compactQueue: string[] = [];
@@ -252,8 +254,11 @@ export class TranslateService {
         if (this.turns.get(turnKey) === mine) this.turns.delete(turnKey);
       };
     }
+    // Never wait for ever: a previous page that is stuck (or slow) does not hold this one; it
+    // translates with the context there is.
+    const waitMs = this.turnWaitMs ?? (config.vision && isLocalProvider(config.vision) ? TURN_WAIT_LOCAL_MS : TURN_WAIT_MS);
     const freshContext = before ? async () => {
-      await before;
+      await waitFor(before, waitMs, opts.signal);
       return this.getContext(seriesKey);
     } : undefined;
     try {
@@ -268,6 +273,17 @@ export class TranslateService {
       if (seriesKey && !opts.generic) await this.joinWithPrevious(seriesKey, out.page, config, context, opts.signal).catch((e) => {
         if ((e as { code?: string }).code === 'CANCELLED') throw e;
       });
+      // The series context as soon as it is known (before drawing and storing).
+      if (seriesKey && !opts.generic) {
+        if (out.contextUpdate) {
+          // Merge into the latest stored context: another page of the series may have finished meanwhile.
+          const update = out.contextUpdate;
+          await this.locks.run(`context:${seriesKey}`, async () => {
+            const latest = (await this.getContext(seriesKey)) ?? emptyContext(seriesKey, seriesKey);
+            await this.db.put('contexts', seriesKey, mergeContext(latest, update));
+          });
+        } else if (out.context) await this.db.put('contexts', seriesKey, out.context);
+      }
       opts.onStage?.({ stage: 'rendering' });
       const rendered = await renderOutput(this.backend, out, styleDefaultsFor(config, settings.fonts));
       const tStore = performance.now();
@@ -292,18 +308,10 @@ export class TranslateService {
       };
       await this.putResult(key, result);
       if (seriesKey && !opts.generic) this.rememberTail(seriesKey, key, page);
+      // Context merged and the sentence tail known: the next page of the series may go on.
+      releaseTurn();
       void this.journal({ key, page, storeMs: Math.round(performance.now() - tStore), vision: config.vision, force: opts.force }).catch(() => undefined);
       if (out.reviewLater) this.queueReview({ key, seriesKey, config, context: out.context ?? context, blocks: structuredClone(page.blocks) });
-      if (seriesKey && !opts.generic) {
-        if (out.contextUpdate) {
-          // Merge into the latest stored context: another page of the series may have finished meanwhile.
-          const update = out.contextUpdate;
-          await this.locks.run(`context:${seriesKey}`, async () => {
-            const latest = (await this.getContext(seriesKey)) ?? emptyContext(seriesKey, seriesKey);
-            await this.db.put('contexts', seriesKey, mergeContext(latest, update));
-          });
-        } else if (out.context) await this.db.put('contexts', seriesKey, out.context);
-      }
       await this.recordUsage(rendered.page.usage);
       if (settings.saveHistory) await this.addHistory({ key, url: opts.sourceUrl, title: opts.title, date: now, pages: 1, targetLang: config.targetLang, model: (config.translator ?? config.vision)?.model ?? 'engine', status: 'done' });
       this.scheduleCompact(key);
@@ -381,7 +389,10 @@ export class TranslateService {
     // The pictures' own lines are in the context: the band repeats them and must not take them for echoes.
     let context = await this.getContext(seriesKey);
     for (const m of members) if (context && m.page.pageId) context = withoutPage(context, m.page.pageId.slice(0, 16));
-    const bytes = await this.backend.encode(band.toSingleCanvas(), 'image/png');
+    const single = band.toSingleCanvas();
+    const bytes = await this.backend.encode(single, 'image/png');
+    releaseCanvas(single);
+    band.dispose();
     const out = await runPipeline({ bytes, mime: 'image/png', config, context, signal: opts.signal, noSkip: true }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector });
     // Nothing read in the band: the pictures keep what they have.
     if (!out.page.blocks.length) return false;
@@ -596,9 +607,15 @@ export class TranslateService {
     const glue = async (chunk: number[]): Promise<Uint8Array> => {
       const glued = await stitchChunk(this.backend, todoParts, plan, chunk);
       const band = this.backend.createCanvas(glued.width, glued.height);
-      const bctx = band.getContext('2d');
-      for (const t of glued.tiles) bctx.drawImage(t.canvas, 0, t.y);
-      return this.backend.encode(band, 'image/png');
+      try {
+        const bctx = band.getContext('2d');
+        for (const t of glued.tiles) bctx.drawImage(t.canvas, 0, t.y);
+        return await this.backend.encode(band, 'image/png');
+      } finally {
+        // Only the bytes go on: a chapter of glued chunks must not pile up canvases.
+        glued.dispose();
+        releaseCanvas(band);
+      }
     };
     // The next chunk is glued and made ready (decoded, checked for text) while the model works on
     // this one; only one chunk ahead, so memory stays bounded.
@@ -643,7 +660,14 @@ export class TranslateService {
   private async deriveParts(parent: StoredResult, spans: { y: number; h: number }[], originals?: StripPart[]): Promise<StoredResult[]> {
     const rendered = await tilesToImage(this.backend, parent.page.width, parent.page.height, parent.rendered);
     const cleaned = await tilesToImage(this.backend, parent.page.width, parent.page.height, parent.cleaned);
-    const encode = (img: TiledImage, mime: ImageMime) => Promise.all(img.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, mime) })));
+    const encode = async (img: TiledImage, mime: ImageMime) => {
+      try {
+        return await Promise.all(img.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, mime) })));
+      } finally {
+        // A crop is encoded once and not used again.
+        img.dispose();
+      }
+    };
     const out: StoredResult[] = [];
     for (const [i, s] of spans.entries()) {
       // A strip cut again (after an edit, or one glued at a seam) keeps the keys of its pictures.
@@ -666,6 +690,8 @@ export class TranslateService {
       this.scheduleCompact(key);
       out.push(r);
     }
+    rendered.dispose();
+    cleaned.dispose();
     await this.putResult(parent.key, { ...parent, parts: out.map((r) => r.key) });
     return out;
   }
@@ -1058,6 +1084,7 @@ export class TranslateService {
             const c = this.backend.createCanvas(d.width, d.height);
             c.getContext('2d').drawImage(d.source, 0, 0);
             const webp = await this.backend.encode(c, 'image/webp', 1);
+            releaseCanvas(c);
             // Only when it is really smaller.
             return webp.length < t.bytes.length && sniffImageMime(webp) === 'image/webp' ? { y: t.y, h: t.h, bytes: webp } : t;
           } finally {
@@ -1172,6 +1199,27 @@ function untranslatedOf(page: PageResult): { untranslated?: string[]; unsure?: s
 }
 
 /** A block cut by the picture's top or bottom edge: its bubble (or its text) reaches the edge. */
+/** How long a page waits for the previous page of its series to leave its context. */
+export const TURN_WAIT_LOCAL_MS = 20_000;
+export const TURN_WAIT_MS = 60_000;
+
+/** Wait for `p`, but at most `ms` (then go on), and not after `signal` aborts (then throw). */
+async function waitFor(p: Promise<unknown>, ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw toAppError(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    await Promise.race([
+      p.catch(() => undefined),
+      new Promise<void>((done) => (timer = setTimeout(done, ms))),
+      new Promise<never>((_, stop) => signal?.addEventListener('abort', (onAbort = () => stop(toAppError(signal.reason ?? new DOMException('Aborted', 'AbortError')))), { once: true })),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+  }
+}
+
 export function touchesEdge(b: TextBlock, height: number, edge: 'top' | 'bottom', within = 2): boolean {
   if (!b.translate && b.textType === 'SFX') return false;
   const boxes = [b.bbox, ...(b.bubble ? [b.bubble.box] : [])];
@@ -1221,11 +1269,14 @@ export async function tilesToImage(backend: ImageBackend, width: number, height:
   for (const t of tiles) {
     // PNG, or lossless WebP once re-stored (see TranslateService.compact).
     const img = await backend.decode(t.bytes, sniffImageMime(t.bytes) ?? 'image/png');
-    for (const tile of image.tiles) {
-      if (tile.y + tile.h <= t.y || tile.y >= t.y + t.h) continue;
-      tile.canvas.getContext('2d').drawImage(img.source, 0, t.y - tile.y);
+    try {
+      for (const tile of image.tiles) {
+        if (tile.y + tile.h <= t.y || tile.y >= t.y + t.h) continue;
+        tile.canvas.getContext('2d').drawImage(img.source, 0, t.y - tile.y);
+      }
+    } finally {
+      img.close?.();
     }
-    img.close?.();
   }
   return image;
 }

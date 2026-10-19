@@ -546,6 +546,36 @@ describe('two pages of a series at once (conveyor)', () => {
   });
 });
 
+describe('a stuck page does not hold the next one', () => {
+  it('the next page of the series waits a limited time for its context, then goes on', async () => {
+    const one = await makeMangaPage(800, 1100, [{ cx: 400, cy: 300, rx: 150, ry: 120, text: 'あいうえ' }]);
+    const two = await makeMangaPage(800, 1000, [{ cx: 400, cy: 300, rx: 150, ry: 120, text: 'かきくけ' }]);
+    let stuckText: (() => void) | null = null;
+    const base = mock((body) => {
+      const blocks = JSON.parse(/<blocks>\n(.*)\n<\/blocks>/s.exec(body.messages.at(-1).content)?.[1] ?? '[]');
+      if (body.messages.every((x: { content: unknown }) => typeof x.content === 'string')) return JSON.stringify({ translations: blocks.map((b: any) => ({ id: b.id, text: `RU ${b.text}` })), entities: [], summary: '' });
+      const text = JSON.stringify(body.messages).includes('800×1000') ? 'SECOND LINE.' : 'FIRST LINE HERE.';
+      return JSON.stringify({ blocks: [{ box: [375, 200, 625, 345], text, type: 'DIALOGUE' }] });
+    });
+    // The first page's translation step hangs (a server that stopped answering) until the test lets it go.
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const isText = body.messages.every((x: { content: unknown }) => typeof x.content === 'string');
+      if (isText && /FIRST LINE/i.test(JSON.stringify(body.messages.at(-1)))) await new Promise<void>((r) => (stuckText = r));
+      return base.fetchImpl(url, init);
+    }) as any;
+    const svc = new TranslateService(memoryDb(), secrets, napiBackend, async () => settingsWith({ sourceLang: 'en', twoStepTranslation: true }), fetchImpl);
+    svc.compactTiles = false;
+    svc.turnWaitMs = 300;
+    const url = 'https://site.example/manga/one/ch1';
+    const first = svc.translate(one.bytes, 'image/png', { sourceUrl: url });
+    const second = await svc.translate(two.bytes, 'image/png', { sourceUrl: url });
+    expect(second.result.page.blocks.map((b) => b.translatedText)).toEqual(['RU Second line.']);
+    (stuckText as unknown as () => void)();
+    await first;
+  });
+});
+
 describe('the picture below goes along to look at the seam', () => {
   // A bubble of three lines on a white page; the site cut the strip right through the middle line.
   async function bubblePage(lines: { y: number; text: string }[], cy: number) {

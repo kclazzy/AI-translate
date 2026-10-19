@@ -95,6 +95,42 @@ def _map_http_error(resp: httpx.Response, label: str) -> AppError:
     return AppError("TRANSLATION_FAILED", retryable=False, detail=detail)
 
 
+# One pooled HTTP client per event loop and transport: every request of a chapter goes over kept-alive
+# connections instead of opening (and closing) its own; the time limit is set per request.
+_clients: dict[tuple[int, int], httpx.AsyncClient] = {}
+
+
+def _shared_client(transport: httpx.AsyncBaseTransport | None) -> httpx.AsyncClient:
+    loop = asyncio.get_running_loop()
+    key = (id(loop), id(transport))
+    client = _clients.get(key)
+    if client is None or client.is_closed:
+        # Clients of loops that have ended (tests start one per test) are dropped.
+        for k in [k for k, c in _clients.items() if c.is_closed or k[0] != id(loop)]:
+            _clients.pop(k, None)
+        client = httpx.AsyncClient(transport=transport, limits=httpx.Limits(max_connections=8, max_keepalive_connections=4))
+        _clients[key] = client
+    return client
+
+
+async def close_clients() -> None:
+    """Close the pooled clients (engine shutdown)."""
+    for c in list(_clients.values()):
+        await c.aclose()
+    _clients.clear()
+
+
+class _TimedClient:
+    """The shared client with this request's time limit."""
+
+    def __init__(self, client: httpx.AsyncClient, timeout: float):
+        self._client = client
+        self._timeout = timeout
+
+    async def post(self, url: str, **kw: Any) -> httpx.Response:
+        return await self._client.post(url, timeout=self._timeout, **kw)
+
+
 class LlmClient:
     """One client for both API styles. `transport` lets tests plug in a mock server."""
 
@@ -105,15 +141,15 @@ class LlmClient:
     async def complete(self, system: str, messages: list[dict[str, Any]], *, json_mode: bool = True, max_tokens: int = 4096, temperature: float | None = None) -> Completion:
         local = is_local_url(self.cfg.base_url)
         timeout = (self.cfg.timeout_ms or (600_000 if local else 120_000)) / 1000
-        async with httpx.AsyncClient(timeout=timeout, transport=self.transport) as client:
-            try:
-                if self.cfg.kind == "anthropic":
-                    return await self._anthropic(client, system, messages, json_mode, max_tokens, temperature)
-                return await self._openai(client, system, messages, json_mode, max_tokens, temperature)
-            except httpx.TimeoutException as exc:
-                raise AppError("TIMEOUT", detail=self.cfg.label) from exc
-            except httpx.TransportError as exc:
-                raise AppError("PROVIDER_UNAVAILABLE", detail=f"{self.cfg.label}: {exc}") from exc
+        client: Any = _TimedClient(_shared_client(self.transport), timeout)
+        try:
+            if self.cfg.kind == "anthropic":
+                return await self._anthropic(client, system, messages, json_mode, max_tokens, temperature)
+            return await self._openai(client, system, messages, json_mode, max_tokens, temperature)
+        except httpx.TimeoutException as exc:
+            raise AppError("TIMEOUT", detail=self.cfg.label) from exc
+        except httpx.TransportError as exc:
+            raise AppError("PROVIDER_UNAVAILABLE", detail=f"{self.cfg.label}: {exc}") from exc
 
     async def _openai(self, client: httpx.AsyncClient, system: str, messages: list[dict[str, Any]], json_mode: bool, max_tokens: int, temperature: float | None) -> Completion:
         local = is_local_url(self.cfg.base_url)

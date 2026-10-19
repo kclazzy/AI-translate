@@ -7,6 +7,7 @@ import json
 import logging
 import time
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -19,6 +20,7 @@ from .config import Settings
 from .entitlements import check_entitlement
 from .errors import AppError
 from .jobs import JobManager
+from .llm import close_clients
 from .pipeline import Engine
 from .schemas import TranslateOptions
 from .translation import translate_blocks
@@ -77,7 +79,13 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
     engine = Engine(settings, transport)
     jobs = JobManager()
     limiter = RateLimiter(per_minute=120)
-    app = FastAPI(title="AI Translate engine", version=__version__, docs_url=None, redoc_url=None, openapi_url="/v1/openapi.json")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        yield
+        # The pooled connections to the model servers (see llm._shared_client).
+        await close_clients()
+
+    app = FastAPI(title="AI Translate engine", version=__version__, docs_url=None, redoc_url=None, openapi_url="/v1/openapi.json", lifespan=lifespan)
     app.state.engine = engine
     app.state.jobs = jobs
 

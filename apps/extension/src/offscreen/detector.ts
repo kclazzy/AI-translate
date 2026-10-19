@@ -1,5 +1,5 @@
 import { DETECTOR_SIZE, parseDetectorOutputs, type Detection, type PixelData, type RawTensor, type TextDetector } from '@ait/core';
-import { GPU_NETS, IDLE_RELEASE_MS, onGpu } from './gpuLane';
+import { GPU_NETS, GpuTimeout, IDLE_RELEASE_MS, NETS_LIMIT_MS, NETS_LOAD_LIMIT_MS, onGpu, withLimit } from './gpuLane';
 import { cached, DETECTOR_FP32_URL, DETECTOR_URL, downloadWithRuntime, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, resizePixels } from './ortRuntime';
 
 /**
@@ -45,7 +45,7 @@ function load(prefer?: 'wasm'): Promise<Loaded> {
   session ??= (async () => {
     const ort = await loadOrt();
     const cache = await caches.open(MODELS_CACHE);
-    const gpu = prefer !== 'wasm' && typeof navigator !== 'undefined' && 'gpu' in navigator;
+    const gpu = prefer !== 'wasm' && !gpuBroken && typeof navigator !== 'undefined' && 'gpu' in navigator;
     let last: unknown = new Error('The text detector is not downloaded');
     for (const url of [DETECTOR_URL, DETECTOR_FP32_URL]) {
       const hit = await cache.match(url);
@@ -93,7 +93,10 @@ export const textDetector: TextDetector = (img) => {
   clearTimeout(idle);
   const queued = performance.now();
   let started = 0;
-  const job = chain.then(() => onGpu(GPU_NETS, async () => {
+  const limitMs = session ? NETS_LIMIT_MS : NETS_LOAD_LIMIT_MS;
+  // On the processor (after the card failed) it does not need the card's turn.
+  const turn = <T>(fn: () => Promise<T>) => (gpuBroken ? withLimit(fn, NETS_LOAD_LIMIT_MS) : onGpu(GPU_NETS, fn, { limitMs }));
+  const job = chain.then(() => turn(async () => {
     started = performance.now();
     try {
       return await runOnce(img);
@@ -105,6 +108,11 @@ export const textDetector: TextDetector = (img) => {
       await load('wasm');
       return runOnce(img);
     }
+  }).catch((e: unknown) => {
+    // The card stopped answering: that session is not used again, the next pictures go on the
+    // processor (the pipeline goes on without the detector for this one).
+    if (e instanceof GpuTimeout) abandon();
+    throw e;
   }));
   chain = job.catch(() => undefined);
   void job.finally(() => {
@@ -117,6 +125,17 @@ export const textDetector: TextDetector = (img) => {
     return { boxes, waitMs: started ? started - queued : 0, runMs: started ? performance.now() - started : 0, ...(ep ? { ep } : {}) };
   });
 };
+
+/** After a run on the card stopped answering: on the processor from now on (until the extension restarts). */
+let gpuBroken = false;
+
+function abandon(): void {
+  gpuBroken = true;
+  const s = session;
+  session = null;
+  // Not awaited: the stuck session may never answer.
+  void s?.then((L) => L.s.release()).catch(() => undefined);
+}
 
 /** Free the session (memory on the video card); the next picture loads it again. */
 export async function releaseDetector(): Promise<void> {
