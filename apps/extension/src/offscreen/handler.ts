@@ -458,6 +458,13 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
                 force: msg.force,
                 signal: watch.signal,
                 keepAliveMin: local ? CHAPTER_KEEP_ALIVE_MIN : undefined,
+                ahead: msg.ahead,
+                onSkip: (idx) => {
+                  for (const i of idx) {
+                    task.delivered.add(i);
+                    emitTo(task, i, emit, (id, s) => ({ source: 'offscreen', type: 'skipped', jobId: id, tabId: s.tabId }));
+                  }
+                },
                 onChunk: (idx) => {
                   current = idx;
                   t0 = Date.now();

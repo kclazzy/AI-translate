@@ -38,7 +38,8 @@ export interface RenderedTile {
 // content → background
 export type ContentToBackground =
   | { type: 'translate'; image: ImageRef; pageUrl: string; title: string; priority: number; force?: boolean; redraw?: boolean }
-  | { type: 'translate-strip'; images: ImageRef[]; pageUrl: string; title: string; priority: number; force?: boolean; redraw?: boolean }
+  /** `ahead`: the last pictures are only neighbours sent along to look at the seam (see translateStrip). */
+  | { type: 'translate-strip'; images: ImageRef[]; pageUrl: string; title: string; priority: number; force?: boolean; redraw?: boolean; ahead?: number }
   | { type: 'cancel'; id: string }
   | { type: 'capture-area'; image: ImageRef; pageUrl: string; title: string }
   | { type: 'get-page-state'; host: string }
@@ -77,6 +78,7 @@ export type BackgroundToContent =
   | { type: 'job-stage'; id: string; event: StageEvent }
   | { type: 'job-done'; id: string; result: RenderedTiles }
   | { type: 'job-error'; id: string; error: SerializedError }
+  | { type: 'job-skip'; id: string }
   | { type: 'command'; command: 'translate-page' | 'select-area' | 'repeat-area' | 'toggle-original' | 'set-auto' | 'download-chapter' | 'clear-page' | 'refresh-look'; value?: boolean | ChapterFormat }
   | { type: 'translate-src'; src: string }
   | { type: 'result-changed'; key: string }
@@ -113,7 +115,7 @@ export type ToOffscreen =
   // SHA-256 of the bytes: the same picture asked for twice (two tabs, a resend) is one queue job.
   | { target: 'offscreen'; type: 'run'; jobId: string; tabId: number; doc?: string; blobId: string; hash: string; mime?: string; pageUrl: string; title: string; priority: number; generic?: boolean; force?: boolean; imageSrc?: string }
   | { target: 'offscreen'; type: 'crop-run'; jobId: string; tabId: number; doc?: string; screenshot: string; rect: { x: number; y: number; width: number; height: number }; dpr: number; pageUrl: string; title: string; generic?: boolean; priority?: number }
-  | { target: 'offscreen'; type: 'run-strip'; jobIds: string[]; tabId: number; doc?: string; parts: { blobId: string; hash: string; mime?: string; src?: string }[]; pageUrl: string; title: string; priority: number; force?: boolean }
+  | { target: 'offscreen'; type: 'run-strip'; jobIds: string[]; tabId: number; doc?: string; parts: { blobId: string; hash: string; mime?: string; src?: string }[]; pageUrl: string; title: string; priority: number; force?: boolean; ahead?: number }
   | { target: 'offscreen'; type: 'cancel'; jobId: string }
   /** Stop every job of a tab (or of one page shown in it: `doc`), or of all tabs. */
   | { target: 'offscreen'; type: 'cancel-tab'; tabId?: number; doc?: string }
@@ -130,6 +132,8 @@ export type FromOffscreen =
   | { source: 'offscreen'; type: 'stage'; jobId: string; tabId: number; event: StageEvent }
   | { source: 'offscreen'; type: 'done'; jobId: string; tabId: number; result: RenderedTiles }
   | { source: 'offscreen'; type: 'error'; jobId: string; tabId: number; error: SerializedError }
+  /** A neighbour sent along with a strip was not needed (its seam is calm): not translated now. */
+  | { source: 'offscreen'; type: 'skipped'; jobId: string; tabId: number }
   | { source: 'offscreen'; type: 'save'; tabId: number; url: string; filename: string }
   /** A stored result changed in the background (batched translation check): redraw it where shown. */
   | { source: 'offscreen'; type: 'result-changed'; key: string };

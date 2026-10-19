@@ -545,3 +545,108 @@ describe('two pages of a series at once (conveyor)', () => {
     expect(order.indexOf('translate-1')).toBeLessThan(order.indexOf('translate-2-with-1'));
   });
 });
+
+describe('the picture below goes along to look at the seam', () => {
+  // A bubble of three lines on a white page; the site cut the strip right through the middle line.
+  async function bubblePage(lines: { y: number; text: string }[], cy: number) {
+    const c = createCanvas(800, 1000);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 800, 1000);
+    ctx.beginPath();
+    ctx.ellipse(400, cy, 230, 130, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold 44px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const l of lines) ctx.fillText(l.text, 400, l.y);
+    const img = await loadImage(c.toBuffer('image/png'));
+    const cut = async (y: number) => {
+      const p = createCanvas(800, 500);
+      p.getContext('2d').drawImage(img, 0, y, 800, 500, 0, 0, 800, 500);
+      return new Uint8Array(await p.encode('png'));
+    };
+    return [await cut(0), await cut(500)];
+  }
+  const heightAsked = (body: any) => Number(/The image is \d+×(\d+)/.exec(JSON.stringify(body.messages))?.[1] ?? 0);
+
+  it('a bubble across the seam: both pictures in one request, the line on the seam read and drawn once', async () => {
+    const [top, bottom] = await bubblePage([{ y: 420, text: 'WAR OF FAIRIES' }, { y: 500, text: 'THE FAIRY WAR' }, { y: 580, text: 'MAKES RAYMOND' }], 500);
+    const heights: number[] = [];
+    const m = mock((body) => {
+      heights.push(heightAsked(body));
+      return JSON.stringify({ blocks: [{ box: toNorm([250, 390, 300, 220], 800, 1000), text: 'WAR OF FAIRIES THE FAIRY WAR MAKES RAYMOND', translation: 'ВОЙНА ФЕЙ ЗАСТАВЛЯЕТ РЕЙМУНДА', type: 'DIALOGUE' }], entities: [], summary: '' });
+    });
+    const svc = new TranslateService(memoryDb(), secrets, napiBackend, async () => settingsWith({ skipEmptyPages: false }), m.fetchImpl);
+    svc.compactTiles = false;
+    const got: number[] = [];
+    const skipped: number[] = [];
+    const parts: StoredResult[] = [];
+    await svc.translateStrip([{ bytes: top, mime: 'image/png' }, { bytes: bottom, mime: 'image/png' }], { ahead: 1, onPart: (i, r) => { got.push(i); parts[i] = r; }, onSkip: (i) => skipped.push(...i) });
+    expect(m.calls).toHaveLength(1);
+    expect(heights).toEqual([1000]);
+    expect(got.sort()).toEqual([0, 1]);
+    expect(skipped).toEqual([]);
+    // One translation for the bubble: drawn by one picture, continued on the other.
+    const blocks = parts.map((p) => p.page.blocks);
+    expect(blocks.map((b) => b.map((x) => x.translatedText))).toEqual([['ВОЙНА ФЕЙ ЗАСТАВЛЯЕТ РЕЙМУНДА'], ['ВОЙНА ФЕЙ ЗАСТАВЛЯЕТ РЕЙМУНДА']]);
+    expect(blocks.flat().filter((b) => b.continued)).toHaveLength(1);
+  });
+
+  it('a calm seam: the picture below is left for its own turn', async () => {
+    const [top, bottom] = await bubblePage([{ y: 220, text: 'HELLO THERE' }], 220);
+    const heights: number[] = [];
+    const m = mock((body) => {
+      heights.push(heightAsked(body));
+      return JSON.stringify({ blocks: [{ box: toNorm([250, 190, 300, 60], 800, 500), text: 'HELLO THERE', translation: 'ПРИВЕТ', type: 'DIALOGUE' }], entities: [], summary: '' });
+    });
+    const svc = new TranslateService(memoryDb(), secrets, napiBackend, async () => settingsWith({ skipEmptyPages: false }), m.fetchImpl);
+    svc.compactTiles = false;
+    const got: number[] = [];
+    const skipped: number[] = [];
+    await svc.translateStrip([{ bytes: top, mime: 'image/png' }, { bytes: bottom, mime: 'image/png' }], { ahead: 1, onPart: (i) => got.push(i), onSkip: (i) => skipped.push(...i) });
+    expect(heights).toEqual([500]);
+    expect(got).toEqual([0]);
+    expect(skipped).toEqual([1]);
+  });
+
+  it('pictures translated one by one: the line on the seam read on neither side still brings the band', async () => {
+    const [top, bottom] = await bubblePage([{ y: 420, text: 'WAR OF FAIRIES' }, { y: 500, text: 'THE FAIRY WAR' }, { y: 580, text: 'MAKES RAYMOND' }], 500);
+    let n = 0;
+    const m = mock(() => {
+      n++;
+      // Upper: only the first line (it ends 50 px above the seam); lower: only the last line (from 60 px down).
+      if (n === 1) return JSON.stringify({ blocks: [{ box: toNorm([270, 395, 260, 50], 800, 500), text: 'WAR OF FAIRIES', translation: 'ВОЙНА ФЕЙ', type: 'DIALOGUE' }], entities: [], summary: '' });
+      if (n === 2) return JSON.stringify({ blocks: [{ box: toNorm([260, 58, 280, 50], 800, 500), text: 'MAKES RAYMOND', translation: 'ЗАСТАВЛЯЕТ РЕЙМУНДА', type: 'DIALOGUE' }], entities: [], summary: '' });
+      return JSON.stringify({ blocks: [{ box: [300, 50, 700, 950], text: 'WAR OF FAIRIES THE FAIRY WAR MAKES RAYMOND', translation: 'ЦЕЛАЯ ФРАЗА', type: 'DIALOGUE' }], entities: [], summary: '' });
+    });
+    const svc = new TranslateService(memoryDb(), secrets, napiBackend, async () => settingsWith({ skipEmptyPages: false }), m.fetchImpl);
+    svc.compactTiles = false;
+    const a = await svc.translate(top, 'image/png', { noSkip: true });
+    const b = await svc.translate(bottom, 'image/png', { noSkip: true });
+    expect(await svc.repairSeam(a.result.key, b.result.key)).toBe(true);
+    expect((await svc.getResult(a.result.key))!.page.blocks.map((x) => x.translatedText)).toEqual(['ЦЕЛАЯ ФРАЗА']);
+    expect((await svc.getResult(b.result.key))!.page.blocks.map((x) => x.translatedText)).toEqual(['ЦЕЛАЯ ФРАЗА']);
+  });
+
+  it('text near a calm seam is not a cut', async () => {
+    const [top, bottom] = await bubblePage([{ y: 420, text: 'ABOVE' }], 350);
+    const [, lower] = await bubblePage([{ y: 580, text: 'BELOW' }], 650);
+    let n = 0;
+    const m = mock(() => {
+      n++;
+      if (n === 1) return JSON.stringify({ blocks: [{ box: toNorm([300, 400, 200, 45], 800, 500), text: 'ABOVE', translation: 'НАД', type: 'DIALOGUE' }], entities: [], summary: '' });
+      return JSON.stringify({ blocks: [{ box: toNorm([300, 58, 200, 45], 800, 500), text: 'BELOW', translation: 'ПОД', type: 'DIALOGUE' }], entities: [], summary: '' });
+    });
+    void bottom;
+    const svc = new TranslateService(memoryDb(), secrets, napiBackend, async () => settingsWith({ skipEmptyPages: false }), m.fetchImpl);
+    svc.compactTiles = false;
+    const a = await svc.translate(top, 'image/png', { noSkip: true });
+    const b = await svc.translate(lower, 'image/png', { noSkip: true });
+    expect(await svc.repairSeam(a.result.key, b.result.key)).toBe(false);
+    expect(m.calls).toHaveLength(2);
+  });
+});

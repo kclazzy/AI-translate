@@ -163,8 +163,12 @@ function main() {
   // (the site cut its strip through a line of text, and the pictures did not arrive together to be
   // glued): the band around the seam is translated once and goes into both pictures.
   const seamsAsked = new Set<string>();
-  const cutAt = (r: RenderedTiles, edge: 'top' | 'bottom') =>
-    r.page.blocks.some((b) => b.translate && [b.bbox, ...(b.bubble ? [b.bubble.box] : [])].some((x) => (edge === 'top' ? x[1] <= 2 : x[1] + x[3] >= r.height - 2)));
+  // Text at the seam or close to it (the line on the seam itself may have been read on neither side):
+  // the worker looks at the pixels of the seam and does nothing where it is calm.
+  const cutAt = (r: RenderedTiles, edge: 'top' | 'bottom') => {
+    const near = Math.max(24, Math.round(r.width * 0.08)) + 2;
+    return r.page.blocks.some((b) => b.translate && [b.bbox, ...(b.bubble ? [b.bubble.box] : [])].some((x) => (edge === 'top' ? x[1] <= near : x[1] + x[3] >= r.height - near)));
+  };
   function checkSeams(it: Item) {
     if (!stitch || !it.result || it.cand.kind !== 'img') return;
     const r0 = it.cand.el.getBoundingClientRect();
@@ -456,17 +460,63 @@ function main() {
     return groups;
   }
 
+  /** How many neighbours below go along with a picture to look at the seam (see neighboursBelow). */
+  const AHEAD = 2;
+
+  /**
+   * The pictures right below `last` in its column that are not translated or queued yet (a lazy one
+   * by its address: the worker fetches it, the page need not show it). They go along with the
+   * picture: where a bubble is cut by the seam the worker glues them and translates the bubble whole
+   * in the same request (the line on the seam is read and erased whole); where the seam is calm it
+   * leaves them for their own turn (job-skip).
+   */
+  async function neighboursBelow(last: Candidate, priority: number): Promise<Pending[]> {
+    const out: Pending[] = [];
+    if (dead) return out;
+    const col = scanPage(minSize).filter((c) => c.kind === 'img' && !dismissed.has(c.el));
+    let cur = last.el.getBoundingClientRect();
+    for (let k = 0; k < AHEAD; k++) {
+      const r0 = cur;
+      const next = col.find((c) => {
+        const r = c.el.getBoundingClientRect();
+        return r.height > 0 && Math.abs(r.left - r0.left) <= 2 && Math.abs(r.width - r0.width) <= 2 && Math.abs(r.top - r0.bottom) <= 6;
+      });
+      if (!next) break;
+      const known = byElement.get(next.el);
+      if (known && items.has(known)) break;
+      const id = idFor(next.el);
+      const overlay = makeOverlay(next, id);
+      const item: Item = { id, req: `${id}~${(reqSeq++).toString(36)}`, cand: next, src: next.src, status: 'queued', overlay, shown: shownIdentity(next) };
+      watchEl(next.el);
+      items.set(id, item);
+      overlay.stage({ stage: 'queued' });
+      try {
+        const image: ImageRef = { id: item.req!, kind: next.kind, src: next.src, dataUrl: await inlineData(next), rect: viewportRect(next.el), dpr: devicePixelRatio };
+        if (image.dataUrl) image.src = undefined;
+        out.push({ item, image, priority });
+      } catch {
+        overlay.destroy();
+        items.delete(id);
+        break;
+      }
+      cur = next.el.getBoundingClientRect();
+    }
+    return out;
+  }
+
   async function flushStrip() {
     stripTimer = null;
     const list = strip.filter((p) => items.get(p.item.id) === p.item);
     strip = [];
-    for (const g of stripGroups(list)) {
-      const priority = Math.min(...g.map((p) => p.priority));
-      const force = g.some((p) => p.force);
-      const redraw = g.every((p) => p.redraw) || undefined;
+    for (const own of stripGroups(list)) {
+      const priority = Math.min(...own.map((p) => p.priority));
+      const force = own.some((p) => p.force);
+      const redraw = own.every((p) => p.redraw) || undefined;
+      const ahead = redraw ? [] : await neighboursBelow(own[own.length - 1].item.cand, priority);
+      const g = [...own, ...ahead];
       const msg: ContentToBackground =
         g.length > 1
-          ? { type: 'translate-strip', images: g.map((p) => p.image), pageUrl: location.href, title: document.title, priority, force, redraw }
+          ? { type: 'translate-strip', images: g.map((p) => p.image), pageUrl: location.href, title: document.title, priority, force, redraw, ...(ahead.length ? { ahead: ahead.length } : {}) }
           : { type: 'translate', image: g[0].image, pageUrl: location.href, title: document.title, priority, force, redraw };
       const group = g.length > 1 ? g.map((p) => p.item.cand) : undefined;
       for (const p of g) p.item.group = group;
@@ -694,6 +744,15 @@ function main() {
           break;
         }
         showResult(it, msg.result);
+        break;
+      }
+      case 'job-skip': {
+        // A neighbour sent along to look at the seam was not needed: it gets its own turn.
+        const it = itemFor(msg.id);
+        if (!it) break;
+        it.overlay.destroy();
+        items.delete(it.id);
+        rescan();
         break;
       }
       case 'job-error': {

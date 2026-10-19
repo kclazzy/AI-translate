@@ -170,7 +170,10 @@ function relayFromOffscreen(m: FromOffscreen) {
   }
   const id = m.jobId.split('|')[1] ?? m.jobId;
   if (m.type === 'stage') sendToTab(m.tabId, { type: 'job-stage', id, event: m.event });
-  else if (m.type === 'done') {
+  else if (m.type === 'skipped') {
+    track(m.tabId, m.jobId, false);
+    sendToTab(m.tabId, { type: 'job-skip', id });
+  } else if (m.type === 'done') {
     track(m.tabId, m.jobId, false);
     sendToTab(m.tabId, { type: 'job-done', id, result: m.result });
   } else {
@@ -461,38 +464,57 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
     case 'translate-strip': {
       // Neighbouring pictures of one strip: fetch them all and translate them as one page.
       const one = (image: ImageRef) => handleContent({ type: 'translate', image, pageUrl: msg.pageUrl, title: msg.title, priority: msg.priority, force: msg.force, redraw: msg.redraw }, sender);
+      // Neighbours sent along only to look at the seam: not translated on their own here.
+      const own = msg.images.length - Math.max(0, Math.min(msg.images.length - 1, msg.ahead ?? 0));
+      const skip = (images: ImageRef[]) => {
+        for (const im of images) sendToTab(tabId, { type: 'job-skip', id: im.id });
+      };
       const settings = await loadSettings();
       if (settings.enabled === false || (!msg.redraw && !(await readiness()).ok) || msg.images.length < 2) {
-        for (const image of msg.images) void one(image);
+        for (const image of msg.images.slice(0, own)) void one(image);
+        skip(msg.images.slice(own));
         return { queued: false };
       }
-      const jobIds = msg.images.map((im) => `${tabId}|${im.id}`);
-      for (const j of jobIds) track(tabId, j, true);
+      let images = msg.images;
       const parts: { blobId: string; hash: string; mime?: string; src?: string }[] = [];
+      const jobIdOf = (im: ImageRef) => `${tabId}|${im.id}`;
       try {
         for (const [i, image] of msg.images.entries()) {
           let got: { bytes: Uint8Array; mime: string } | null = null;
           if (image.dataUrl) got = dataUrlToBytes(image.dataUrl);
           else if (image.src) got = await fetchImage(image.src, msg.pageUrl).catch(() => null);
+          if (!got && i >= own) {
+            // A neighbour that cannot be fetched (not loaded yet, protected): go without it.
+            images = msg.images.slice(0, i);
+            skip(msg.images.slice(i));
+            break;
+          }
           if (!got) throw new Error('fetch');
-          parts.push({ ...(await stash(jobIds[i], got.bytes, got.mime)), mime: got.mime, src: image.src });
+          parts.push({ ...(await stash(jobIdOf(image), got.bytes, got.mime)), mime: got.mime, src: image.src });
         }
       } catch {
         // A picture that cannot be fetched (protected reader): each one on its own, as before.
         for (const p of parts) void deleteJobBytes(p.blobId);
-        for (const j of jobIds) track(tabId, j, false);
-        for (const image of msg.images) void one(image);
+        for (const image of msg.images.slice(0, own)) void one(image);
+        skip(msg.images.slice(own));
         return { queued: false };
       }
+      if (images.length < 2) {
+        for (const p of parts) void deleteJobBytes(p.blobId);
+        void one(images[0]);
+        return { queued: false };
+      }
+      const jobIds = images.map(jobIdOf);
+      for (const j of jobIds) track(tabId, j, true);
       try {
-        await toOffscreen({ target: 'offscreen', type: 'run-strip', jobIds, tabId, doc, parts, pageUrl: msg.pageUrl, title: msg.title, priority: msg.priority, force: msg.force });
+        await toOffscreen({ target: 'offscreen', type: 'run-strip', jobIds, tabId, doc, parts, pageUrl: msg.pageUrl, title: msg.title, priority: msg.priority, force: msg.force, ahead: Math.max(0, images.length - own) || undefined });
       } catch (e) {
         dlog('strip failed', e);
         for (const p of parts) void deleteJobBytes(p.blobId);
         const error = toAppError(e).toJSON();
         for (const [i, j] of jobIds.entries()) {
           track(tabId, j, false);
-          sendToTab(tabId, { type: 'job-error', id: msg.images[i].id, error });
+          sendToTab(tabId, { type: 'job-error', id: images[i].id, error });
         }
         return { queued: false };
       }

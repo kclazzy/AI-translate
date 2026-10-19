@@ -348,9 +348,19 @@ export class TranslateService {
     const W = up.page.width;
     if (members.some((m) => m.page.width !== W)) return false;
     const H = up.page.height;
-    const cutUp = up.page.blocks.filter((b) => touchesEdge(b, H, 'bottom'));
-    const cutLo = lo.page.blocks.filter((b) => touchesEdge(b, lo.page.height, 'top'));
-    if (!cutUp.length && !cutLo.length) return false;
+    let cutUp = up.page.blocks.filter((b) => touchesEdge(b, H, 'bottom'));
+    let cutLo = lo.page.blocks.filter((b) => touchesEdge(b, lo.page.height, 'top'));
+    if (!cutUp.length && !cutLo.length) {
+      // The line on the seam itself was cut in half and read on neither side («THE FAIRY WAR»
+      // between «ВОЙНА ФЕЙ» above and «ЗАСТАВЛЯЕТ…» below): text close to the seam, and letters
+      // drawn across it (the seam is not calm).
+      const near = Math.max(24, Math.round(W * 0.08));
+      cutUp = up.page.blocks.filter((b) => touchesEdge(b, H - near, 'bottom'));
+      cutLo = lo.page.blocks.filter((b) => touchesEdge(b, lo.page.height, 'top', near));
+      if (!cutUp.length && !cutLo.length) return false;
+      const plan = await planStrip(this.backend, [up.original, lo.original]);
+      if (plan.calmAfter[0]) return false;
+    }
     // The band: from the top of what is cut in the upper picture to the bottom of what is cut in the
     // lower one (a third of the width on a side where nothing was read).
     const topOf = (b: TextBlock) => Math.min(b.bbox[1], b.bubble?.box[1] ?? Infinity);
@@ -524,7 +534,17 @@ export class TranslateService {
    */
   async translateStrip(
     parts: StripPart[],
-    opts: TranslateOptions & { onPart: (index: number, result: StoredResult, cached: boolean) => void; onChunk?: (indices: number[]) => void },
+    opts: TranslateOptions & {
+      onPart: (index: number, result: StoredResult, cached: boolean) => void;
+      onChunk?: (indices: number[]) => void;
+      /**
+       * The last `ahead` pictures are only the neighbours below, sent along to look at the seam: one
+       * whose seam with the pictures asked for is cut (a bubble across it) is glued and translated
+       * with them; the others are not translated now and reported through `onSkip`.
+       */
+      ahead?: number;
+      onSkip?: (indices: number[]) => void;
+    },
   ): Promise<void> {
     const seriesKey = opts.seriesKey ?? seriesKeyFromUrl(opts.sourceUrl);
     const { settings, config } = await this.config(seriesKey);
@@ -558,6 +578,7 @@ export class TranslateService {
       }
       known[i] = await this.getResult(r.key);
     }
+    const own = parts.length - Math.max(0, Math.min(parts.length - 1, opts.ahead ?? 0));
     const todo = parts.map((_, i) => i).filter((i) => !known[i]);
     for (const [i, r] of known.entries()) if (r) opts.onPart(i, r, true);
     if (!todo.length) return;
@@ -565,7 +586,12 @@ export class TranslateService {
     // a whole chapter is never held in memory at once.
     const todoParts = todo.map((i) => parts[i]);
     const plan = await planStrip(this.backend, todoParts);
-    const chunks = planChunks(plan.spans.map((s) => s.h), plan.calmAfter);
+    const planned = planChunks(plan.spans.map((s) => s.h), plan.calmAfter);
+    // A chunk of neighbours only (their seam with the pictures asked for is calm): not now.
+    const chunks = planned.filter((c) => c.some((j) => todo[j] < own));
+    const skipped = planned.filter((c) => !chunks.includes(c)).flat().map((j) => todo[j]);
+    if (skipped.length) opts.onSkip?.(skipped);
+    if (!chunks.length) return;
     // Glue one chunk into one picture (PNG bytes).
     const glue = async (chunk: number[]): Promise<Uint8Array> => {
       const glued = await stitchChunk(this.backend, todoParts, plan, chunk);
@@ -1146,10 +1172,10 @@ function untranslatedOf(page: PageResult): { untranslated?: string[]; unsure?: s
 }
 
 /** A block cut by the picture's top or bottom edge: its bubble (or its text) reaches the edge. */
-export function touchesEdge(b: TextBlock, height: number, edge: 'top' | 'bottom'): boolean {
+export function touchesEdge(b: TextBlock, height: number, edge: 'top' | 'bottom', within = 2): boolean {
   if (!b.translate && b.textType === 'SFX') return false;
   const boxes = [b.bbox, ...(b.bubble ? [b.bubble.box] : [])];
-  return boxes.some((x) => (edge === 'top' ? x[1] <= 2 : x[1] + x[3] >= height - 2));
+  return boxes.some((x) => (edge === 'top' ? x[1] <= within : x[1] + x[3] >= height - within));
 }
 
 /** A background change found that the result was edited after it was read (see saveEdited ifRev). */
