@@ -94,22 +94,33 @@ class LamaInpainter:
 
 
 def flat_ring_color(rgb: np.ndarray, mask: np.ndarray, width: int = 3) -> tuple[int, int, int] | None:
-    """The colour of a plain background around a mask: the 3 px ring around it one colour (no art,
-    screentone or gradient). Then a fill is as good as LaMa and costs nothing."""
+    """The colour to fill a mask with instead of LaMa: only a white bubble (90 % of the 3 px ring
+    around it white, > 235 in every channel) or a black one (90 % below 22), with a brightness
+    spread under 10 (JPEG noise is fine) and no gradient across it. Grey plates, colours, glows and
+    gradients are left to LaMa."""
     m = (mask > 0).astype(np.uint8)
-    if not m.any():
+    if not m.any() or m.shape != rgb.shape[:2]:
         return None
     grown = cv2.dilate(m, np.ones((2 * width + 1, 2 * width + 1), np.uint8))
-    ring = rgb[(grown > 0) & (m == 0)]
+    sel = (grown > 0) & (m == 0)
+    ring = rgb[sel]
     if len(ring) < 24:
         return None
-    med = np.median(ring, axis=0)
-    # Strict: one exact colour. A gradient, glow or texture filled with one colour shows as a patch,
-    # so anything that varies goes to LaMa: max - min <= 5 per channel (1 % stray pixels allowed).
-    lo = np.percentile(ring, 1, axis=0)
-    hi = np.percentile(ring, 99, axis=0)
-    if float((hi - lo).max()) > 5:
+    lum = ring[:, 0] * 0.3 + ring[:, 1] * 0.6 + ring[:, 2] * 0.1
+    if float(lum.std()) >= 10:
         return None
+    white = float((ring > 235).all(axis=1).mean())
+    black = float((ring < 22).all(axis=1).mean())
+    if white < 0.9 and black < 0.9:
+        return None
+    # A gradient: the mean colour differs between opposite sides of the text.
+    ys, xs = np.nonzero(sel)
+    my, mx = np.nonzero(m)
+    cy, cx = (int(my.min()) + int(my.max())) / 2, (int(mx.min()) + int(mx.max())) / 2
+    for side_a, side_b in ((ys < cy, ys > cy), (xs < cx, xs > cx)):
+        if side_a.sum() >= 8 and side_b.sum() >= 8 and float(np.abs(ring[side_a].mean(axis=0) - ring[side_b].mean(axis=0)).max()) > 6:
+            return None
+    med = np.median(ring, axis=0)
     return int(med[0]), int(med[1]), int(med[2])
 
 

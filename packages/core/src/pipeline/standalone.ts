@@ -1,7 +1,7 @@
 import { familyFor } from '../llm/catalog';
 import { AppError } from '../errors';
 import type { ImageBackend, PixelData } from '../image/backend';
-import { cleanBlock, findLeftoverText, findLetterClusters, findTextRegions, luminance, parseHex, type LetterCluster, type Lettering, type LeftoverProbe } from '../image/clean';
+import { cleanBlock, plainFillColor, findLeftoverText, findLetterClusters, findTextRegions, luminance, parseHex, type LetterCluster, type Lettering, type LeftoverProbe } from '../image/clean';
 import { boxArea, boxToPolygon, clampBox, expandBox, overlapRatio, TiledImage } from '../image/tiled';
 import { detectScript } from '../languages';
 import { assertPrivacy, isLocalProvider, isLocalUrl } from '../llm/privacy';
@@ -338,58 +338,21 @@ function errorText(e: unknown): string {
   return String((e as Error)?.message ?? e).slice(0, 160);
 }
 
-/**
- * The ring of pixels around a mask (3 px wide): when it is one colour (no art, no screentone, no
- * gradient), that colour — else null. Then a fill is as good as LaMa and costs nothing.
- */
-export function flatRing(img: PixelData, mask: Uint8Array, width = 3): [number, number, number] | null {
-  const { width: w, height: h, data } = img;
-  // Grow the mask by `width` px (rows, then columns), the ring is what was added.
-  const rowGrown = new Uint8Array(w * h);
-  for (let y = 0; y < h; y++) {
-    let last = -Infinity;
-    for (let x = 0; x < w; x++) if (mask[y * w + x]) last = x;
-      else if (x - last <= width) rowGrown[y * w + x] = 1;
-    last = Infinity;
-    for (let x = w - 1; x >= 0; x--) if (mask[y * w + x]) last = x;
-      else if (last - x <= width) rowGrown[y * w + x] = 1;
-  }
-  const ring: number[] = [];
-  for (let x = 0; x < w; x++) {
-    let last = -Infinity;
-    for (let y = 0; y < h; y++) {
-      const i = y * w + x;
-      if (mask[i] || rowGrown[i]) last = y;
-      else if (y - last <= width) ring.push(i);
-    }
-    last = Infinity;
-    for (let y = h - 1; y >= 0; y--) {
-      const i = y * w + x;
-      if (mask[i] || rowGrown[i]) last = y;
-      else if (last - y <= width) ring.push(i);
-    }
-  }
-  for (let i = 0; i < w * h; i++) if (rowGrown[i]) ring.push(i);
-  if (ring.length < 24) return null;
-  const med = (k: number) => {
-    const v = ring.map((i) => data[i * 4 + k]).sort((a, b) => a - b);
-    return v[v.length >> 1];
-  };
-  const c: [number, number, number] = [med(0), med(1), med(2)];
-  // Strict: one exact colour (a white or black bubble, a flat digital panel). A soft gradient, glow
-  // or texture shows as a patch when filled with one colour, so anything that varies goes to LaMa:
-  // per channel max − min ≤ 5 over the ring (1 % of stray pixels — the edge of a letter — allowed).
-  for (let k = 0; k < 3; k++) {
-    const v = ring.map((i) => data[i * 4 + k]).sort((a, b) => a - b);
-    const cut = Math.floor(v.length * 0.01);
-    if (v[v.length - 1 - cut] - v[cut] > 5) return null;
-  }
-  return c;
+/** The colour that fills a mask as well as LaMa would (a white or black bubble), else null (see plainFillColor). */
+export function flatRing(img: PixelData, mask: Uint8Array): [number, number, number] | null {
+  return plainFillColor(img, mask);
 }
+
+export const LAMA_MAX_AREAS = 12;
+export const LAMA_PAGE_BUDGET_MS = 20_000;
 
 export async function redrawArt(original: TiledImage, cleaned: TiledImage, masks: { box: Box; mask: Uint8Array }[], inpaint: Inpainter, signal?: AbortSignal, failed?: (e: unknown) => void): Promise<number> {
   let done = 0;
-  for (const m of masks.slice(0, 16)) {
+  // LaMa per page: at most this many areas and this much time; the rest keeps the simple fill
+  // (a long chapter must not stall on one page full of plates).
+  const started = Date.now();
+  for (const m of masks.slice(0, LAMA_MAX_AREAS)) {
+    if (Date.now() - started > LAMA_PAGE_BUDGET_MS) break;
     try {
       // Context around the mask helps LaMa: a margin of half the box on every side.
       const pad = Math.round(Math.max(24, Math.max(m.box[2], m.box[3]) * 0.5));
@@ -903,7 +866,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     const split = mergeSplitLines(blocks, (x, y, w, h) => {
       const [cx, cy, cw, ch] = clampBox([x, y, w, h], original.width, original.height);
       return original.getRegion(cx, cy, cw, ch);
-    });
+    }, original.height);
     if (split.joined.length) {
       blocks = split.blocks;
       for (const [a, b] of split.joined) {

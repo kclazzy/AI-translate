@@ -158,7 +158,8 @@ export class EngineClient {
     const form = new FormData();
     form.append('image', new Blob([image as BlobPart], { type: 'image/png' }), 'image.png');
     form.append('mask', new Blob([mask as BlobPart], { type: 'image/png' }), 'mask.png');
-    const res = await this.request('/v1/inpaint', { method: 'POST', body: form, signal }, 120_000);
+    // One area: a second on the video card, a few on the processor; one that takes longer is let go.
+    const res = await this.request('/v1/inpaint', { method: 'POST', body: form, signal }, 30_000);
     return new Uint8Array(await res.arrayBuffer());
   }
 }

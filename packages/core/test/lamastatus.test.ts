@@ -23,22 +23,47 @@ describe('LaMa that does not answer', () => {
 });
 
 describe('a plain background around the letters', () => {
-  it('is filled with its colour, LaMa is not asked', async () => {
+  // A ground of `color` with JPEG-like noise (±7) and an optional gradient from top to bottom.
+  async function ground(color: [number, number, number], noise: number, gradient = 0) {
     const img = new TiledImage(napiBackend, 200, 200);
     const px = img.getRegion(0, 0, 200, 200);
-    for (let i = 0; i < 200 * 200; i++) px.data.set([60, 62, 70, 255], i * 4);
-    // The letters (to be erased) in white.
-    for (let y = 60; y < 80; y++) for (let x = 60; x < 80; x++) px.data.set([255, 255, 255, 255], (y * 200 + x) * 4);
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 200 * 200; i++) {
+      const y = Math.floor(i / 200);
+      for (let k = 0; k < 3; k++) px.data[i * 4 + k] = Math.max(0, Math.min(255, color[k] + (rnd() - 0.5) * 2 * noise - (gradient * y) / 200));
+      px.data[i * 4 + 3] = 255;
+    }
+    // The letters (to be erased).
+    for (let y = 60; y < 80; y++) for (let x = 60; x < 80; x++) px.data.set([0, 0, 0, 255], (y * 200 + x) * 4);
     img.putRegion(px, 0, 0);
+    return img;
+  }
+  const run = async (img: TiledImage) => {
     const cleaned = img.clone();
     let asked = 0;
     const mask = { box: [58, 58, 24, 24] as [number, number, number, number], mask: new Uint8Array(24 * 24).fill(1) };
-    const done = await redrawArt(img, cleaned, [mask], async (p) => {
+    await redrawArt(img, cleaned, [mask], async (p) => {
       asked++;
       return p;
     });
-    expect(done).toBe(1);
-    expect(asked).toBe(0);
-    expect([...cleaned.getRegion(70, 70, 1, 1).data.slice(0, 3)]).toEqual([60, 62, 70]);
+    return { asked, cleaned };
+  };
+
+  it('a white bubble with JPEG noise is filled with its colour, LaMa is not asked', async () => {
+    const r = await run(await ground([250, 250, 250], 7));
+    expect(r.asked).toBe(0);
+    const c = [...r.cleaned.getRegion(70, 70, 1, 1).data.slice(0, 3)];
+    expect(c.every((v) => v > 240)).toBe(true);
+  });
+
+  it('a black panel too', async () => {
+    expect((await run(await ground([8, 8, 8], 6))).asked).toBe(0);
+  });
+
+  it('a grey plate, a coloured ground or a gradient goes to LaMa', async () => {
+    expect((await run(await ground([60, 62, 70], 2))).asked).toBe(1);
+    expect((await run(await ground([250, 230, 140], 2))).asked).toBe(1);
+    expect((await run(await ground([255, 255, 255], 2, 80))).asked).toBe(1);
   });
 });

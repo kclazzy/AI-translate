@@ -81,7 +81,7 @@ export function sameBubble(a: TextBlock, b: TextBlock, regionOf: RegionOf): bool
 }
 
 /** Join blocks that are one bubble cut in two (see above), in reading order; ids of the kept blocks are returned with what they took in. */
-export function mergeSplitLines(blocks: TextBlock[], regionOf: RegionOf): { blocks: TextBlock[]; joined: [string, string][] } {
+export function mergeSplitLines(blocks: TextBlock[], regionOf: RegionOf, pageHeight = Infinity): { blocks: TextBlock[]; joined: [string, string][] } {
   const out: TextBlock[] = [];
   const joined: [string, string][] = [];
   const used = new Set<string>();
@@ -92,6 +92,8 @@ export function mergeSplitLines(blocks: TextBlock[], regionOf: RegionOf): { bloc
     for (const b of order) {
       if (b === a || used.has(b.id) || b.bbox[1] < cur.bbox[1] - 2) continue;
       if (!sameBubble(cur, b, regionOf)) continue;
+      // One bubble is never most of a page: on a page dense with text the joins stop here.
+      if (Math.max(cur.bbox[1] + cur.bbox[3], b.bbox[1] + b.bbox[3]) - Math.min(cur.bbox[1], b.bbox[1]) > pageHeight * 0.45) continue;
       used.add(b.id);
       joined.push([cur.id, b.id]);
       const box = union(cur.bbox, b.bbox);
@@ -122,7 +124,12 @@ export function mergeSplitLines(blocks: TextBlock[], regionOf: RegionOf): { bloc
  * anything else (an outline, art, another text).
  */
 export function growOverPlain(regionOf: RegionOf, box: Box, fill: [number, number, number], limits: { width: number; height: number }): Box {
-  const [x, y, w, h] = box.map(Math.round) as Box;
+  // Whole pixels inside the picture (a box may come with fractions or reach past an edge).
+  const x = Math.max(0, Math.min(limits.width - 1, Math.round(box[0])));
+  const y = Math.max(0, Math.min(limits.height - 1, Math.round(box[1])));
+  const w = Math.max(1, Math.min(limits.width - x, Math.round(box[2])));
+  const h = Math.max(1, Math.min(limits.height - y, Math.round(box[3])));
+  if (!Number.isFinite(x + y + w + h)) return box;
   const my = Math.round(h * 0.35);
   const mx = Math.round(w * 0.35);
   const ox = Math.max(0, x - mx);
@@ -131,6 +138,7 @@ export function growOverPlain(regionOf: RegionOf, box: Box, fill: [number, numbe
   const oh = Math.min(limits.height, y + h + my) - oy;
   if (ow <= 0 || oh <= 0) return box;
   const px = regionOf(ox, oy, ow, oh);
+  if (px.width !== ow || px.height !== oh) return box;
   const plain = (xx: number, yy: number) => {
     const i = ((yy - oy) * px.width + (xx - ox)) * 4;
     return Math.abs(px.data[i] - fill[0]) <= 24 && Math.abs(px.data[i + 1] - fill[1]) <= 24 && Math.abs(px.data[i + 2] - fill[2]) <= 24;

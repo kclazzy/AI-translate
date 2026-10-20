@@ -129,3 +129,46 @@ describe('sound effects over colourful art', () => {
     expect(white).toBeLessThan(40);
   });
 });
+
+describe('a page of white bubbles saved as JPEG', () => {
+  it('needs no LaMa at all (JPEG noise is not a gradient)', async () => {
+    const W = 800;
+    const H = 1400;
+    const c = createCanvas(W, H);
+    const g = c.getContext('2d') as any;
+    g.fillStyle = '#6d7f96';
+    g.fillRect(0, 0, W, H);
+    const blocks: any[] = [];
+    for (let i = 0; i < 6; i++) {
+      const cx = 250 + (i % 2) * 300;
+      const cy = 150 + i * 210;
+      g.beginPath();
+      g.ellipse(cx, cy, 130, 80, 0, 0, Math.PI * 2);
+      g.fillStyle = '#ffffff';
+      g.fill();
+      g.lineWidth = 4;
+      g.strokeStyle = '#000';
+      g.stroke();
+      g.fillStyle = '#000';
+      g.font = 'bold 28px sans-serif';
+      g.textAlign = 'center';
+      g.fillText(`HELLO ${i}`, cx, cy + 10);
+      blocks.push({ box: toNorm([cx - 75, cy - 15, 150, 34], W, H), text: `HELLO ${i}`, translation: `ПРИВЕТ ${i}`, type: 'DIALOGUE', vertical: false });
+    }
+    // JPEG at a webtoon's usual quality: noise of several levels on the white.
+    const bytes = new Uint8Array(await c.encode('jpeg', 70));
+    const fetchImpl = async () => jsonResponse({ choices: [{ message: { content: JSON.stringify({ blocks, entities: [], summary: '' }) } }], usage: { prompt_tokens: 1, completion_tokens: 1 } });
+    const config: any = {
+      mode: 'standalone', privacy: 'local', sourceLang: 'en', targetLang: 'ru', quality: 'balanced', profile: DEFAULT_PROFILES[0], glossary: [], translateSfx: true, sfxStyle: 'translated',
+      vision: { ...configFromPreset('lmstudio', 'vlm'), vision: true }, translator: null, lama: 'browser',
+    };
+    let called = 0;
+    const inpaint = async (img: { width: number; height: number; data: Uint8ClampedArray }) => {
+      called++;
+      return img;
+    };
+    const out = await runStandalonePipeline({ bytes, config }, { backend: napiBackend, fetchImpl: fetchImpl as any, inpaint: inpaint as any });
+    expect(out.page.blocks.filter((b) => b.translatedText.startsWith('ПРИВЕТ'))).toHaveLength(6);
+    expect(called).toBe(0);
+  });
+});

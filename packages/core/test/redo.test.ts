@@ -44,4 +44,22 @@ describe('a one-colour fill on ground that varies', () => {
     expect(r.redoMask).toBeUndefined();
     expect(r.closed).toBe(true);
   });
+
+  it('JPEG noise on a white bubble is not a ground that varies', async () => {
+    const { ringVaries } = await import('../src/image/clean');
+    const w = 120, h = 80;
+    const data = new Uint8ClampedArray(w * h * 4);
+    let seed = 3;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < w * h; i++) {
+      for (let k = 0; k < 3; k++) data[i * 4 + k] = 255 - rnd() * 14;
+      data[i * 4 + 3] = 255;
+    }
+    const mask = new Uint8Array(w * h);
+    for (let y = 30; y < 50; y++) for (let x = 30; x < 90; x++) mask[y * w + x] = 1;
+    expect(ringVaries({ width: w, height: h, data }, mask)).toBe(false);
+    // The same with a gradient from top to bottom: it varies.
+    for (let i = 0; i < w * h; i++) for (let k = 0; k < 3; k++) data[i * 4 + k] = 255 - Math.floor(i / w) * 1.2;
+    expect(ringVaries({ width: w, height: h, data }, mask)).toBe(true);
+  });
 });

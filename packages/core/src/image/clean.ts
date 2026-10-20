@@ -1128,23 +1128,108 @@ function plateMask(width: number, height: number, rect: Box, limit?: Uint8Array)
   return out;
 }
 
-/**
- * Does the ground right around a mask (a 3 px ring) vary — per channel more than 5 between the
- * darkest and the lightest (1 % stray pixels allowed)? Then a one-colour fill would show.
- */
-export function ringVaries(img: PixelData, mask: Uint8Array): boolean {
-  const ring = dilate(mask, img.width, img.height, 3);
-  const vals: number[][] = [[], [], []];
-  for (let p = 0; p < ring.length; p++) {
-    if (!ring[p] || mask[p]) continue;
-    for (let k = 0; k < 3; k++) vals[k].push(img.data[p * 4 + k]);
+/** What the ground right around a mask looks like (a ring `width` px wide). */
+export interface RingStats {
+  /** Median colour. */
+  color: RGB;
+  /** Spread of brightness (JPEG noise on a white bubble: 2–5; texture, screentone: far more). */
+  std: number;
+  /** Largest difference of the mean colour between opposite sides (top/bottom, left/right): a gradient. */
+  slope: number;
+  /** Shares of pixels that are white (all channels > 235) and black (all < 22). */
+  white: number;
+  black: number;
+  n: number;
+}
+
+/** Ring statistics; null when the ring is too small to say. Coordinates are whole pixels of `img`. */
+export function maskRingStats(img: PixelData, mask: Uint8Array, width = 3, within?: Uint8Array): RingStats | null {
+  const W = img.width;
+  const H = img.height;
+  if (mask.length !== W * H) return null;
+  const ring = dilate(mask, W, H, width);
+  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  for (let p = 0; p < mask.length; p++) {
+    if (!mask[p]) continue;
+    const x = p % W;
+    const y = (p - x) / W;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
   }
-  if (vals[0].length < 24) return false;
-  return vals.some((v) => {
+  if (x1 < 0) return null;
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  const sides = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]; // top, bottom, left, right: r g b n
+  const vals: number[][] = [[], [], []];
+  let sum = 0;
+  let sum2 = 0;
+  let white = 0;
+  let black = 0;
+  for (let p = 0; p < ring.length; p++) {
+    if (!ring[p] || mask[p] || (within && !within[p])) continue;
+    const i = p * 4;
+    const r = img.data[i];
+    const g = img.data[i + 1];
+    const b = img.data[i + 2];
+    vals[0].push(r);
+    vals[1].push(g);
+    vals[2].push(b);
+    const l = (r * 3 + g * 6 + b) / 10;
+    sum += l;
+    sum2 += l * l;
+    if (r > 235 && g > 235 && b > 235) white++;
+    if (r < 22 && g < 22 && b < 22) black++;
+    const x = p % W;
+    const y = (p - x) / W;
+    const dx = x - cx;
+    const dy = y - cy;
+    // Which side of the text the pixel lies on (by the larger offset, in units of the text size).
+    const side = Math.abs(dy) / Math.max(1, y1 - y0) >= Math.abs(dx) / Math.max(1, x1 - x0) ? (dy < 0 ? 0 : 1) : dx < 0 ? 2 : 3;
+    const s = sides[side];
+    s[0] += r;
+    s[1] += g;
+    s[2] += b;
+    s[3]++;
+  }
+  const n = vals[0].length;
+  if (n < 24) return null;
+  const med = (v: number[]) => {
     v.sort((a, b) => a - b);
-    const cut = Math.floor(v.length * 0.01);
-    return v[v.length - 1 - cut] - v[cut] > 5;
-  });
+    return v[v.length >> 1];
+  };
+  const mean = sum / n;
+  const std = Math.sqrt(Math.max(0, sum2 / n - mean * mean));
+  let slope = 0;
+  for (const [a, b] of [[0, 1], [2, 3]]) {
+    if (sides[a][3] < 8 || sides[b][3] < 8) continue;
+    for (let k = 0; k < 3; k++) slope = Math.max(slope, Math.abs(sides[a][k] / sides[a][3] - sides[b][k] / sides[b][3]));
+  }
+  return { color: [med(vals[0]), med(vals[1]), med(vals[2])], std, slope, white: white / n, black: black / n, n };
+}
+
+/**
+ * Does the ground right around a mask (within `within`, when given) vary — a gradient (the sides differ by more than 8) or a
+ * texture (brightness spread over 12)? Then a one-colour fill would show. JPEG noise on a plain
+ * bubble (spread 2–5, no slope) does not count.
+ */
+export function ringVaries(img: PixelData, mask: Uint8Array, within?: Uint8Array): boolean {
+  // Only the ground itself (the bubble's inside, the open space's flood): not its outline or the art past it.
+  const st = maskRingStats(img, mask, 3, within);
+  return !!st && (st.slope > 8 || st.std > 12);
+}
+
+/**
+ * The colour to fill a mask with instead of LaMa: only a white bubble (90 % of the ring white,
+ * spread under 10) or a black one (90 % black), with no gradient across it. Anything else — grey
+ * plates, colours, glows — is left to LaMa.
+ */
+export function plainFillColor(img: PixelData, mask: Uint8Array): RGB | null {
+  const st = maskRingStats(img, mask);
+  if (!st || st.std >= 10 || st.slope > 6) return null;
+  if (st.white >= 0.9 || st.black >= 0.9) return st.color;
+  return null;
 }
 
 function paintPlate(img: PixelData, rect: Box, color: RGB, limit?: Uint8Array): void {
@@ -1430,7 +1515,7 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     const lettering = measureLettering(img, letterMask, closed ? flood!.box : search, bg);
     // Ground that is not one exact colour (a gradient, a glow, paper texture): the one-colour fill
     // below shows there as a patch — LaMa (when on) redraws those pixels from the ground around them.
-    const varies = !opts.analyzeOnly && !opts.sfx && ringVaries(img, mask);
+    const varies = !opts.analyzeOnly && !opts.sfx && ringVaries(img, mask, flood?.mask);
     if (!opts.analyzeOnly) {
       fillMask(img, mask, bg);
       // A bubble that is not one flat colour (a soft gradient, an off-white with noise): a patch of
@@ -1460,7 +1545,7 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       paintPlate(img, plateBox, bg, limit);
       method = 'plate';
       // The plate is one colour too: LaMa redraws it where the ground is not.
-      if (varies || ringVaries(img, plateMask(img.width, img.height, plateBox, limit))) plated = plateMask(img.width, img.height, plateBox, limit);
+      if (varies || ringVaries(img, plateMask(img.width, img.height, plateBox, limit), flood?.mask)) plated = plateMask(img.width, img.height, plateBox, limit);
     }
     const flatArt = plated ?? (varies ? mask : null);
     const textBox: Box | null = tb ? [tb[0] + region[0], tb[1] + region[1], tb[2], tb[3]] : null;

@@ -57,12 +57,28 @@ def test_plain_background_is_filled_without_the_model():
         def inpaint(self, rgb, mask):  # pragma: no cover - must not be called
             raise AssertionError("LaMa called on a plain background")
 
-    rgb = np.full((60, 60, 3), (60, 62, 70), np.uint8)
-    rgb[20:40, 20:40] = 255
+    # A white bubble with JPEG-like noise.
+    rng = np.random.default_rng(1)
+    rgb = (250 - rng.integers(0, 12, (60, 60, 3))).astype(np.uint8)
+    rgb[20:40, 20:40] = 0
     mask = np.zeros((60, 60), np.uint8)
     mask[18:42, 18:42] = 1
     out = inpaint_or_fill(rgb, mask, Boom())
-    assert tuple(out[30, 30]) == (60, 62, 70)
+    assert all(v > 235 for v in out[30, 30])
+
+    # A grey plate goes to the model.
+    grey = np.full((60, 60, 3), (60, 62, 70), np.uint8)
+    seen = []
+
+    class Grey:
+        name = "g"
+
+        def inpaint(self, rgb, mask):
+            seen.append(1)
+            return rgb
+
+    inpaint_or_fill(grey, mask, Grey())
+    assert seen == [1]
 
     # Art around the letters: the model is asked.
     art = (np.indices((60, 60)).sum(axis=0)[..., None] * np.array([7, 3, 5]) % 256).astype(np.uint8)
