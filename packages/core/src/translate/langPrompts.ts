@@ -28,6 +28,8 @@ const LANG: Record<string, LangPrompt> = {
       'Punctuation: «ёлочки» for quotes, an em dash «—» in speech, «…» as one character; ё where it matters (всё, её).',
       'Sound effects: short real onomatopoeia (БАХ, ГРОХОТ, ХРЯСЬ, ЧМОК, ТОП), never a verb (not «ТОПАЙ») and never a made-up word.',
       'Panting "HAH… HAH…" is breathing «Ха… ха…», not laughter. "Huh?" → «А?», "Tch" → «Тц».',
+      'Stammering and emphasis stay: "W-wait!" → «П-постой!», "?!" and "!!" as in the original; short interjections are never dropped.',
+      'Spelling: -тся / -ться («он боится», «надо бояться»).',
     ],
   },
   uk: {

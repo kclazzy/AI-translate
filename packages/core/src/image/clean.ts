@@ -628,6 +628,8 @@ export interface CleanResult {
   lettering?: Lettering;
   /** Text over artwork that was smudged away (page coordinates and a mask of that box). */
   artMask?: { box: Box; mask: Uint8Array };
+  /** A one-colour fill on ground that varies (a gradient bubble, a glow): LaMa, when on, redoes it. */
+  redoMask?: { box: Box; mask: Uint8Array };
   /** Lettering in separate groups far apart (two speeches in joined bubbles), top to bottom. */
   textGroups?: Box[];
 }
@@ -1103,6 +1105,48 @@ function letterLike(img: PixelData, rect: Box, bg: RGB, reach: number): { x: num
 }
 
 /** Solid rounded plate in the background colour: the last resort that always hides the lettering. */
+/** A mask cut to its bounds, in page coordinates (`region` is where `img` lies on the page). */
+function maskCrop(mask: Uint8Array, width: number, height: number, region: Box): { box: Box; mask: Uint8Array } | undefined {
+  let x0 = width, y0 = height, x1 = -1, y1 = -1;
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) if (mask[y * width + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  if (x1 < 0) return undefined;
+  const w = x1 - x0 + 1;
+  const h = y1 - y0 + 1;
+  const m = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) m[y * w + x] = mask[(y + y0) * width + x + x0];
+  return { box: [x0 + region[0], y0 + region[1], w, h], mask: m };
+}
+
+/** The pixels a plate covers (its rounded rectangle, within `limit`). */
+function plateMask(width: number, height: number, rect: Box, limit?: Uint8Array): Uint8Array {
+  const out = new Uint8Array(width * height);
+  const [x0, y0, w, h] = clampBox(rect, width, height);
+  for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) {
+    const p = y * width + x;
+    if (!limit || limit[p]) out[p] = 1;
+  }
+  return out;
+}
+
+/**
+ * Does the ground right around a mask (a 3 px ring) vary — per channel more than 5 between the
+ * darkest and the lightest (1 % stray pixels allowed)? Then a one-colour fill would show.
+ */
+export function ringVaries(img: PixelData, mask: Uint8Array): boolean {
+  const ring = dilate(mask, img.width, img.height, 3);
+  const vals: number[][] = [[], [], []];
+  for (let p = 0; p < ring.length; p++) {
+    if (!ring[p] || mask[p]) continue;
+    for (let k = 0; k < 3; k++) vals[k].push(img.data[p * 4 + k]);
+  }
+  if (vals[0].length < 24) return false;
+  return vals.some((v) => {
+    v.sort((a, b) => a - b);
+    const cut = Math.floor(v.length * 0.01);
+    return v[v.length - 1 - cut] - v[cut] > 5;
+  });
+}
+
 function paintPlate(img: PixelData, rect: Box, color: RGB, limit?: Uint8Array): void {
   const [x0, y0, w, h] = clampBox(rect, img.width, img.height);
   const r = Math.min(10, Math.floor(Math.min(w, h) / 3));
@@ -1384,6 +1428,9 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       mask = dilateIn(snap.mask, img.width, img.height, grow, snap.box && expandBox(snap.box, Math.ceil(grow)));
     }
     const lettering = measureLettering(img, letterMask, closed ? flood!.box : search, bg);
+    // Ground that is not one exact colour (a gradient, a glow, paper texture): the one-colour fill
+    // below shows there as a patch — LaMa (when on) redraws those pixels from the ground around them.
+    const varies = !opts.analyzeOnly && !opts.sfx && ringVaries(img, mask);
     if (!opts.analyzeOnly) {
       fillMask(img, mask, bg);
       // A bubble that is not one flat colour (a soft gradient, an off-white with noise): a patch of
@@ -1392,6 +1439,7 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       if (closed && !opts.sfx && flood && groundVaries(img, flood.mask, clampBox(expandBox(tb ?? local, 12), img.width, img.height), bg, mask)) diffuseInpaint(img, mask, 40);
     }
     let method: CleanResult['method'] = opts.analyzeOnly ? 'none' : 'fill';
+    let plated: Uint8Array | null = null;
     // Verify: nothing that stands out from the bubble colour may remain where the text was. Only
     // marks the bubble's background surrounds count: the outline or the art a loose box reaches
     // into are not lettering left behind.
@@ -1408,9 +1456,13 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
         const near = dilate(letterMask, img.width, img.height, 3);
         for (let i = 0; i < limit.length; i++) if (near[i]) limit[i] = 1;
       }
-      paintPlate(img, clampBox(expandBox(textArea, 3), img.width, img.height), bg, limit);
+      const plateBox = clampBox(expandBox(textArea, 3), img.width, img.height);
+      paintPlate(img, plateBox, bg, limit);
       method = 'plate';
+      // The plate is one colour too: LaMa redraws it where the ground is not.
+      if (varies || ringVaries(img, plateMask(img.width, img.height, plateBox, limit))) plated = plateMask(img.width, img.height, plateBox, limit);
     }
+    const flatArt = plated ?? (varies ? mask : null);
     const textBox: Box | null = tb ? [tb[0] + region[0], tb[1] + region[1], tb[2], tb[3]] : null;
     let bubble: BubbleInfo;
     if (closed) {
@@ -1433,7 +1485,8 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       bubble = { box: base, fill: toHex(bg), safeArea: clampBox(expandBox(base, Math.round(base[2] * 0.08), Math.round(base[3] * 0.08)).map(Math.round) as Box, image.width, image.height), shape: 'rect' };
     }
     const groups = letterGroups(letterMask, img.width, img.height, lettering?.letterHeight);
-    result = { bubble, textBox, method, closed, lettering, ...(groups ? { textGroups: groups.map((g) => [g[0] + region[0], g[1] + region[1], g[2], g[3]] as Box) } : {}) };
+    const artMask = flatArt ? maskCrop(flatArt, img.width, img.height, region) : undefined;
+    result = { bubble, textBox, method, closed, lettering, ...(artMask ? { redoMask: artMask } : {}), ...(groups ? { textGroups: groups.map((g) => [g[0] + region[0], g[1] + region[1], g[2], g[3]] as Box) } : {}) };
   } else {
     // Text over artwork: letters are the extreme pixels (white/black fill and outline).
     const bgLum = luminance(...bg);
@@ -1511,15 +1564,7 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     const textBox: Box | null = tb ? [tb[0] + region[0], tb[1] + region[1], tb[2], tb[3]] : null;
     // Where letters over artwork were smudged away: a better inpainter (LaMa) can redo this part.
     let artMask: CleanResult['artMask'];
-    if ((method === 'diffuse' || method === 'plate') && countMask(mask)) {
-      let x0 = img.width, y0 = img.height, x1 = -1, y1 = -1;
-      for (let y = 0; y < img.height; y++) for (let x = 0; x < img.width; x++) if (mask[y * img.width + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-      const w = x1 - x0 + 1;
-      const h = y1 - y0 + 1;
-      const m = new Uint8Array(w * h);
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) m[y * w + x] = mask[(y + y0) * img.width + x + x0];
-      artMask = { box: [x0 + region[0], y0 + region[1], w, h], mask: m };
-    }
+    if ((method === 'diffuse' || method === 'plate') && countMask(mask)) artMask = maskCrop(mask, img.width, img.height, region);
     result = {
       artMask,
       closed: false,

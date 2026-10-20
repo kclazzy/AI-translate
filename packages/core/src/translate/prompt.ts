@@ -176,6 +176,7 @@ export function grammarRules(targetLang: string): string {
     'Decide every speaker\'s gender from the picture, the "speaker"/"speakerGender" hints, names and the known characters above, and keep it the same for the same character. When it really cannot be told, choose wording without gendered endings.',
     'Check case endings after prepositions, numbers and negation, and agreement between nouns and adjectives. Never leave a word in the wrong form to save space — shorten the sentence instead.' + fillers,
     base === 'ru' ? 'A woman\'s name ending in a consonant (Саранг, Субин, Кармен) is not declined: «у Саранг», «с Субин». Use the gender given for a character in <context> for every line by or about that character.' : '',
+    base === 'ru' ? 'Check -тся / -ться («он боится», «надо бояться»). Keep stammering and emphasis as in the original: "W-wait!" → «П-постой!», "?!" and "!!" stay. Never drop short interjections: "Huh?" → «А?», "Ugh" → «Ух…», "Gasp" → «Ах!».' : '',
   ].filter(Boolean).join(' ');
 }
 
@@ -184,6 +185,10 @@ const SPEAKER_HELP =
 
 export const TEXT_TYPE_HELP =
   'type is one of DIALOGUE (speech bubble), NARRATION (caption box; also game/system windows — status, quest, skill, notification: translate their labels and messages, keep the numbers), SFX (sound effect drawn in the art), SIGN (text on objects/signs), OTHER.';
+
+/** How the lettering looks: one letter, so the translation is set the same way (see pipeline matchLook). */
+export const LOOK_HELP =
+  's is how the text is lettered: n normal speech, b shouted or extra bold, i thought, whisper or memory (slanted or soft), u game/system window or sign, h a small handwritten aside next to a bubble.';
 
 /** What the vision model must not put into the blocks (shared by both vision instructions). */
 const VISION_RULES =
@@ -196,12 +201,13 @@ const ENTITY_HELP =
 export function visionFullInstruction(width: number, height: number): string {
   return [
     `The image is ${width}×${height} pixels. Find every piece of text (speech bubbles, captions, sound effects, signs), in reading order.`,
-    'Return JSON: {"blocks":[{"box":[x0,y0,x1,y1],"text":"original text","translation":"translated text","type":"DIALOGUE","vertical":true,"speaker":"","gender":"unknown"}],"entities":[],"summary":""}.',
+    'Return JSON: {"blocks":[{"box":[x0,y0,x1,y1],"text":"original text","translation":"translated text","type":"DIALOGUE","vertical":true,"speaker":"","gender":"unknown","s":"n"}],"entities":[],"summary":""}.',
     'box is the tight bounding box of the text itself (not the whole bubble) in coordinates normalised to 0–1000 on both axes, where [0,0] is the top-left corner and [1000,1000] the bottom-right.',
     'One block per bubble or caption; join the lines of one bubble into one text. vertical is true for top-to-bottom columns.',
     VISION_RULES,
     SPEAKER_HELP,
     TEXT_TYPE_HELP,
+    LOOK_HELP,
     ENTITY_HELP,
     'If there is no text, return {"blocks":[],"entities":[],"summary":""}.',
   ].join('\n');
@@ -214,8 +220,8 @@ export function visionFullInstruction(width: number, height: number): string {
 export function visionCollageInstruction(width: number, height: number, pieces: number, sourceLang = 'auto', withTranslation = false, strict = false): string {
   const lang = sourceLang === 'auto' ? 'the language it is written in' : `${languageName(sourceLang)}, as printed`;
   const shape = withTranslation
-    ? '{"blocks":[{"id":1,"text":"original text","translation":"translated text","type":"DIALOGUE"}],"entities":[],"summary":""}'
-    : '{"blocks":[{"id":1,"text":"original text","type":"DIALOGUE"}]}';
+    ? '{"blocks":[{"id":1,"text":"original text","translation":"translated text","type":"DIALOGUE","s":"n"}],"entities":[],"summary":""}'
+    : '{"blocks":[{"id":1,"text":"original text","type":"DIALOGUE","s":"n"}]}';
   return [
     `The image is ${width}×${height} pixels: a collage of ${pieces} pieces cut out of ONE comic page, in the page's reading order. Each piece has its number in a grey box on its left and a frame around it.`,
     withTranslation
@@ -226,6 +232,7 @@ export function visionCollageInstruction(width: number, height: number, pieces: 
     '"id" is the number of the piece. One entry per bubble or caption; a piece holding two separate bubbles gives two entries with the same id; a piece with no letters gives none. Join the lines of one bubble into one text. Never read the grey numbers or the frames as text.',
     'The pieces come from one scene: read them in order, a sentence may go on in the next piece.',
     TEXT_TYPE_HELP,
+    LOOK_HELP,
     ...(withTranslation ? [ENTITY_HELP] : []),
   ]
     .filter(Boolean)
@@ -239,11 +246,12 @@ export function visionOcrInstruction(width: number, height: number, sourceLang =
     `The image is ${width}×${height} pixels. Find every piece of text (speech bubbles, captions, sound effects, signs), in reading order, and transcribe it exactly.`,
     `Do NOT translate in this step: "text" is the letters exactly as they stand in the image, in ${lang}. A translation here is an error — another step translates.`,
     strict ? 'Your previous answer gave a translation instead of the text in the image. Copy the original letters this time.' : '',
-    'Return JSON: {"blocks":[{"box":[x0,y0,x1,y1],"text":"original text","type":"DIALOGUE","vertical":true,"speaker":"","gender":"unknown"}]}.',
+    'Return JSON: {"blocks":[{"box":[x0,y0,x1,y1],"text":"original text","type":"DIALOGUE","vertical":true,"speaker":"","gender":"unknown","s":"n"}]}.',
     'box is the tight bounding box of the text in coordinates normalised to 0–1000 on both axes.',
     VISION_RULES,
     SPEAKER_HELP,
     TEXT_TYPE_HELP,
+    LOOK_HELP,
   ]
     .filter(Boolean)
     .join('\n');

@@ -94,8 +94,8 @@ class LamaInpainter:
 
 
 def flat_ring_color(rgb: np.ndarray, mask: np.ndarray, width: int = 3) -> tuple[int, int, int] | None:
-    """The colour of a plain background around a mask: the 3 px ring around it nearly all one colour
-    (no art, screentone or gradient). Then a fill is as good as LaMa and costs nothing."""
+    """The colour of a plain background around a mask: the 3 px ring around it one colour (no art,
+    screentone or gradient). Then a fill is as good as LaMa and costs nothing."""
     m = (mask > 0).astype(np.uint8)
     if not m.any():
         return None
@@ -104,9 +104,11 @@ def flat_ring_color(rgb: np.ndarray, mask: np.ndarray, width: int = 3) -> tuple[
     if len(ring) < 24:
         return None
     med = np.median(ring, axis=0)
-    diff = ring.astype(np.int16) - med.astype(np.int16)
-    close = float((np.abs(diff).max(axis=1) <= 18).mean())
-    if close < 0.95 or float(ring.astype(np.float32).std(axis=0).max()) > 6:
+    # Strict: one exact colour. A gradient, glow or texture filled with one colour shows as a patch,
+    # so anything that varies goes to LaMa: max - min <= 5 per channel (1 % stray pixels allowed).
+    lo = np.percentile(ring, 1, axis=0)
+    hi = np.percentile(ring, 99, axis=0)
+    if float((hi - lo).max()) > 5:
         return None
     return int(med[0]), int(med[1]), int(med[2])
 

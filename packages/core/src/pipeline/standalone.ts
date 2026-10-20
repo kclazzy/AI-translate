@@ -9,7 +9,8 @@ import { createProvider } from '../llm/presets';
 import type { FetchLike, LlmProvider } from '../llm/types';
 import { memoryKey, mergeContext, rememberedTranslation, withoutPage, type ContextUpdate, type TranslationContext } from '../translate/context';
 import { applyForbiddenFixes, findGlossaryHits, findViolations } from '../translate/glossary';
-import { isDegenerate, parseVisionAnswer, tameRuns, type VisionAnswer } from '../translate/parse';
+import { isDegenerate, parseVisionAnswer, tameRuns, type Look, type VisionAnswer } from '../translate/parse';
+import { FONT_STACKS } from '../render/style';
 import { buildSystemPrompt, contextData, visionCollageInstruction, visionFullInstruction, visionOcrInstruction, visionPhrasebook, type PromptInput } from '../translate/prompt';
 import { completeFitted, CONTEXT_LEVELS, estimateTokens, growRoom, imageTokens, OCR_LEVEL, windowOf } from '../translate/budget';
 import { translateBlocks, usageFrom } from '../translate/translator';
@@ -168,6 +169,7 @@ interface Located {
   view: View;
   speaker?: string;
   gender?: 'male' | 'female' | 'unknown';
+  look?: Look;
   /** Read from an answer that was cut off or had to be mended. */
   low?: boolean;
   /** The reading step gave the translation instead of the original (see readTranslated). */
@@ -337,8 +339,8 @@ function errorText(e: unknown): string {
 }
 
 /**
- * The ring of pixels around a mask (3 px wide): when nearly all of it is one colour (no art, no
- * screentone, no gradient), that colour — else null. Then a fill is as good as LaMa and costs nothing.
+ * The ring of pixels around a mask (3 px wide): when it is one colour (no art, no screentone, no
+ * gradient), that colour — else null. Then a fill is as good as LaMa and costs nothing.
  */
 export function flatRing(img: PixelData, mask: Uint8Array, width = 3): [number, number, number] | null {
   const { width: w, height: h, data } = img;
@@ -374,25 +376,20 @@ export function flatRing(img: PixelData, mask: Uint8Array, width = 3): [number, 
     return v[v.length >> 1];
   };
   const c: [number, number, number] = [med(0), med(1), med(2)];
-  let close = 0;
-  const sd = [0, 0, 0];
-  for (const i of ring) {
-    let far = false;
-    for (let k = 0; k < 3; k++) {
-      const d = data[i * 4 + k] - c[k];
-      sd[k] += d * d;
-      if (Math.abs(d) > 18) far = true;
-    }
-    if (!far) close++;
+  // Strict: one exact colour (a white or black bubble, a flat digital panel). A soft gradient, glow
+  // or texture shows as a patch when filled with one colour, so anything that varies goes to LaMa:
+  // per channel max − min ≤ 5 over the ring (1 % of stray pixels — the edge of a letter — allowed).
+  for (let k = 0; k < 3; k++) {
+    const v = ring.map((i) => data[i * 4 + k]).sort((a, b) => a - b);
+    const cut = Math.floor(v.length * 0.01);
+    if (v[v.length - 1 - cut] - v[cut] > 5) return null;
   }
-  const n = ring.length;
-  if (close / n < 0.95 || sd.some((v) => Math.sqrt(v / n) > 6)) return null;
   return c;
 }
 
 export async function redrawArt(original: TiledImage, cleaned: TiledImage, masks: { box: Box; mask: Uint8Array }[], inpaint: Inpainter, signal?: AbortSignal, failed?: (e: unknown) => void): Promise<number> {
   let done = 0;
-  for (const m of masks.slice(0, 12)) {
+  for (const m of masks.slice(0, 16)) {
     try {
       // Context around the mask helps LaMa: a margin of half the box on every side.
       const pad = Math.round(Math.max(24, Math.max(m.box[2], m.box[3]) * 0.5));
@@ -460,9 +457,29 @@ export function scriptFits(script: ReturnType<typeof detectScript>, lang: string
 /** Letters with case (Latin, Cyrillic, Greek) and all of them capitals: comic lettering. */
 export { isAllCaps } from '../translate/caseNorm';
 import { joinLetterBlocks, keepAsDrawn } from './asDrawn';
+import { growOverPlain, mergeSplitLines } from './splitLines';
 import { COLLAGE_MAX, drawCollage, pieceBoxes, pieceScale, planCollage, withPieceBoxes, type CollagePiece } from './collage';
 import { fixSfx } from '../translate/sfx';
 import { isAllCaps } from '../translate/caseNorm';
+
+/**
+ * The lettering the model saw (LOOK_HELP) as a style: a shout in bold capitals, a thought or whisper
+ * slanted, a system window or sign in the narrow caption face, a small aside in the handwritten one.
+ * The pixels measured later add the colour and outline of the original letters.
+ */
+export function lookStyle(look: Look, type: TextBlock['textType']): Partial<TextStyle> {
+  if (type === 'SFX') return {};
+  switch (look) {
+    case 'b':
+      return { bold: true, uppercase: true };
+    case 'i':
+      return { italic: true };
+    case 'u':
+      return { fontFamily: FONT_STACKS.narration };
+    case 'h':
+      return { fontFamily: FONT_STACKS.hand };
+  }
+}
 
 /** Make the translation look like the original: capitals, weight and colour of the letters. */
 export function matchLettering(b: TextBlock, l: Lettering | undefined): Partial<TextStyle> {
@@ -835,7 +852,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     for (const b of answer.blocks) {
       const box: Box = [(b.box[0] / 1000) * original.width, view.y + (b.box[1] / 1000) * view.h, ((b.box[2] - b.box[0]) / 1000) * original.width, ((b.box[3] - b.box[1]) / 1000) * view.h];
       if (debug.modelBlocks.length < 200) debug.modelBlocks.push({ box: box.map(Math.round) as Box, text: b.text, ...(b.translation !== undefined ? { translation: b.translation } : {}) });
-      located.push({ box: clampBox(box, original.width, original.height), text: b.text, translation: b.translation, type: b.type, vertical: b.vertical, view, speaker: b.speaker, gender: b.gender, ...(answer.repaired || b.pretranslated ? { low: true } : {}), ...(b.pretranslated ? { pre: true } : {}) });
+      located.push({ box: clampBox(box, original.width, original.height), text: b.text, translation: b.translation, type: b.type, vertical: b.vertical, view, speaker: b.speaker, gender: b.gender, ...(b.look ? { look: b.look } : {}), ...(answer.repaired || b.pretranslated ? { low: true } : {}), ...(b.pretranslated ? { pre: true } : {}) });
     }
   }
   tDetected = performance.now();
@@ -870,6 +887,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       ...(l.low ? { lowConfidence: true } : {}),
       ...(l.speaker ? { speaker: l.speaker } : {}),
       ...(l.gender ? { speakerGender: l.gender } : {}),
+      ...(l.look ? { style: lookStyle(l.look, l.type) } : {}),
     };
   });
 
@@ -878,6 +896,21 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   if (letters.joined.length) {
     blocks = letters.blocks;
     for (const g of letters.joined) addStep(debug, `letters ${g.join(', ')} joined into one block`);
+  }
+  // One bubble read as two blocks (lines of it): one block, translated and set as one.
+  const rejoined = new Set<string>();
+  if (!req.generic) {
+    const split = mergeSplitLines(blocks, (x, y, w, h) => {
+      const [cx, cy, cw, ch] = clampBox([x, y, w, h], original.width, original.height);
+      return original.getRegion(cx, cy, cw, ch);
+    });
+    if (split.joined.length) {
+      blocks = split.blocks;
+      for (const [a, b] of split.joined) {
+        rejoined.add(a);
+        addStep(debug, `${b} is the next lines of ${a}'s bubble → joined`);
+      }
+    }
   }
   for (const b of blocks) {
     const why = b.translate ? keepAsDrawn(b, { translateLogo: config.translateLogo }) : null;
@@ -900,6 +933,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     const translator = recording(createProvider(translatorCfg!, deps.fetchImpl), 'translate', debug);
     // Blocks the reading step already translated (see readTranslated) keep that translation.
     const pre = new Set(merged.flatMap((l, i) => (l.pre ? [`b${i + 1}`] : [])));
+    // A joined block without a translation for both halves is translated as one.
+    for (const id of rejoined) if (!blocks.find((b) => b.id === id)?.translatedText) pre.delete(id);
     // Translated on an earlier page of the series (a sign on the wall, a line said again): the same words.
     for (const b of blocks) {
       const known = b.translate && !pre.has(b.id) ? rememberedTranslation(req.context, b.originalText, b.textType) : undefined;
@@ -1030,7 +1065,13 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       }
       // The detector's bubble around the text limits the bubble the cleaner looks for.
       const bubbleBox = dets && b.textType !== 'SFX' ? bubbleAround(b.bbox, dets) : undefined;
-      const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, sfx: b.textType === 'SFX', expand: config.inpaintExpand, ...(bubbleBox ? { bubbleBox } : {}) });
+      // Text within 12 px of the top or bottom edge (a line cut by the seam of two pictures): the
+      // letters are looked for up to the edge, so their cut halves do not stay along the seam.
+      const [ex, ey, ew, eh] = b.bbox;
+      const toTop = erase && ey > 0 && ey <= 12;
+      const toBottom = erase && ey + eh < original.height && ey + eh >= original.height - 12;
+      const cleanBox: Box = toTop || toBottom ? [ex, toTop ? 0 : ey, ew, (toBottom ? original.height : ey + eh) - (toTop ? 0 : ey)] : b.bbox;
+      const r = cleanBlock(cleaned!, cleanBox, { analyzeOnly: !erase, sfx: b.textType === 'SFX', expand: config.inpaintExpand, ...(bubbleBox ? { bubbleBox } : {}) });
       if (bubbleBox && !r.closed && !r.artMask) {
         // The outline was not found, but the detector saw a bubble: lay the text out in an ellipse
         // inscribed in it (erasing still went by the letters' mask).
@@ -1039,6 +1080,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         addStep(debug, `bubble of ${b.id} taken from the detector`);
       }
       if (r.artMask) artMasks.push(r.artMask);
+      if (r.redoMask) artMasks.push(r.redoMask);
       if (r.bubble && b.textType !== 'DIALOGUE' && b.textType !== 'NARRATION') {
         // A sign or a sound effect lies inside its own plate or over the art: a "bubble" that does not even
         // hold the middle of the text is a neighbour's bubble, and the translation would go into it.
@@ -1052,6 +1094,18 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         }
       }
       if (!r.bubble && b.textType !== 'SFX') addStep(debug, `bubble not found for ${b.id} → text over art`);
+      if (r.bubble && !r.closed && erase && r.bubble.shape === 'rect' && (b.textType === 'DIALOGUE' || b.textType === 'NARRATION')) {
+        // An open bubble (its outline not found) on plain ground: the translation, usually longer,
+        // may take the free ground around the original text instead of shrinking.
+        const grown = growOverPlain((x, y, w, h) => cleaned!.getRegion(x, y, w, h), r.bubble.safeArea, parseHex(r.bubble.fill), original);
+        if (boxArea(grown) > boxArea(r.bubble.safeArea) * 1.05) {
+          const bb = r.bubble.box;
+          const x0 = Math.min(bb[0], grown[0]);
+          const y0 = Math.min(bb[1], grown[1]);
+          r.bubble = { ...r.bubble, safeArea: grown, box: [x0, y0, Math.max(bb[0] + bb[2], grown[0] + grown[2]) - x0, Math.max(bb[1] + bb[3], grown[1] + grown[3]) - y0] };
+          addStep(debug, `room for ${b.id} grown over the plain ground`);
+        }
+      }
       b.bubble = r.bubble;
       closedBubble.set(b.id, r.closed);
       if (r.lettering) letterHeight.set(b.id, r.lettering.letterHeight);

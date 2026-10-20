@@ -5,6 +5,8 @@ export const FONT_STACKS = {
   dialogue: '"AIT Lettering", "AIT Comic", "Comic Neue", "Comic Sans MS", sans-serif',
   narration: '"AIT Narration", "PT Sans Narrow", "Arial Narrow", sans-serif',
   sfx: '"AIT SFX", "Impact", "Arial Black", sans-serif',
+  /** Small handwritten asides next to a bubble (Pangolin). */
+  hand: '"AIT Comic", "Pangolin", "Comic Neue", "Comic Sans MS", sans-serif',
   cjk: '"Noto Sans CJK JP", "Noto Sans JP", "Hiragino Sans", "Yu Gothic", "Microsoft YaHei", sans-serif',
 };
 

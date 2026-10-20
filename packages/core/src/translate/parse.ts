@@ -210,8 +210,18 @@ export interface VisionBlock {
   vertical: boolean;
   speaker?: string;
   gender?: 'male' | 'female' | 'unknown';
+  /** How the text is lettered (see LOOK_HELP). */
+  look?: Look;
   /** The reading step gave the translation instead of the original (see readView): `translation` is it. */
   pretranslated?: boolean;
+}
+
+/** How a text is lettered: shout, thought/whisper, system window or sign, small handwritten aside (normal: none). */
+export type Look = 'b' | 'i' | 'u' | 'h';
+
+function lookOf(v: unknown): Look | undefined {
+  const s = typeof v === 'string' ? v.trim().toLowerCase()[0] : '';
+  return s === 'b' || s === 'i' || s === 'u' || s === 'h' ? s : undefined;
 }
 
 export interface VisionAnswer {
@@ -281,6 +291,7 @@ export function parseVisionAnswer(raw: string, expectTranslation: boolean, repai
       vertical: b.vertical === true,
       speaker: sanitizeText(b.speaker, 60) || undefined,
       gender: b.gender === 'male' || b.gender === 'female' ? b.gender : undefined,
+      look: lookOf(b.s ?? b.style),
     });
   }
   return {
