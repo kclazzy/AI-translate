@@ -2,7 +2,7 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { describe, expect, it } from 'vitest';
 import { configFromPreset, DEFAULT_PROFILES, defaultSettings, pipelineConfigFromSettings, pipelineHash, runStandalonePipeline } from '../src';
-import { pieceBoxes, planCollage, withPieceBoxes } from '../src/pipeline/collage';
+import { pieceBoxes, pieceScale, planCollage, withPieceBoxes } from '../src/pipeline/collage';
 import { detectorWindows, type Detection, type TextDetector } from '../src/pipeline/detect';
 import type { PixelData } from '../src/image/backend';
 import type { Box } from '../src/types';
@@ -88,12 +88,43 @@ describe('collage of the text pieces', () => {
     expect(boxes[2][1]).toBeGreaterThan(800);
   });
 
-  it('lays pieces out in a narrow picture with room for the numbers', () => {
-    const plan = planCollage([[0, 0, 300, 100], [0, 200, 300, 100], [0, 400, 300, 100], [0, 600, 1500, 200]], 1024);
-    expect(plan.width).toBeLessThanOrEqual(1024);
+  it('lays pieces out in a picture of whole 28 px patches, at most 896 wide, with room for the numbers', () => {
+    const plan = planCollage([[0, 0, 300, 100], [0, 200, 300, 100], [0, 400, 300, 100], [0, 600, 1500, 200]]);
+    expect(plan.width).toBeLessThanOrEqual(896);
+    expect(plan.width % 28).toBe(0);
+    expect(plan.height % 28).toBe(0);
     expect(plan.pieces.map((p) => p.id)).toEqual([1, 2, 3, 4]);
-    expect(plan.pieces[3].at[2]).toBeLessThan(1024);
+    expect(plan.pieces[3].at[2]).toBeLessThan(896);
     for (const p of plan.pieces) expect(p.at[0]).toBeGreaterThanOrEqual(30);
+    // No piece outside the picture, none over another.
+    for (const p of plan.pieces) expect(p.at[0] + p.at[2] <= plan.width && p.at[1] + p.at[3] <= plan.height).toBe(true);
+  });
+
+  it('many small pieces make a square-ish picture, not a long strip', () => {
+    const boxes = Array.from({ length: 12 }, (_, i) => [0, i * 300, 220, 90] as Box);
+    const plan = planCollage(boxes);
+    expect(plan.width / plan.height).toBeGreaterThan(0.5);
+    expect(plan.width / plan.height).toBeLessThan(2.5);
+  });
+
+  it('giant lettering is scaled down, small lettering is not', async () => {
+    const piece = async (font: number, lines: number, h: number): Promise<PixelData> => {
+      const c = createCanvas(600, h);
+      const g = c.getContext('2d') as any;
+      g.fillStyle = '#fff';
+      g.fillRect(0, 0, 600, h);
+      g.fillStyle = '#000';
+      g.font = `bold ${font}px sans-serif`;
+      for (let i = 0; i < lines; i++) g.fillText('WHAT', 20, 20 + font + i * font * 1.3);
+      const d = g.getImageData(0, 0, 600, h);
+      return { width: 600, height: h, data: d.data };
+    };
+    const giant = pieceScale(await piece(150, 1, 220));
+    expect(giant).toBeLessThan(1);
+    expect(giant).toBeGreaterThanOrEqual(32 / 150 - 0.01);
+    // Six lines of 28 px letters: already small, left as they are.
+    expect(pieceScale(await piece(28, 6, 260))).toBe(1);
+    expect(pieceScale(await piece(40, 1, 120))).toBe(1);
   });
 
   it('maps the answer back onto the page; two bubbles in one piece get one each', () => {

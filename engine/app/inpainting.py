@@ -64,7 +64,12 @@ class LamaInpainter:
             raise FileNotFoundError(model_path)
         available = set(ort.get_available_providers())
         chosen = [p for p in providers if p in available] or ["CPUExecutionProvider"]
-        self.session = ort.InferenceSession(model_path, providers=chosen)
+        opts = ort.SessionOptions()
+        opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        opts.enable_cpu_mem_arena = True
+        # DirectML (Windows without CUDA) does not work with memory patterns; everywhere else they help.
+        opts.enable_mem_pattern = "DmlExecutionProvider" not in chosen
+        self.session = ort.InferenceSession(model_path, sess_options=opts, providers=chosen)
         inputs = self.session.get_inputs()
         self.image_input = next((i.name for i in inputs if "image" in i.name.lower()), inputs[0].name)
         self.mask_input = next((i.name for i in inputs if "mask" in i.name.lower()), inputs[-1].name)
@@ -88,6 +93,34 @@ class LamaInpainter:
         return result
 
 
+def flat_ring_color(rgb: np.ndarray, mask: np.ndarray, width: int = 3) -> tuple[int, int, int] | None:
+    """The colour of a plain background around a mask: the 3 px ring around it nearly all one colour
+    (no art, screentone or gradient). Then a fill is as good as LaMa and costs nothing."""
+    m = (mask > 0).astype(np.uint8)
+    if not m.any():
+        return None
+    grown = cv2.dilate(m, np.ones((2 * width + 1, 2 * width + 1), np.uint8))
+    ring = rgb[(grown > 0) & (m == 0)]
+    if len(ring) < 24:
+        return None
+    med = np.median(ring, axis=0)
+    diff = ring.astype(np.int16) - med.astype(np.int16)
+    close = float((np.abs(diff).max(axis=1) <= 18).mean())
+    if close < 0.95 or float(ring.astype(np.float32).std(axis=0).max()) > 6:
+        return None
+    return int(med[0]), int(med[1]), int(med[2])
+
+
+def inpaint_or_fill(rgb: np.ndarray, mask: np.ndarray, inpainter: Inpainter) -> np.ndarray:
+    """LaMa (or Telea) only where the background needs it; a plain one is filled with its colour."""
+    color = flat_ring_color(rgb, mask)
+    if color is None:
+        return inpainter.inpaint(rgb, mask)
+    out = rgb.copy()
+    out[mask > 0] = np.array(color, dtype=np.uint8)
+    return out
+
+
 def clean_region(page: np.ndarray, b: RawBlock, inpainter: Inpainter, context_pad: int = 24) -> None:
     """Inpaint one block in place using a crop with some surrounding context."""
     H, W = page.shape[:2]
@@ -100,4 +133,4 @@ def clean_region(page: np.ndarray, b: RawBlock, inpainter: Inpainter, context_pa
     mask[ry - y0 : ry - y0 + rh, rx - x0 : rx - x0 + rw] = mask_full
     if not mask.any():
         return
-    page[y0:y1, x0:x1] = inpainter.inpaint(crop, mask)
+    page[y0:y1, x0:x1] = inpaint_or_fill(crop, mask, inpainter)

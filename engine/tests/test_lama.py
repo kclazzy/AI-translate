@@ -44,3 +44,36 @@ def test_lama_inpainter_only_changes_masked_pixels(tmp_path):
     assert np.all(out[0:90] == 250)
     inside = out[105:145, 55:115]
     assert abs(int(inside.mean()) - 127) <= 2
+
+
+def test_plain_background_is_filled_without_the_model():
+    import numpy as np
+
+    from app.inpainting import inpaint_or_fill
+
+    class Boom:
+        name = "boom"
+
+        def inpaint(self, rgb, mask):  # pragma: no cover - must not be called
+            raise AssertionError("LaMa called on a plain background")
+
+    rgb = np.full((60, 60, 3), (60, 62, 70), np.uint8)
+    rgb[20:40, 20:40] = 255
+    mask = np.zeros((60, 60), np.uint8)
+    mask[18:42, 18:42] = 1
+    out = inpaint_or_fill(rgb, mask, Boom())
+    assert tuple(out[30, 30]) == (60, 62, 70)
+
+    # Art around the letters: the model is asked.
+    art = (np.indices((60, 60)).sum(axis=0)[..., None] * np.array([7, 3, 5]) % 256).astype(np.uint8)
+    called = []
+
+    class Model:
+        name = "m"
+
+        def inpaint(self, rgb, mask):
+            called.append(1)
+            return rgb
+
+    inpaint_or_fill(art, mask, Model())
+    assert called == [1]

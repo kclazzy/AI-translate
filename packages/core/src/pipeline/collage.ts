@@ -1,4 +1,4 @@
-import { releaseCanvas, type ImageBackend } from '../image/backend';
+import { releaseCanvas, type ImageBackend, type PixelData } from '../image/backend';
 import { clampBox, type TiledImage } from '../image/tiled';
 import type { Box } from '../types';
 import { extractJson, findBlocksArray } from '../translate/parse';
@@ -52,30 +52,110 @@ export function pieceBoxes(boxes: Box[], width: number, height: number): Box[] {
   return out.sort((a, b) => (Math.abs(a[1] - b[1]) < Math.min(a[3], b[3]) * 0.5 ? a[0] - b[0] : a[1] - b[1]));
 }
 
-/** Pieces on shelves of a picture `maxWidth` wide; a piece too wide is scaled down. */
-export function planCollage(boxes: Box[], maxWidth = 1024, texts: Box[] = []): CollagePlan {
-  const pieces: CollagePiece[] = [];
+/** The vision encoder of Qwen-VL works in patches of 28 px: a picture of whole patches is not resized again. */
+export const PATCH = 28;
+/** Longest side of a collage (it grows taller only when the pieces do not fit). */
+export const COLLAGE_MAX = 896;
+/** A piece taller than this with big letters is scaled down (fewer picture tokens) … */
+const TALL_PIECE = 160;
+/** … but its letters are never made smaller than this. */
+const MIN_LETTER = 32;
+
+const ceilTo = (v: number, step: number) => Math.max(step, Math.ceil(v / step) * step);
+
+/**
+ * How much to shrink a piece: giant lettering (a shout over half a page) costs the model many
+ * picture tokens and reads as well smaller. The letter height is measured from the rows with ink
+ * (lines of text); a piece is scaled so it is at most TALL_PIECE high, letters at least MIN_LETTER.
+ */
+export function pieceScale(px: PixelData): number {
+  const { width: w, height: h, data } = px;
+  if (h <= TALL_PIECE || w < 4) return 1;
+  // Background: the median brightness; ink: pixels far from it.
+  const lum = new Uint8Array(w * h);
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < w * h; i++) {
+    const l = (data[i * 4] * 3 + data[i * 4 + 1] * 6 + data[i * 4 + 2]) / 10;
+    lum[i] = l;
+    hist[l | 0]++;
+  }
+  let acc = 0;
+  let median = 0;
+  for (; median < 255 && acc + hist[median] < (w * h) / 2; median++) acc += hist[median];
+  const inkRow: boolean[] = [];
+  for (let y = 0; y < h; y++) {
+    let n = 0;
+    for (let x = 0; x < w; x++) if (Math.abs(lum[y * w + x] - median) > 80) n++;
+    inkRow.push(n > w * 0.01);
+  }
+  // Runs of rows with ink (gaps of a few rows inside a line are bridged) = lines of letters.
+  const runs: number[] = [];
+  let start = -1;
+  let gap = 0;
+  for (let y = 0; y <= h; y++) {
+    const ink = y < h && inkRow[y];
+    if (ink) {
+      if (start < 0) start = y;
+      gap = 0;
+    } else if (start >= 0 && (++gap > 3 || y === h)) {
+      runs.push(y - gap + 1 - start);
+      start = -1;
+      gap = 0;
+    }
+  }
+  const lines = runs.filter((r) => r >= 6).sort((a, b) => a - b);
+  if (!lines.length) return 1;
+  const letter = lines[Math.floor(lines.length / 2)];
+  return Math.min(1, Math.max(TALL_PIECE / h, MIN_LETTER / letter));
+}
+
+function shelve(sizes: [number, number][], width: number): { at: [number, number][]; w: number; h: number } {
+  const at: [number, number][] = [];
   let x = 0;
   let y = 0;
   let row = 0;
-  let width = 0;
-  for (const [i, b] of boxes.entries()) {
-    const k = Math.min(1, (maxWidth - LABEL) / b[2]);
-    const w = Math.round(b[2] * k);
-    const h = Math.round(b[3] * k);
-    if (x && x + LABEL + w > maxWidth) {
+  let w = 0;
+  for (const [pw, ph] of sizes) {
+    if (x && x + LABEL + pw > width) {
       x = 0;
       y += row + GAP;
       row = 0;
     }
+    at.push([x + LABEL, y]);
+    x += LABEL + pw + GAP;
+    row = Math.max(row, ph, 28);
+    w = Math.max(w, x - GAP);
+  }
+  return { at, w, h: y + row };
+}
+
+/**
+ * Pieces packed on shelves, in reading order, into a picture close to a square of at most
+ * COLLAGE_MAX a side, both sides whole patches (PATCH). `scales` shrink pieces (see pieceScale);
+ * a piece wider than the picture is scaled down to fit.
+ */
+export function planCollage(boxes: Box[], maxSide = COLLAGE_MAX, texts: Box[] = [], scales: number[] = []): CollagePlan {
+  const sizes: [number, number][] = boxes.map((b, i) => {
+    const k = Math.min(scales[i] ?? 1, (maxSide - LABEL) / b[2]);
+    return [Math.max(1, Math.round(b[2] * k)), Math.max(1, Math.round(b[3] * k))];
+  });
+  // The shelf width that gives the smallest picture (a square-ish one rather than a long strip).
+  const widest = Math.max(...sizes.map(([w]) => w + LABEL), PATCH);
+  let best: { at: [number, number][]; w: number; h: number; cost: number } | null = null;
+  for (let width = ceilTo(widest, PATCH); width <= Math.max(maxSide, ceilTo(widest, PATCH)); width += PATCH) {
+    const s = shelve(sizes, width);
+    const W = ceilTo(s.w, PATCH);
+    const H = ceilTo(s.h, PATCH);
+    const cost = W * H * (H > maxSide ? 4 : 1) * (1 + Math.abs(Math.log(W / H)) * 0.15);
+    if (!best || cost < best.cost) best = { ...s, w: W, h: H, cost };
+  }
+  const plan = best!;
+  const pieces: CollagePiece[] = boxes.map((b, i) => {
     const inside = texts.filter((t) => { const cx = t[0] + t[2] / 2; const cy = t[1] + t[3] / 2; return cx >= b[0] && cx < b[0] + b[2] && cy >= b[1] && cy < b[1] + b[3]; });
     inside.sort((a, c) => (Math.abs(a[1] - c[1]) < Math.min(a[3], c[3]) * 0.5 ? a[0] - c[0] : a[1] - c[1]));
-    pieces.push({ id: i + 1, box: b, at: [x + LABEL, y, w, h], ...(inside.length > 1 ? { parts: inside } : {}) });
-    x += LABEL + w + GAP;
-    row = Math.max(row, h, 28);
-    width = Math.max(width, x - GAP);
-  }
-  return { width: Math.max(1, width), height: Math.max(1, y + row), pieces };
+    return { id: i + 1, box: b, at: [plan.at[i][0], plan.at[i][1], sizes[i][0], sizes[i][1]], ...(inside.length > 1 ? { parts: inside } : {}) };
+  });
+  return { width: plan.w, height: plan.h, pieces };
 }
 
 /** Draw the collage: white, each piece with its number in a grey box on its left and a thin frame. */
@@ -102,7 +182,7 @@ export async function drawCollage(backend: ImageBackend, image: TiledImage, plan
     ctx.fillText(String(p.id), ax - LABEL / 2 - 1, ay + 14);
   }
   try {
-    return { jpeg: await backend.encode(canvas, 'image/jpeg', 0.9), width: plan.width, height: plan.height };
+    return { jpeg: await backend.encode(canvas, 'image/jpeg', 0.85), width: plan.width, height: plan.height };
   } finally {
     releaseCanvas(canvas);
   }

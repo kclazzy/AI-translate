@@ -13,7 +13,7 @@ from PIL import Image
 
 from .detection import RawBlock
 from .errors import AppError
-from .imaging import encode_png
+from .imaging import encode_jpeg
 from .llm import LlmClient, image_part, with_retry
 from .schemas import Usage
 from .translation import crop_ocr_instruction, extract_json, normalize_type, sanitize
@@ -64,7 +64,7 @@ class VisionLlmOcr:
                 if scale < 1:
                     crop = cv2.resize(crop, (max(1, int(crop.shape[1] * scale)), max(1, int(crop.shape[0] * scale))), interpolation=cv2.INTER_AREA)
                 parts.append({"type": "text", "text": f"Crop {bid}:"})
-                parts.append(image_part(encode_png(crop), "image/png"))
+                parts.append(image_part(encode_jpeg(crop, 90), "image/jpeg"))
             parts.append({"type": "text", "text": crop_ocr_instruction(ids)})
             system = (
                 f"You are an OCR engine for manga and comics. Expected language: {lang_hint}. "

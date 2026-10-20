@@ -54,7 +54,8 @@ def decode_image(data: bytes, max_pixels: int) -> np.ndarray:
 
 
 def encode_png(rgb: np.ndarray) -> bytes:
-    ok, buf = cv2.imencode(".png", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_PNG_COMPRESSION, 3])
+    # Level 1: several times faster than the default and only a little bigger (the bytes stay on this computer).
+    ok, buf = cv2.imencode(".png", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_PNG_COMPRESSION, 1])
     if not ok:
         raise AppError("UNKNOWN", "PNG encoding failed", retryable=False)
     return buf.tobytes()

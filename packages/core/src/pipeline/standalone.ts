@@ -336,6 +336,60 @@ function errorText(e: unknown): string {
   return String((e as Error)?.message ?? e).slice(0, 160);
 }
 
+/**
+ * The ring of pixels around a mask (3 px wide): when nearly all of it is one colour (no art, no
+ * screentone, no gradient), that colour — else null. Then a fill is as good as LaMa and costs nothing.
+ */
+export function flatRing(img: PixelData, mask: Uint8Array, width = 3): [number, number, number] | null {
+  const { width: w, height: h, data } = img;
+  // Grow the mask by `width` px (rows, then columns), the ring is what was added.
+  const rowGrown = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    let last = -Infinity;
+    for (let x = 0; x < w; x++) if (mask[y * w + x]) last = x;
+      else if (x - last <= width) rowGrown[y * w + x] = 1;
+    last = Infinity;
+    for (let x = w - 1; x >= 0; x--) if (mask[y * w + x]) last = x;
+      else if (last - x <= width) rowGrown[y * w + x] = 1;
+  }
+  const ring: number[] = [];
+  for (let x = 0; x < w; x++) {
+    let last = -Infinity;
+    for (let y = 0; y < h; y++) {
+      const i = y * w + x;
+      if (mask[i] || rowGrown[i]) last = y;
+      else if (y - last <= width) ring.push(i);
+    }
+    last = Infinity;
+    for (let y = h - 1; y >= 0; y--) {
+      const i = y * w + x;
+      if (mask[i] || rowGrown[i]) last = y;
+      else if (last - y <= width) ring.push(i);
+    }
+  }
+  for (let i = 0; i < w * h; i++) if (rowGrown[i]) ring.push(i);
+  if (ring.length < 24) return null;
+  const med = (k: number) => {
+    const v = ring.map((i) => data[i * 4 + k]).sort((a, b) => a - b);
+    return v[v.length >> 1];
+  };
+  const c: [number, number, number] = [med(0), med(1), med(2)];
+  let close = 0;
+  const sd = [0, 0, 0];
+  for (const i of ring) {
+    let far = false;
+    for (let k = 0; k < 3; k++) {
+      const d = data[i * 4 + k] - c[k];
+      sd[k] += d * d;
+      if (Math.abs(d) > 18) far = true;
+    }
+    if (!far) close++;
+  }
+  const n = ring.length;
+  if (close / n < 0.95 || sd.some((v) => Math.sqrt(v / n) > 6)) return null;
+  return c;
+}
+
 export async function redrawArt(original: TiledImage, cleaned: TiledImage, masks: { box: Box; mask: Uint8Array }[], inpaint: Inpainter, signal?: AbortSignal, failed?: (e: unknown) => void): Promise<number> {
   let done = 0;
   for (const m of masks.slice(0, 12)) {
@@ -353,6 +407,16 @@ export async function redrawArt(original: TiledImage, cleaned: TiledImage, masks
           const py = m.box[1] - ay + y;
           if (px >= 0 && py >= 0 && px < aw && py < ah) inMask[py * aw + px] = 1;
         }
+      }
+      // A plain background around the letters (a grey or black panel, a narration box): one colour
+      // fills it exactly, without LaMa.
+      const flat = flatRing(img, inMask);
+      if (flat) {
+        const cur = cleaned.getRegion(ax, ay, aw, ah);
+        for (let i = 0; i < inMask.length; i++) if (inMask[i]) for (let k = 0; k < 3; k++) cur.data[i * 4 + k] = flat[k];
+        cleaned.putRegion(cur, ax, ay);
+        done++;
+        continue;
       }
       const res = await inpaint(img, inMask, signal);
       if (res.width !== aw || res.height !== ah) continue;
@@ -396,7 +460,7 @@ export function scriptFits(script: ReturnType<typeof detectScript>, lang: string
 /** Letters with case (Latin, Cyrillic, Greek) and all of them capitals: comic lettering. */
 export { isAllCaps } from '../translate/caseNorm';
 import { joinLetterBlocks, keepAsDrawn } from './asDrawn';
-import { drawCollage, pieceBoxes, planCollage, withPieceBoxes, type CollagePiece } from './collage';
+import { COLLAGE_MAX, drawCollage, pieceBoxes, pieceScale, planCollage, withPieceBoxes, type CollagePiece } from './collage';
 import { fixSfx } from '../translate/sfx';
 import { isAllCaps } from '../translate/caseNorm';
 
@@ -739,7 +803,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     const area = boxes.reduce((a, b) => a + b[2] * b[3], 0);
     // Text over most of the page (a title page, a wall of captions): the page as it is reads as well.
     if (boxes.length <= 40 && area <= original.width * original.height * 0.6) {
-      const plan = planCollage(boxes, 1024, textDets.map((d) => d.box));
+      const plan = planCollage(boxes, COLLAGE_MAX, textDets.map((d) => d.box), boxes.map((b) => (b[3] > 160 ? pieceScale(original.getRegion(b[0], b[1], b[2], b[3])) : 1)));
       const drawn = await drawCollage(deps.backend, original, plan);
       addStep(debug, `collage: ${plan.pieces.length} piece(s), ${drawn.width}×${drawn.height} (${Math.round((area / (original.width * original.height)) * 100)}% of the page)`);
       const view = { y: 0, h: original.height };

@@ -19,7 +19,7 @@ from .config import Settings
 from .detection import ClassicDetector, RawBlock, analyze_box, sort_reading_order
 from .errors import AppError
 from .imaging import decode_image, encode_jpeg, encode_png, output_tiles, overlap_small, resize_long_side
-from .inpainting import FillInpainter, LamaInpainter, TeleaInpainter, clean_region
+from .inpainting import FillInpainter, LamaInpainter, TeleaInpainter, clean_region, inpaint_or_fill
 from .llm import LlmClient, assert_privacy, image_part, with_retry
 from .ocr import MangaOcrProvider, PaddleOcrProvider, VisionLlmOcr, detect_lang
 from .schemas import ProviderConfig, TextBlock, TranslateOptions, Usage
@@ -362,7 +362,7 @@ class Engine:
             raise AppError("UNSUPPORTED_FORMAT", "Mask size differs from image size", retryable=False)
         mask = (mask_rgb.max(axis=2) > 127).astype(np.uint8)
         inp = self.lama() or self.telea
-        out = await asyncio.to_thread(self._locked, inp.inpaint, rgb, mask)
+        out = await asyncio.to_thread(self._locked, inpaint_or_fill, rgb, mask, inp)
         return await asyncio.to_thread(encode_png, out)
 
 
