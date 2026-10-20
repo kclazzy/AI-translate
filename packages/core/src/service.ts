@@ -297,6 +297,10 @@ export class TranslateService {
       const rendered = await renderOutput(this.backend, out, styleDefaultsFor(config, settings.fonts));
       const tStore = performance.now();
       const cleanedTiles = await Promise.all(out.cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') })));
+      // The page's pictures are bytes now: their canvases (video memory in a browser, which the
+      // garbage collector does not see) go at once — a chapter of 170 pages must not pile them up.
+      out.cleaned.dispose();
+      if (out.original !== out.cleaned) out.original?.dispose();
       const now = new Date().toISOString();
       const page = { ...rendered.page, timings: { ...rendered.page.timings, totalMs: Math.round(performance.now() - tStart) } };
       const result: StoredResult = {

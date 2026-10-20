@@ -1,3 +1,4 @@
+import { releaseCanvas } from '../image/backend';
 import type { PageTimings } from '../types';
 import type { ImageBackend, ImageMime } from '../image/backend';
 import { renderTilesAsync, encodeTiles } from '../render/render';
@@ -86,6 +87,8 @@ export async function renderOutput(backend: ImageBackend, out: Pick<PipelineOutp
   }
   const { tiles, overflow } = await renderTilesAsync(backend, out.cleaned, src.blocks, defaults);
   const encoded = await encodeTiles(backend, tiles, mime, mime === 'image/png' ? undefined : 0.92);
+  // The drawn tiles are bytes now: their canvases (video memory in a browser) go at once.
+  for (const t of tiles) releaseCanvas(t.canvas);
   const page: PageResult = {
     ...src,
     blocks: src.blocks.map((b) => ({ ...b, overflow: overflow.has(b.id) })),

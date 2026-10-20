@@ -621,7 +621,7 @@ function main() {
       } else if (st.state === 'running') {
         it.lost = 0;
         const slow = st.elapsedMs > 90_000;
-        it.overlay.note(fmt(st.elapsedMs), slow ? tr('Модель отвечает долго: проверьте её в настройках или выберите модель полегче') : undefined);
+        it.overlay.note(fmt(st.elapsedMs), slow ? slowHint(st.stage) : undefined);
       } else if (Date.now() - (it.sentAt ?? 0) > 5000 && (it.lost = (it.lost ?? 0) + 1) >= 2) {
         // The worker restarted (the browser closed it to save memory, the extension updated)
         // and forgot the job: send the picture again by itself, twice at most.
@@ -631,6 +631,22 @@ function main() {
         if (tries <= 2 && !it.docRect) void translate(it.cand, { priority: 40 });
         else it.overlay.error(tr('Задача потерялась'), tr('Расширение несколько раз перезапускалось. Нажмите «Повторить».'));
       }
+    }
+  }
+
+  /** What is slow, by the step the picture is at (so a report says where it stood). */
+  function slowHint(stage: Extract<JobStatus, { state: 'running' }>['stage']): string {
+    switch (stage) {
+      case 'ocr':
+      case 'translating':
+        return tr('Модель отвечает долго: проверьте её в настройках или выберите модель полегче');
+      case 'cleaning':
+        return tr('Долго стирается текст (LaMa): видеокарта занята или LaMa работает на процессоре');
+      case 'detecting':
+      case 'decoding':
+        return tr('Долго ищется текст: видеокарта занята');
+      default:
+        return tr('Картинка обрабатывается долго');
     }
   }
 

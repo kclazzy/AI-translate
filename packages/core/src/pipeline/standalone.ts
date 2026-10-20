@@ -1,6 +1,6 @@
 import { familyFor } from '../llm/catalog';
 import { AppError } from '../errors';
-import type { ImageBackend, PixelData } from '../image/backend';
+import { releaseCanvas, type ImageBackend, type PixelData } from '../image/backend';
 import { cleanBlock, plainFillColor, findLeftoverText, findLetterClusters, findTextRegions, luminance, parseHex, type LetterCluster, type Lettering, type LeftoverProbe } from '../image/clean';
 import { boxArea, boxToPolygon, clampBox, expandBox, overlapRatio, TiledImage } from '../image/tiled';
 import { detectScript } from '../languages';
@@ -198,6 +198,7 @@ async function encodeView(image: TiledImage, view: View, config: PipelineConfig,
     const smaller = await deps.backend.encode(canvas, 'image/jpeg', q);
     if (smaller.length < jpeg.length) jpeg = smaller;
   }
+  releaseCanvas(canvas);
   return { view, jpeg, dw, dh };
 }
 
@@ -321,12 +322,22 @@ export function engineInpainter(engine: { url: string; token: string }, deps: St
       md.data[i * 4 + 3] = 255;
     }
     mctx.putImageData(md, 0, 0);
-    const out = await client.inpaint(await deps.backend.encode(c, 'image/png'), await deps.backend.encode(mc, 'image/png'), signal);
+    let out: Uint8Array;
+    try {
+      out = await client.inpaint(await deps.backend.encode(c, 'image/png'), await deps.backend.encode(mc, 'image/png'), signal);
+    } finally {
+      releaseCanvas(c);
+      releaseCanvas(mc);
+    }
     const dec = await deps.backend.decode(out, 'image/png');
     const oc = deps.backend.createCanvas(w, h);
-    oc.getContext('2d').drawImage(dec.source, 0, 0, w, h);
-    dec.close?.();
-    return oc.getContext('2d').getImageData(0, 0, w, h);
+    try {
+      oc.getContext('2d').drawImage(dec.source, 0, 0, w, h);
+      return oc.getContext('2d').getImageData(0, 0, w, h);
+    } finally {
+      dec.close?.();
+      releaseCanvas(oc);
+    }
   };
 }
 

@@ -1,3 +1,4 @@
+import { releaseCanvas } from './backend';
 import type { TiledImage } from './tiled';
 import { yieldIfBusy } from '../util/yield';
 
@@ -75,6 +76,7 @@ function* checkSteps(image: TiledImage, opts: { full?: boolean }): Generator<voi
     ctx.imageSmoothingQuality = 'high';
     image.drawRegion(ctx, 0, top / scale, image.width, bh / scale, W, bh);
     const data: Uint8ClampedArray = ctx.getImageData(0, 0, W, bh).data;
+    releaseCanvas(canvas);
     const r = scanBand(data, W, bh, { top: top === 0, bottom: top + bh >= H });
     lines += r.lines;
     letters += r.letters;

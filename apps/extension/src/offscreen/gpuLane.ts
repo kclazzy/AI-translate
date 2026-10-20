@@ -153,5 +153,9 @@ export function gpuFetch(base: typeof fetch = fetch, limitMs = MODEL_LIMIT_MS): 
   }) as typeof fetch;
 }
 
-/** Sessions of the detector and LaMa are let go after this long without work (video memory for the model). */
-export const IDLE_RELEASE_MS = 90_000;
+/**
+ * Sessions of the detector and LaMa are let go after this long without work (video memory for the
+ * model). Not sooner: a page that takes long (a slow model) would otherwise load and compile them
+ * again on every page, which made each page slower still.
+ */
+export const IDLE_RELEASE_MS = 300_000;
