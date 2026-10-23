@@ -88,3 +88,30 @@ describe('chapter files', () => {
     expect((await readArchiveImages(epubBytes)).map((i) => i.name)).toEqual(names);
   });
 });
+
+describe('a long chapter is written page by page', () => {
+  it('each page is read only when its turn comes, a page without pictures is left out', async () => {
+    const page = await strip(400, 600, []);
+    const reads: number[] = [];
+    let open = 0;
+    let most = 0;
+    const lazy = (i: number): ExportPage => ({
+      name: `${i}.png`,
+      width: page.width,
+      height: page.height,
+      load: async () => {
+        reads.push(i);
+        open++;
+        most = Math.max(most, open);
+        const t = i === 2 ? [] : page.tiles!;
+        open--;
+        return t;
+      },
+    });
+    const bytes = await exportCbz(napiBackend, [lazy(1), lazy(2), lazy(3)], 'T');
+    expect(reads).toEqual([1, 2, 3]);
+    expect(most).toBe(1);
+    const zip = await (await import('jszip')).default.loadAsync(bytes);
+    expect(Object.keys(zip.files).filter((n) => n.endsWith('.jpg'))).toHaveLength(2);
+  });
+});

@@ -1,5 +1,5 @@
 import type { Inpainter, PixelData } from '@ait/core';
-import { GPU_NETS, GpuTimeout, IDLE_RELEASE_MS, NETS_LIMIT_MS, NETS_LOAD_LIMIT_MS, onGpu, withLimit } from './gpuLane';
+import { GPU_NETS, GpuTimeout, NETS_LIMIT_MS, NETS_LOAD_LIMIT_MS, onGpu, releaseWhenIdle, withLimit } from './gpuLane';
 import { cached, downloadWithRuntime, LAMA_URL, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, resizePixels, type Ort } from './ortRuntime';
 
 /**
@@ -44,7 +44,7 @@ export async function releaseLama(): Promise<void> {
 
 /** One redraw at a time (a session does not run two calls at once), on the card between model requests. */
 let chain: Promise<unknown> = Promise.resolve();
-let idle: ReturnType<typeof setTimeout> | undefined;
+let cancelIdle: (() => void) | undefined;
 
 let session: Promise<{ ort: Ort; s: import('onnxruntime-web').InferenceSession; image: string; mask: string }> | null = null;
 
@@ -83,8 +83,8 @@ export const lamaInpainter: Inpainter = (img, mask) => {
   chain = job.catch(() => undefined);
   void job.finally(() => {
     // Not used for a while: give the video memory back to the model.
-    clearTimeout(idle);
-    idle = setTimeout(() => void releaseLama(), IDLE_RELEASE_MS);
+    cancelIdle?.();
+    cancelIdle = releaseWhenIdle(() => void releaseLama());
   }).catch(() => undefined);
   return job;
 };

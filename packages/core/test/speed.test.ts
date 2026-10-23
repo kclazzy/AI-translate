@@ -297,7 +297,9 @@ describe('cache size', () => {
     await svc.translate(await artOnly(0), 'image/png');
     const one = (db.map.get(`kv/cache:${keys[1]}`) as { size: number }).size;
     // A cap that holds about two pages: the least recently used one (page 2) goes.
-    const dropped = await svc.pruneCache(365, (usage.usedBytes - one / 2) / 1048576);
+    // Pages used in the last hours (the chapter at hand) stay even over the cap.
+    expect(await svc.pruneCache(365, (usage.usedBytes - one / 2) / 1048576)).toBe(0);
+    const dropped = await svc.pruneCache(365, (usage.usedBytes - one / 2) / 1048576, 0);
     expect(dropped).toBe(1);
     expect(db.map.has(`results/${keys[1]}`)).toBe(false);
     expect(db.map.has(`kv/cache:${keys[1]}`)).toBe(false);

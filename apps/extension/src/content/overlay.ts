@@ -52,6 +52,7 @@ export class Overlay {
   private bar: HTMLDivElement;
   private pill: HTMLSpanElement | null = null;
   private urls: string[] = [];
+  private unloaded = false;
   private compareAt: number | null = null;
   showingOriginal = false;
   /** Languages for the ⇄ button: it shows the name of the language a click switches to. */
@@ -163,11 +164,32 @@ export class Overlay {
     this.buttons(defs);
   }
 
-  setTiles(tiles: { y: number; h: number; dataUrl: string }[], langs?: { source: string; target: string }): void {
-    if (langs) this.langs = langs;
+  /** The translated picture is shown (its tiles are in the page now, not let go for being far away). */
+  get tilesShown(): boolean {
+    return this.hasResult && !this.unloaded;
+  }
+
+  /**
+   * Far from the screen: let the pictures go (their decoded pixels and blobs), keeping the
+   * overlay's place and buttons. A chapter of 400 translated pictures would otherwise hold them all.
+   */
+  unloadTiles(): void {
+    if (!this.hasResult || this.unloaded) return;
     this.revoke();
+    this.tiles.replaceChildren();
+    this.unloaded = true;
+  }
+
+  /** The pictures again (read back from the extension's store) when the reader comes back. */
+  restoreTiles(tiles: { y: number; h: number; dataUrl: string }[]): void {
+    this.revoke();
+    this.tiles.replaceChildren(...this.images(tiles));
+    this.unloaded = false;
+  }
+
+  private images(tiles: { y: number; h: number; dataUrl: string }[]): HTMLImageElement[] {
     const total = tiles.length ? tiles[tiles.length - 1].y + tiles[tiles.length - 1].h : 1;
-    const imgs = tiles.map((t, i) => {
+    return tiles.map((t, i) => {
       const img = document.createElement('img');
       img.style.top = `${(t.y / total) * 100}%`;
       img.style.height = i < tiles.length - 1 ? `calc(${(t.h / total) * 100}% + 1px)` : `${(t.h / total) * 100}%`;
@@ -179,7 +201,13 @@ export class Overlay {
       img.alt = '';
       return img;
     });
-    this.tiles.replaceChildren(...imgs);
+  }
+
+  setTiles(tiles: { y: number; h: number; dataUrl: string }[], langs?: { source: string; target: string }): void {
+    if (langs) this.langs = langs;
+    this.revoke();
+    this.tiles.replaceChildren(...this.images(tiles));
+    this.unloaded = false;
     this.hasResult = true;
     this.pill = null;
     this.bar.className = 'bar';

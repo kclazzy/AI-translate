@@ -62,6 +62,11 @@ export class TaskQueue {
     return promise;
   }
 
+  /** Tasks waiting or running. */
+  get size(): number {
+    return this.entries.size;
+  }
+
   has(key: string): boolean {
     return this.entries.has(key);
   }

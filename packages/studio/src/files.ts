@@ -1,4 +1,4 @@
-import { AppError, naturalCompare, planSlices, readArchiveImages, rowBusyness, sniffImageMime, type ImageBackend, type ImageMime } from '@ait/core';
+import { AppError, naturalCompare, planSlices, readArchiveImages, releaseCanvas, rowBusyness, sniffImageMime, type ImageBackend, type ImageMime } from '@ait/core';
 import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
 import { tr } from '@ait/core/i18n';
@@ -69,23 +69,38 @@ export async function importFiles(files: File[], onProgress?: (msg: string) => v
   return out;
 }
 
+type Tile = { y: number; h: number; bytes: Uint8Array };
+
 export interface ExportPage {
   name: string;
   width: number;
   height: number;
-  tiles: { y: number; h: number; bytes: Uint8Array }[];
+  /** The page's pictures, or `load` to read them only when the page's turn comes. */
+  tiles?: Tile[];
+  /**
+   * Read the pictures when the page is written: a chapter of 400 pages is never held in memory at
+   * once (each page's pictures are let go once it is in the file).
+   */
+  load?: () => Promise<Tile[]>;
   /** Where the text is (page pixels): a page is never cut through a speech bubble. */
   avoid?: [number, number, number, number][];
+}
+
+async function tilesOf(page: ExportPage): Promise<Tile[]> {
+  return page.tiles ?? (page.load ? await page.load() : []);
 }
 
 /** Join tiles into one image (when it fits a canvas) or keep them as numbered parts. */
 export async function flattenTiles(backend: ImageBackend, page: ExportPage, mime: ImageMime, quality = 0.92): Promise<{ name: string; bytes: Uint8Array }[]> {
   const ext = mime === 'image/png' ? 'png' : mime === 'image/jpeg' ? 'jpg' : 'webp';
   const base = page.name.replace(/\.[^.]+$/, '');
+  const tiles = await tilesOf(page);
+  // A page whose pictures are gone (cleared from the cache meanwhile) is left out.
+  if (!tiles.length) return [];
   if (page.height <= 16_000) {
     const canvas = backend.createCanvas(page.width, page.height);
     const ctx = canvas.getContext('2d');
-    for (const t of page.tiles) {
+    for (const t of tiles) {
       const img = await backend.decode(t.bytes, 'image/png');
       ctx.drawImage(img.source, 0, t.y);
       img.close?.();
@@ -96,15 +111,18 @@ export async function flattenTiles(backend: ImageBackend, page: ExportPage, mime
       ctx.fillStyle = '#fff';
       ctx.fillRect(0, 0, page.width, page.height);
     }
-    return [{ name: `${base}.${ext}`, bytes: await backend.encode(canvas, mime, quality) }];
+    const bytes = await backend.encode(canvas, mime, quality);
+    releaseCanvas(canvas);
+    return [{ name: `${base}.${ext}`, bytes }];
   }
   const parts: { name: string; bytes: Uint8Array }[] = [];
-  for (const [i, t] of page.tiles.entries()) {
+  for (const [i, t] of tiles.entries()) {
     const img = await backend.decode(t.bytes, 'image/png');
     const c = backend.createCanvas(page.width, t.h);
     c.getContext('2d').drawImage(img.source, 0, 0);
     img.close?.();
     parts.push({ name: `${base}-part${String(i + 1).padStart(2, '0')}.${ext}`, bytes: await backend.encode(c, mime, quality) });
+    releaseCanvas(c);
   }
   return parts;
 }
@@ -134,7 +152,8 @@ export function sliceOptions(width: number, len: PageLength = 'normal'): { targe
 
 export async function bookPages(backend: ImageBackend, page: ExportPage, mime: ImageMime, quality = 0.9, len: PageLength = 'normal'): Promise<{ width: number; height: number; bytes: Uint8Array }[]> {
   const decoded = [];
-  for (const t of page.tiles) decoded.push({ t, img: await backend.decode(t.bytes, sniffImageMime(t.bytes) ?? 'image/png') });
+  for (const t of await tilesOf(page)) decoded.push({ t, img: await backend.decode(t.bytes, sniffImageMime(t.bytes) ?? 'image/png') });
+  if (!decoded.length) return [];
   try {
     const busy = new Float32Array(page.height);
     for (const { t, img } of decoded) {
@@ -142,6 +161,7 @@ export async function bookPages(backend: ImageBackend, page: ExportPage, mime: I
       const ctx = c.getContext('2d');
       ctx.drawImage(img.source, 0, 0);
       const rows = rowBusyness(ctx.getImageData(0, 0, page.width, t.h).data, page.width, t.h);
+      releaseCanvas(c);
       busy.set(rows.subarray(0, Math.min(t.h, page.height - t.y)), t.y);
     }
     // Rows crossing a bubble or a caption are never a place to cut.
@@ -163,6 +183,7 @@ export async function bookPages(backend: ImageBackend, page: ExportPage, mime: I
         ctx.drawImage(img.source, 0, t.y - y0);
       }
       out.push({ width: page.width, height: y1 - y0, bytes: await backend.encode(c, mime, quality) });
+      releaseCanvas(c);
     }
     return out;
   } finally {

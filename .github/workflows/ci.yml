@@ -74,6 +74,7 @@ jobs:
           xvfb-run -a node e2e/phrasebook.e2e.mjs 2>&1 | tee .test-output/e2e-phrasebook.log
           xvfb-run -a node e2e/race.e2e.mjs 2>&1 | tee .test-output/e2e-race.log
           xvfb-run -a node e2e/seam.e2e.mjs 2>&1 | tee .test-output/e2e-seam.log
+          xvfb-run -a node e2e/far.e2e.mjs 2>&1 | tee .test-output/e2e-far.log
           pnpm --filter @ait/studio test
       - name: Why the end-to-end tests failed (as annotations, readable without the logs)
         if: failure()

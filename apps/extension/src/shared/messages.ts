@@ -56,6 +56,8 @@ export type ContentToBackground =
   /** Pictures translated before: picture address → result key (results are fetched one by one). */
   | { type: 'lookup-cached'; srcs: string[] }
   | { type: 'get-tile'; key: string; index: number }
+  /** Pictures waiting in the queue came on screen (or went far): their new priorities. */
+  | { type: 'set-priority'; jobs: { id: string; priority: number }[] }
   | { type: 'build-download'; keys: string[]; title: string; format: ChapterFormat }
   /** «Сообщить о проблеме» on a page's ⓘ: a zip to reproduce it (page address only when ticked). */
   | { type: 'problem-report'; key: string; comment?: string; pageUrl?: string };
@@ -125,6 +127,7 @@ export type ToOffscreen =
   | { target: 'offscreen'; type: 'get-result'; key: string }
   | { target: 'offscreen'; type: 'repair-seam'; upper: string; lower: string }
   | { target: 'offscreen'; type: 'get-tile'; key: string; index: number }
+  | { target: 'offscreen'; type: 'set-priority'; jobs: { jobId: string; priority: number }[] }
   | { target: 'offscreen'; type: 'lookup-cached'; srcs: string[] }
   | { target: 'offscreen'; type: 'free-memory' };
 

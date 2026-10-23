@@ -30,6 +30,10 @@ interface Item {
   group?: Candidate[];
   /** What the element showed when the job was sent (see shownIdentity): a result for another picture is never drawn. */
   shown?: string;
+  /** How many picture tiles the result has (to read them back after they were let go far from the screen). */
+  tileCount?: number;
+  /** The queue priority it was last sent with (see repriorities). */
+  priority?: number;
 }
 
 declare global {
@@ -139,7 +143,9 @@ function main() {
       return;
     }
     it.status = 'done';
+    it.tileCount = result.tiles.length;
     it.overlay.setTiles(result.tiles, langsOf(result));
+    if (!it.docRect) far.observe(it.cand.el);
     // The overlay keeps its own copies of the pictures; holding the base64 tiles too would
     // double the memory on long webtoon pages.
     it.result = { ...result, tiles: [] };
@@ -157,6 +163,40 @@ function main() {
     checkSeams(it);
     if (result.page.lama === 'engine-down' || result.page.lama === 'not-downloaded') void offerLama(result.page.lama);
     else if (artPlain(result)) void offerLama();
+  }
+
+  // ---- translated pictures far from the screen let their tiles go ---------------------------
+  // A chapter of hundreds of translated pictures would hold every one of them decoded (memory the
+  // video card shares with the model). Past FAR_PX above or below the screen an overlay keeps its
+  // place but drops its pictures; coming back they are read again from the extension's store.
+  const FAR_PX = 3500;
+  const restoring = new Set<Item>();
+  const far = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        const id = byElement.get(e.target);
+        const it = id ? items.get(id) : undefined;
+        if (!it || it.status !== 'done' || !it.result || it.docRect) continue;
+        if (!e.isIntersecting) it.overlay.unloadTiles();
+        else if (!it.overlay.tilesShown && !restoring.has(it)) void restoreTiles(it);
+      }
+    },
+    { rootMargin: `${FAR_PX}px 0px ${FAR_PX}px 0px` },
+  );
+
+  async function restoreTiles(it: Item) {
+    const r = it.result;
+    if (!r || !it.tileCount) return;
+    restoring.add(it);
+    try {
+      const tiles = await tilesOf({ ...r, tiles: [], tilesOmitted: it.tileCount });
+      // Still the same picture and result (not redrawn or dropped meanwhile).
+      if (items.get(it.id) === it && it.result === r) it.overlay.restoreTiles(tiles);
+    } catch {
+      /* the result is gone from the store: the overlay stays empty until ⟳ */
+    } finally {
+      restoring.delete(it);
+    }
   }
 
   // ---- a bubble cut by the seam between two pictures translated one by one -----------------
@@ -420,6 +460,7 @@ function main() {
       const image: ImageRef = { id: req, kind: c.kind, src: c.src, dataUrl: await inlineData(c), rect: viewportRect(c.el), dpr: devicePixelRatio };
       if (image.dataUrl) image.src = undefined;
       const priority = opts.priority ?? priorityOf(c.el);
+      item.priority = priority;
       if (stitch && c.kind === 'img') {
         // Wait a moment for the neighbours: pictures of one strip go to the model together.
         strip.push({ item, image, priority, force: opts.force, redraw: opts.redraw });
@@ -648,6 +689,26 @@ function main() {
       default:
         return tr('Картинка обрабатывается долго');
     }
+  }
+
+  // ---- the queue follows the reader -------------------------------------------------------
+  // Pictures still waiting move up when they come on screen (and down when the reader scrolls
+  // away), so the part being read is translated first even in the middle of a long chapter.
+  let priorityTimer: ReturnType<typeof setTimeout> | null = null;
+  function schedulePriorities() {
+    if (priorityTimer) return;
+    priorityTimer = setTimeout(() => {
+      priorityTimer = null;
+      const jobs: { id: string; priority: number }[] = [];
+      for (const it of items.values()) {
+        if (it.status !== 'queued' || it.docRect || !it.req) continue;
+        const p = priorityOf(it.cand.el);
+        if (p === it.priority) continue;
+        it.priority = p;
+        jobs.push({ id: it.req, priority: p });
+      }
+      if (jobs.length) void send({ type: 'set-priority', jobs }).catch(() => undefined);
+    }, 400);
   }
 
   function priorityOf(el: Element): number {
@@ -1114,6 +1175,7 @@ ${chapterStats(list)}`;
 
   /** Remove a picture's overlay; a job still in work for it is stopped (nobody will see it). */
   function dropItem(it: Item) {
+    if (!it.docRect) far.unobserve(it.cand.el);
     if (it.status === 'queued' || it.status === 'working') void send({ type: 'cancel', id: it.req ?? it.id }).catch(() => undefined);
     it.overlay.destroy();
     items.delete(it.id);
@@ -1170,7 +1232,7 @@ ${chapterStats(list)}`;
       reposition();
     }
   });
-  mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset', 'style', 'data-src'] });
+  mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'srcset', 'style', 'data-src', 'data-lazy-src', 'data-original', 'data-url', 'data-lazy', 'data-srcset'] });
   const onLoad = (e: Event) => e.target instanceof HTMLImageElement && rescan();
   document.addEventListener('load', onLoad, true);
 
@@ -1189,6 +1251,7 @@ ${chapterStats(list)}`;
     });
   };
   addEventListener('scroll', reposition, { capture: true, passive: true });
+  addEventListener('scroll', () => schedulePriorities(), { capture: true, passive: true });
   addEventListener('resize', reposition, { passive: true });
   // Nothing runs on a page until it has a translation (or one is on its way): the timer and the
   // size watcher start with the first overlay and the timer stops when the last one is gone.

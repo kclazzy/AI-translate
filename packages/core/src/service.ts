@@ -116,7 +116,9 @@ export interface TranslateOptions {
 
 export const MAX_INPUT_BYTES = 60 * 1024 * 1024;
 /** Pages kept in the journal (a 300-page chapter fits). */
-export const JOURNAL_MAX = 400;
+export const JOURNAL_MAX = 600;
+/** Results used this recently are kept even over the cache size cap (see pruneCache). */
+export const RECENT_KEEP_MS = 12 * 3_600_000;
 
 /** Series key used to share a translation context between pages of the same manga. */
 export function seriesKeyFromUrl(url: string | undefined): string | undefined {
@@ -408,7 +410,12 @@ export class TranslateService {
     band.dispose();
     const out = await runPipeline({ bytes, mime: 'image/png', config, context, signal: opts.signal, noSkip: true }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector });
     // Nothing read in the band: the pictures keep what they have.
-    if (!out.page.blocks.length) return false;
+    if (!out.page.blocks.length) {
+      for (const o of originals) o.dispose();
+      out.cleaned.dispose();
+      if (out.original !== out.cleaned) out.original.dispose();
+      return false;
+    }
 
     // One strip of all the members: their own blocks (not the copies drawn across a seam), the band's in place of what it covers.
     const offsets: number[] = [];
@@ -441,6 +448,16 @@ export class TranslateService {
       debug: { ...(out.page.debug ?? { answers: [], modelBlocks: [], steps: [] }), steps: [...(out.page.debug?.steps ?? []), `seam between pictures ${left.length} and ${left.length + 1} translated as one band`] },
     };
     const rendered = await renderOutput(this.backend, { page, cleaned }, styleDefaultsFor(config, settings.fonts));
+    // Everything the strip is made of goes into bytes now; the canvases are let go right after.
+    const gluedCanvas = glued.toSingleCanvas();
+    const gluedBytes = await this.backend.encode(gluedCanvas, 'image/png');
+    releaseCanvas(gluedCanvas);
+    const cleanedBytes = await Promise.all(cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') })));
+    glued.dispose();
+    cleaned.dispose();
+    for (const o of originals) o.dispose();
+    out.cleaned.dispose();
+    if (out.original !== out.cleaned) out.original.dispose();
     const parentKey = `${members[0].key}~seam`;
     const now = new Date().toISOString();
     const parent: StoredResult = {
@@ -448,8 +465,8 @@ export class TranslateService {
       page: rendered.page,
       rendered: rendered.tiles,
       mime: rendered.mime,
-      original: { bytes: await this.backend.encode(glued.toSingleCanvas(), 'image/png'), mime: 'image/png' },
-      cleaned: await Promise.all(cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') }))),
+      original: { bytes: gluedBytes, mime: 'image/png' },
+      cleaned: cleanedBytes,
       sourceUrl: up.sourceUrl,
       title: up.title,
       seriesKey,
@@ -956,7 +973,7 @@ export class TranslateService {
    * cache takes at most `maxMb`. Works from the small size records (see putResult): the pictures
    * are not read, except once for results stored before sizes were kept.
    */
-  async pruneCache(days: number, maxMb = Infinity): Promise<number> {
+  async pruneCache(days: number, maxMb = Infinity, keepRecentMs = RECENT_KEEP_MS): Promise<number> {
     const cutoff = Date.now() - days * 86_400_000;
     const metas = await this.cacheIndex();
     let n = 0;
@@ -972,11 +989,13 @@ export class TranslateService {
         used += m.size;
       }
     }
-    // Over the cap: oldest use first.
+    // Over the cap: oldest use first. Pages used in the last hours (the chapter being read or
+    // translated) are never dropped for size: a 400-page chapter may take more than the cap for a while.
     alive.sort((a, b) => a[1].lastHitAt.localeCompare(b[1].lastHitAt));
     const cap = maxMb * 1024 * 1024;
+    const recent = Date.now() - keepRecentMs;
     for (const [key, m] of alive) {
-      if (used > cap) {
+      if (used > cap && Date.parse(m.lastHitAt) < recent) {
         await this.dropResult(key);
         used -= m.size;
         n++;

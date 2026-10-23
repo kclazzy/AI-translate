@@ -129,7 +129,9 @@ export async function buildProblemReport(input: ProblemReportInput): Promise<{ n
 export interface AnalysisPage {
   page: PageResult;
   original?: { bytes: Uint8Array; mime?: string };
-  rendered: Tile[];
+  rendered?: Tile[];
+  /** Read the pictures only when the page is written (a long chapter never sits in memory at once). */
+  load?: () => Promise<{ original?: { bytes: Uint8Array; mime?: string }; rendered: Tile[] }>;
 }
 
 const ANALYSIS_README = `Пакет для анализа главы — AI Translate
@@ -191,8 +193,9 @@ export async function buildAnalysisPack(input: {
   zip.file('README.txt', ANALYSIS_README);
   for (const [i, p] of input.pages.entries()) {
     const dir = String(i + 1).padStart(3, '0');
-    if (p.original?.bytes?.length) zip.file(`${dir}/original.${extOf(p.original.bytes, p.original.mime)}`, p.original.bytes);
-    await resultJpeg(zip, `${dir}/result`, p.rendered, p.page.width, p.page.height, input.backend);
+    const pics = p.load ? await p.load() : { original: p.original, rendered: p.rendered ?? [] };
+    if (pics.original?.bytes?.length) zip.file(`${dir}/original.${extOf(pics.original.bytes, pics.original.mime)}`, pics.original.bytes);
+    await resultJpeg(zip, `${dir}/result`, pics.rendered, p.page.width, p.page.height, input.backend);
     zip.file(`${dir}/page.json`, JSON.stringify(p.page, null, 2));
   }
   zip.file('texts.tsv', textsTable(input.pages.map((p, i) => ({ name: String(i + 1).padStart(3, '0'), blocks: p.page.blocks }))));

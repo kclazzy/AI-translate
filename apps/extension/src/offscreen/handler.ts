@@ -8,7 +8,7 @@ import { deleteJobBytes, getJobBytes, pruneJobBytes } from '../shared/jobstore';
 import { db, loadSettings, secrets } from '../shared/store';
 import { lamaDownloaded, lamaInpainter, releaseLama } from './lama';
 import { detectorDownloaded, releaseDetector, textDetector } from './detector';
-import { gpuFetch } from './gpuLane';
+import { gpuFetch, setWorkWaiting } from './gpuLane';
 import { setUiLang, tr } from '@ait/core/i18n';
 
 /**
@@ -23,6 +23,8 @@ service.releaseGpu = async () => {
   await releaseLama();
 };
 const queue = new TaskQueue(2);
+// The detector and LaMa keep their sessions while pictures still wait (see releaseWhenIdle).
+setWorkWaiting(() => queue.size > 0);
 let fontsReady: Promise<void> | null = null;
 /** A picture with no answer for this long is failed and the queue moves on. */
 const WATCHDOG_LOCAL_MIN = 12;
@@ -307,7 +309,7 @@ async function prepare() {
  * behind the translations, and not waiting for the fonts). A translation in progress lets them in
  * between its steps (the pipeline yields, see yieldIfBusy).
  */
-const QUICK = new Set<ToOffscreen['type']>(['status', 'lookup-cached', 'get-result', 'get-tile', 'cancel', 'cancel-tab', 'free-memory']);
+const QUICK = new Set<ToOffscreen['type']>(['status', 'lookup-cached', 'get-result', 'get-tile', 'cancel', 'cancel-tab', 'free-memory', 'set-priority']);
 
 export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen) => void): Promise<unknown> {
   // The batched translation check fixed a picture after it was shown: the pages showing it redraw
@@ -536,12 +538,23 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       return { ok: true };
     case 'status':
       return Object.fromEntries(msg.jobIds.map((id) => [id, jobStatus(id)]));
+    case 'set-priority': {
+      // A task of several pictures (a strip) goes by the most urgent of them.
+      const best = new Map<string, number>();
+      for (const j of msg.jobs) {
+        const key = jobTask.get(j.jobId);
+        if (key) best.set(key, Math.max(best.get(key) ?? -Infinity, j.priority));
+      }
+      for (const [key, p] of best) queue.setPriority(key, p);
+      return { ok: true };
+    }
     case 'lookup-cached': {
       // Pictures of this page translated before (to the current language): only their keys — the
       // page fetches the results one by one, so no single message gets too big.
       const s = await loadSettings();
       const out: Record<string, string> = {};
-      for (const src of msg.srcs.slice(0, 300)) {
+      // A chapter of up to 600 pictures.
+      for (const src of msg.srcs.slice(0, 600)) {
         const key = await db.get<string>('kv', `src:${s.targetLang}:${src}`);
         if (key) out[src] = key;
       }
@@ -598,7 +611,15 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
         const pages: AnalysisPage[] = [];
         for (const key of msg.keys) {
           const r = await service.getResult(key);
-          if (r) pages.push({ page: r.page, original: r.original, rendered: r.rendered });
+          if (!r) continue;
+          // The pictures are read again when the page is written: one page in memory at a time.
+          pages.push({
+            page: r.page,
+            load: async () => {
+              const again = await service.getResult(key);
+              return { original: again?.original, rendered: again?.rendered ?? [] };
+            },
+          });
         }
         if (!pages.length) throw new AppError('UNKNOWN', { retryable: false, message: tr('Нет переведённых страниц') });
         const { name, bytes } = await buildAnalysisPack({
@@ -615,10 +636,19 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
         return { url, name, pages: pages.length, size: bytes.length };
       }
       // Assemble the translated pages of a chapter into one file and hand back a blob URL.
+      // Only the small page records first; each page's pictures are read when it is written into
+      // the file and let go after (a chapter of 400 pages never sits in memory at once).
       const pages: ExportPage[] = [];
       for (const [i, key] of msg.keys.entries()) {
         const r = await service.getResult(key);
-        if (r) pages.push({ name: `${String(i + 1).padStart(3, '0')}.png`, width: r.page.width, height: r.page.height, tiles: r.rendered, avoid: r.page.blocks.map((b) => b.bubble?.box ?? b.bbox) });
+        if (!r) continue;
+        pages.push({
+          name: `${String(i + 1).padStart(3, '0')}.png`,
+          width: r.page.width,
+          height: r.page.height,
+          avoid: r.page.blocks.map((b) => b.bubble?.box ?? b.bbox),
+          load: async () => (await service.getResult(key))?.rendered ?? [],
+        });
       }
       if (!pages.length) throw new AppError('UNKNOWN', { retryable: false, message: tr('Нет переведённых страниц') });
       // Letters (any alphabet), digits and simple punctuation only: Chrome rejects some characters.

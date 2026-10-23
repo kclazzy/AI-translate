@@ -232,7 +232,9 @@ async function acquireReferer(host: string, referer: string): Promise<RefererRul
       {
         id,
         priority: 1,
-        action: { type: dnr.RuleActionType.MODIFY_HEADERS, requestHeaders: [{ header: 'referer', operation: dnr.HeaderOperation.SET, value: referer }] },
+        // The page's own Origin too: a request from the extension otherwise carries
+        // «chrome-extension://…», which some picture servers refuse (403).
+        action: { type: dnr.RuleActionType.MODIFY_HEADERS, requestHeaders: [{ header: 'referer', operation: dnr.HeaderOperation.SET, value: referer }, { header: 'origin', operation: dnr.HeaderOperation.SET, value: new URL(referer).origin }] },
         condition: {
           requestDomains: [host],
           initiatorDomains: [new URL(chrome.runtime.getURL('')).host],
@@ -657,6 +659,8 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
       return toOffscreen({ target: 'offscreen', type: 'repair-seam', upper: msg.upper, lower: msg.lower });
     case 'get-tile':
       return toOffscreen({ target: 'offscreen', type: 'get-tile', key: msg.key, index: msg.index });
+    case 'set-priority':
+      return toOffscreen({ target: 'offscreen', type: 'set-priority', jobs: msg.jobs.slice(0, 500).map((j) => ({ jobId: `${tabId}|${j.id}`, priority: j.priority })) });
   }
 }
 

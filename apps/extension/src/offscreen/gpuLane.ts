@@ -159,3 +159,26 @@ export function gpuFetch(base: typeof fetch = fetch, limitMs = MODEL_LIMIT_MS): 
  * again on every page, which made each page slower still.
  */
 export const IDLE_RELEASE_MS = 300_000;
+
+let workWaiting: () => boolean = () => false;
+/** Tell the lane how to see that pictures are still waiting or in work (the job queue). */
+export function setWorkWaiting(fn: () => boolean): void {
+  workWaiting = fn;
+}
+
+/**
+ * Call `release` after IDLE_RELEASE_MS without use — but never while pictures still wait in the
+ * queue (a slow page between two runs is no reason to load and compile the session again).
+ * Returns a function that cancels it.
+ */
+export function releaseWhenIdle(release: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = () => {
+    timer = setTimeout(() => {
+      if (workWaiting()) arm();
+      else release();
+    }, IDLE_RELEASE_MS);
+  };
+  arm();
+  return () => clearTimeout(timer);
+}

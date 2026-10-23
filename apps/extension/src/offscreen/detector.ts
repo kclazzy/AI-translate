@@ -1,5 +1,5 @@
 import { DETECTOR_SIZE, parseDetectorOutputs, type Detection, type PixelData, type RawTensor, type TextDetector } from '@ait/core';
-import { GPU_NETS, GpuTimeout, IDLE_RELEASE_MS, NETS_LIMIT_MS, NETS_LOAD_LIMIT_MS, onGpu, withLimit } from './gpuLane';
+import { GPU_NETS, GpuTimeout, NETS_LIMIT_MS, NETS_LOAD_LIMIT_MS, onGpu, releaseWhenIdle, withLimit } from './gpuLane';
 import { cached, DETECTOR_FP32_URL, DETECTOR_URL, downloadWithRuntime, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, resizePixels } from './ortRuntime';
 
 /**
@@ -87,10 +87,10 @@ async function runOnce(img: PixelData): Promise<Detection[]> {
   return parseDetectorOutputs(raw, S).map((d) => ({ ...d, box: [d.box[0] * sx, d.box[1] * sy, d.box[2] * sx, d.box[3] * sy] }));
 }
 
-let idle: ReturnType<typeof setTimeout> | undefined;
+let cancelIdle: (() => void) | undefined;
 
 export const textDetector: TextDetector = (img) => {
-  clearTimeout(idle);
+  cancelIdle?.();
   const queued = performance.now();
   let started = 0;
   const limitMs = session ? NETS_LIMIT_MS : NETS_LOAD_LIMIT_MS;
@@ -116,8 +116,8 @@ export const textDetector: TextDetector = (img) => {
   }));
   chain = job.catch(() => undefined);
   void job.finally(() => {
-    clearTimeout(idle);
-    idle = setTimeout(() => void releaseDetector(), IDLE_RELEASE_MS);
+    cancelIdle?.();
+    cancelIdle = releaseWhenIdle(() => void releaseDetector());
   }).catch(() => undefined);
   // Where the time goes (journal, ⓘ): waiting for the video card (Ollama on it) or computing, and where.
   return job.then(async (boxes) => {
