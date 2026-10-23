@@ -1,0 +1,54 @@
+name: Models
+
+# Networks for the browser that the extension downloads from this repository's "models-1" release:
+# Manga OCR (Japanese, Apache-2.0, kha-white/manga-ocr-base exported to ONNX by mayocream for Koharu)
+# made smaller (int8 for the processor, fp16 for the video card), and LaMa trained on manga
+# (AnimeMangaInpainting, Apache-2.0, ONNX by mayocream). Each source file is checked by SHA-256.
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/models.yml', 'scripts/models/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  models:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: models-1
+    steps:
+      - uses: actions/checkout@v4
+      - id: have
+        run: |
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -q '^SHA256SUMS$'; then echo "skip=1" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-python@v5
+        if: steps.have.outputs.skip != '1'
+        with: { python-version: '3.12' }
+      - name: Download (checked)
+        if: steps.have.outputs.skip != '1'
+        run: |
+          mkdir -p src out
+          ocr=https://huggingface.co/mayocream/manga-ocr-onnx/resolve/24b12778d85800835e2ca409236de281b8ab7b9f
+          lama=https://huggingface.co/mayocream/lama-manga-onnx/resolve/b55497aadbfcb9740e1ed16f008268d71b4f3f79
+          curl -fsSL --retry 3 -o src/encoder_model.onnx "$ocr/encoder_model.onnx"
+          curl -fsSL --retry 3 -o src/decoder_model.onnx "$ocr/decoder_model.onnx"
+          curl -fsSL --retry 3 -o out/manga-ocr-vocab.txt "$ocr/vocab.txt"
+          curl -fsSL --retry 3 -o out/lama-manga.onnx "$lama/lama-manga.onnx"
+          printf '%s  %s\n' \
+            15fa8155fe9bc1a7d25d9bb353debaa4def033d0174e907dbd2dd6d995def85f src/encoder_model.onnx \
+            ef7765261e9d1cdc34d89356986c2bbc2a082897f753a89605ae80fdfa61f5e8 src/decoder_model.onnx \
+            4512adab295ee5a5e02ccd1bdf8d45dccbac88309d9cff1532ffd5de876f02a4 out/lama-manga.onnx | sha256sum -c
+      - name: Make smaller
+        if: steps.have.outputs.skip != '1'
+        run: |
+          pip install -q onnx==1.17.0 onnxruntime==1.20.1 onnxconverter-common==1.14.0
+          python scripts/models/shrink.py src out
+          (cd out && sha256sum * > SHA256SUMS && cat SHA256SUMS && ls -l) | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Publish
+        if: steps.have.outputs.skip != '1'
+        run: |
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --prerelease --latest=false --title "Models for the browser" --notes "Networks the extension downloads (see .github/workflows/models.yml for sources and licenses)."
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber out/*
