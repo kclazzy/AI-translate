@@ -82,11 +82,14 @@ const llm = createServer((req, res) => {
 });
 await new Promise((r) => llm.listen(18170, '127.0.0.1', r));
 
+// Chrome 137+ ignores --load-extension; there the extension is loaded over CDP (E2E_CDP_EXTENSIONS).
+const cdp = !!process.env.E2E_CDP_EXTENSIONS;
 const browser = await puppeteer.launch({
   env: { ...process.env, LANG: 'ru_RU.UTF-8', LANGUAGE: 'ru' },
   executablePath: CHROME,
   headless: false,
-  args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, '--no-sandbox', '--lang=ru', '--no-first-run', '--disable-gpu'],
+  ...(cdp ? { pipe: true, enableExtensions: [ext] } : {}),
+  args: [...(cdp ? [] : [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`]), '--no-sandbox', '--lang=ru', '--no-first-run', '--disable-gpu'],
   defaultViewport: { width: 1000, height: 1000 },
 });
 browser.on('targetcreated', async (t) => {
@@ -94,6 +97,9 @@ browser.on('targetcreated', async (t) => {
 });
 
 try {
+  // First thing: the extension's worker may stop when idle, and then it is not listed.
+  const sw = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().endsWith('background.js'), { timeout: 15000 });
+  const extId = new URL(sw.url()).host;
   const helper = await browser.newPage();
   await helper.goto('http://127.0.0.1:18171/x');
   const drawBubble = async (text, font) => Buffer.from(
@@ -121,8 +127,6 @@ try {
   );
   picture = await drawBubble('HELLO THERE', 'bold 22px sans-serif');
   pictureJa = await drawBubble('なにしてるの', '24px "Noto Sans CJK JP", sans-serif');
-  const sw = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().endsWith('background.js'), { timeout: 15000 });
-  const extId = new URL(sw.url()).host;
   const studio = await browser.newPage();
   const fetched = new Set();
   await studio.setRequestInterception(true);
