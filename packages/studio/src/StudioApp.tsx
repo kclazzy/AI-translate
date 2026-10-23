@@ -216,6 +216,10 @@ export function StudioApp({ platform: hostPlatform, initialView, resultKey, chap
                   location.reload();
                 }}
                 onCloud={() => setView('settings')}
+                onEngine={() => {
+                  update({ pipeline: 'engine' });
+                  setView('settings');
+                }}
               />
             ) : null}
             {view === 'settings' ? <SettingsPanel settings={settings} update={update} /> : null}

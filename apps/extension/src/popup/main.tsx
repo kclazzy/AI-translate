@@ -1,7 +1,7 @@
 import '@ait/core/i18n/all';
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { applyPreset, checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, modelTiers, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, profilesForLanguage, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
+import { aiModesAvailable, applyAiMode, applyPreset, checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, modelTiers, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, profilesForLanguage, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
@@ -68,6 +68,24 @@ function Popup() {
   const [s, setS] = useState<AppSettings | null>(null);
   const [tab, setTab] = useState<chrome.tabs.Tab | null>(null);
   const [engine, setEngine] = useState<'ok' | 'down' | 'unpaired' | null>(null);
+  // Is the engine there (checked when the window opens and whenever the engine mode is chosen)?
+  const enginePipeline = s?.pipeline === 'engine';
+  const engineUrl = s?.engine.url;
+  const engineToken = s?.engine.token;
+  useEffect(() => {
+    if (!enginePipeline || !engineUrl) {
+      setEngine(null);
+      return;
+    }
+    let off = false;
+    void new EngineClient(engineUrl, engineToken ?? '')
+      .health()
+      .then((h) => !off && setEngine((h as { paired?: boolean }).paired === false ? 'unpaired' : 'ok'))
+      .catch(() => !off && setEngine('down'));
+    return () => {
+      off = true;
+    };
+  }, [enginePipeline, engineUrl, engineToken]);
   const [usage, setUsage] = useState<UsageTotals | null>(null);
   const [busy, setBusy] = useState(0);
   const [unloaded, setUnloaded] = useState<string[] | null>(null);
@@ -83,11 +101,6 @@ function Popup() {
       }
       setS(x);
       if (x.theme !== 'system') document.documentElement.setAttribute('data-theme', x.theme);
-      if (x.pipeline === 'engine')
-        void new EngineClient(x.engine.url, x.engine.token)
-          .health()
-          .then((h) => setEngine((h as { paired?: boolean }).paired === false ? 'unpaired' : 'ok'))
-          .catch(() => setEngine('down'));
     });
     void chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => {
       setTab(t ?? null);
@@ -169,6 +182,12 @@ function Popup() {
         </span>
       </header>
 
+      {/* The AI mode first: seen as soon as the window opens. */}
+      <div className="ait-field pp-mode">
+        <span>{tr('Режим работы ИИ')}</span>
+        <AiModeSwitch settings={s} update={update} compact />
+      </div>
+
       {missing ? (
         <div className="ait-notice">{tr('Выберите модель, которая читает изображения.')}{' '}<button className="pp-link" onClick={() => chrome.runtime.openOptionsPage()}>{tr('Открыть настройки')}</button></div>
       ) : null}
@@ -176,7 +195,16 @@ function Popup() {
         <ModelCheckCard compact settings={s} update={update} getKey={(id) => secrets.get(`provider:${id}`)} onOpenSettings={(download) => open(download ? 'studio.html?view=settings&pull=1' : 'studio.html?view=settings')} />
       ) : null}
       {s.pipeline === 'standalone' ? <VramLine settings={s} /> : null}
-      {engine === 'down' ? <div className="ait-error">{tr('Движок не отвечает по адресу {0}. Запустите его или переключитесь в режим без движка.', s.engine.url)}</div> : null}
+      {engine === 'down' ? (
+        <div className="ait-error">
+          {tr('Движок не отвечает по адресу {0}. Запустите его или переключитесь в режим без движка.', s.engine.url)}{' '}
+          {(['ollama', 'cloud'] as const).filter((m) => aiModesAvailable(s)[m]).map((m) => (
+            <button key={m} className="pp-link" onClick={() => update(applyAiMode(s, m)!)}>
+              {m === 'ollama' ? tr('Работать через Ollama') : tr('Работать через облако')}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {engine === 'unpaired' ? <div className="ait-notice">{tr('Движок запущен, но код сопряжения не подходит. Введите его в настройках.')}</div> : null}
 
       <button className="ait-bubble-btn pp-main" disabled={!canRun || missing} onClick={() => void command('translate-page')}>
@@ -339,10 +367,6 @@ function Popup() {
             <option value="best">{tr('Максимум')}</option>
           </select>
         </label>
-        <div className="ait-field" style={{ gridColumn: '1 / -1' }}>
-          <span>{tr('Режим работы ИИ')}</span>
-          <AiModeSwitch settings={s} update={update} compact />
-        </div>
         <label className="ait-field" style={{ gridColumn: '1 / -1' }}>
           <span>{tr('Сервер модели')}</span>
           <select className="ait-select" value={s.visionProviderId ?? ''} onChange={(e) => update({ visionProviderId: e.target.value || null })}>
