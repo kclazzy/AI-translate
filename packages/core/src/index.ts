@@ -2,6 +2,7 @@ export * from './types';
 export * from './languages';
 export * from './errors';
 export * from './settings';
+export * from './aiMode';
 export * from './service';
 export * from './util/bytes';
 export * from './util/retry';

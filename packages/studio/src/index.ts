@@ -8,3 +8,4 @@ export { importFiles, exportZip, exportPdf, flattenTiles } from './files';
 export { ProjectStore } from './projects';
 export { detectGpu, LocalModels, LocalSetup, ModelCheckCard, ModelPicker, UpdateCheck } from './ModelPicker';
 export { buildProblemReport, problemReportName, type ProblemReportInput } from './problemReport';
+export { AiModeSwitch, aiModeHint } from './AiModeSwitch';

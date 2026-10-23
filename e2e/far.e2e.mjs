@@ -147,6 +147,23 @@ try {
   }
   check('back on screen they are read again from the store', back === shown, `images=${back} (was ${shown})`);
   await tab.screenshot({ path: join(OUT, 'far-back.png') });
+
+  // The AI mode switch in the popup: one click between the model on this computer and the engine.
+  const popup = await browser.newPage();
+  await popup.goto(`chrome-extension://${extId}/popup.html`);
+  await popup.waitForSelector('[data-testid="ai-mode"] button', { timeout: 15000 });
+  const modes = () => popup.$$eval('[data-testid="ai-mode"] button', (bs) => bs.map((b) => `${b.dataset.mode}:${b.getAttribute('aria-pressed')}:${b.disabled ? 'off' : 'on'}`).join(' '));
+  check('the popup shows the modes; cloud needs an online server', /ollama:true:on/.test(await modes()) && /cloud:false:off/.test(await modes()), await modes());
+  await popup.click('[data-mode="engine"]');
+  await new Promise((r) => setTimeout(r, 600));
+  const pipelineOf = () => studio.evaluate(async () => {
+    const db = await new Promise((res) => { const r = indexedDB.open('ai-translate', 1); r.onsuccess = () => res(r.result); });
+    return new Promise((res) => { const g = db.transaction('kv').objectStore('kv').get('settings'); g.onsuccess = () => res(g.result.pipeline); });
+  });
+  const afterEngine = await pipelineOf();
+  await popup.click('[data-mode="ollama"]');
+  await new Promise((r) => setTimeout(r, 600));
+  check('one click switches to the engine and back', afterEngine === 'engine' && (await pipelineOf()) === 'standalone', `${afterEngine} → ${await pipelineOf()}`);
 } catch (e) {
   check('no crash', false, String(e?.stack ?? e));
 } finally {

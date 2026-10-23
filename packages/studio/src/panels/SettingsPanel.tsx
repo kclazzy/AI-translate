@@ -1,3 +1,4 @@
+import { AiModeSwitch } from '../AiModeSwitch';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   applyPreset,
@@ -659,21 +660,8 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
       </div>
 
       <div className="ait-panel">
-        <h2>{tr('Где обрабатывать')}</h2>
-        <Segmented
-          label={tr('Режим обработки')}
-          value={s.pipeline}
-          onChange={(pipeline) => update({ pipeline })}
-          options={[
-            { value: 'standalone', label: tr('Здесь (через модель)') },
-            { value: 'engine', label: tr('Локальный движок') },
-          ]}
-        />
-        <p className="ait-hint">
-          {s.pipeline === 'standalone'
-            ? tr('Изображение читает vision-модель, очистка и вёрстка выполняются прямо здесь. Работает без установки движка, в том числе на телефоне.')
-            : tr('Поиск текста, OCR и очистку делает движок на ПК (GPU). Телефон может подключиться к нему по Wi-Fi.')}
-        </p>
+        <h2>{tr('Режим работы ИИ')}</h2>
+        <AiModeSwitch settings={s} update={update} force />
         {s.pipeline === 'engine' ? (
           <div className="ait-grid2" style={{ marginTop: 12 }}>
             <Field label={tr('Адрес движка')} hint={tr('На ПК: http://127.0.0.1:8765. С телефона: LAN-адрес из окна движка.')}>

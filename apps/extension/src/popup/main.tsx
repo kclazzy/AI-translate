@@ -5,6 +5,7 @@ import { applyPreset, checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGE
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
+import { AiModeSwitch } from '@ait/studio/ai-mode';
 import './popup.css';
 import type { PageLangs, SpeedStats } from '../shared/messages';
 import { db, hostOf, loadSettings, saveSettings, secrets } from '../shared/store';
@@ -338,6 +339,10 @@ function Popup() {
             <option value="best">{tr('Максимум')}</option>
           </select>
         </label>
+        <div className="ait-field" style={{ gridColumn: '1 / -1' }}>
+          <span>{tr('Режим работы ИИ')}</span>
+          <AiModeSwitch settings={s} update={update} compact />
+        </div>
         <label className="ait-field" style={{ gridColumn: '1 / -1' }}>
           <span>{tr('Сервер модели')}</span>
           <select className="ait-select" value={s.visionProviderId ?? ''} onChange={(e) => update({ visionProviderId: e.target.value || null })}>

@@ -99,7 +99,7 @@ try {
 
   // Navigation and settings render on a small screen.
   await page.evaluate(() => [...document.querySelectorAll('.ait-nav-btn')].find((b) => b.textContent.includes('Настройки'))?.click());
-  await page.waitForFunction(() => document.body.innerText.includes('Где обрабатывать'));
+  await page.waitForFunction(() => document.body.innerText.includes('Режим работы ИИ'));
   await page.screenshot({ path: join(OUT, 'mobile-settings.png') });
   check('settings open from the bottom navigation', true);
   check('PWA manifest has a share target', JSON.parse(readFileSync(join(DIST, 'manifest.webmanifest'), 'utf8')).share_target?.method === 'POST');
