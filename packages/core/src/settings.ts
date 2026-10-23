@@ -144,8 +144,10 @@ export interface AppSettings {
   translateLogo?: boolean;
   /** Read only the pieces with text (a collage) instead of the whole page; default: on with a local model. */
   readCrops?: boolean;
+  /** How the text is read: a vision model (default) or recognition in this browser (see aiMode.ts). */
+  readMode?: 'vision' | 'ocr';
   /** The model server last used in each AI mode (see aiMode.ts), to switch back to it. */
-  modeProviders?: { ollama?: string; cloud?: string };
+  modeProviders?: { ollama?: string; cloud?: string; ocr?: string };
   /** The user said «Не предлагать» to the LaMa offer shown after a page with text over artwork. */
   lamaOfferDismissed?: boolean;
   /** Neural text/bubble detector running in the browser (model downloaded once): 'browser' after the download. */
@@ -400,6 +402,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     lamaMode: 'string',
     translateLogo: 'boolean',
     readCrops: 'boolean',
+    readMode: 'string',
     modeProviders: 'object',
     lamaOfferDismissed: 'boolean',
     detectorMode: 'string',

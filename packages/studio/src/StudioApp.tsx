@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { emptyContext, type AppSettings, type TranslationContext } from '@ait/core';
+import { applyAiMode, emptyContext, type AppSettings, type TranslationContext } from '@ait/core';
 import { CachedPageEditor } from './editor/EditorHost';
 import { WelcomePanel } from './panels/WelcomePanel';
 import { loadBundledFonts } from './fonts';
@@ -216,8 +216,8 @@ export function StudioApp({ platform: hostPlatform, initialView, resultKey, chap
                   location.reload();
                 }}
                 onCloud={() => setView('settings')}
-                onEngine={() => {
-                  update({ pipeline: 'engine' });
+                onOcr={() => {
+                  update(applyAiMode(settings, 'ocr') ?? { readMode: 'ocr', detectorMode: 'browser', pipeline: 'standalone' });
                   setView('settings');
                 }}
               />

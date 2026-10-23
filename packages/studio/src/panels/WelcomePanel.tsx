@@ -7,7 +7,7 @@ import { usePlatform } from '../platform';
 import { DetectorGetButton, useDetectorDownloaded } from '../detector';
 
 /** Shown once after installing: the AI mode to start with (one of three, one recommended), then what to do. */
-export function WelcomePanel({ settings, update, onSetup, onCloud, onEngine }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; onSetup: () => void; onCloud: () => void; onEngine: () => void }) {
+export function WelcomePanel({ settings, update, onSetup, onCloud, onOcr }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; onSetup: () => void; onCloud: () => void; onOcr: () => void }) {
   const platform = usePlatform();
   // A card with 8 GB or more runs a reading model well; with less (or none found) the cloud is the easy start.
   const [gpu] = useState(() => detectGpu());
@@ -29,7 +29,7 @@ export function WelcomePanel({ settings, update, onSetup, onCloud, onEngine }: {
               [
                 ['ollama', tr('Ollama на этом ПК'), tr('Бесплатно и без интернета. Нужна видеокарта от 8 ГБ; модель скачивается один раз (~6 ГБ).'), tr('Настроить'), onSetup],
                 ['cloud', tr('Облачная модель'), tr('Быстро на любом компьютере, даже без видеокарты. Нужен ключ API (у Gemini есть бесплатный).'), tr('Подключить'), onCloud],
-                ['engine', tr('Движок на ПК'), tr('Для опытных: программа AI Translate Engine сама распознаёт текст, переводит текстовая модель. Нужно установить движок.'), tr('Подключить движок'), onEngine],
+                ...(platform.ocr ? ([['ocr', tr('Распознавание в браузере'), tr('Без Python и без модели, читающей картинки: текст распознаётся прямо в браузере, переводит любая текстовая модель. Быстро и на слабой видеокарте; рисованные надписи читает хуже.'), tr('Включить'), onOcr]] as const) : []),
               ] as const
             ).map(([mode, title, text, action, go]) => (
               <div key={mode} data-mode={mode} className="ait-panel" style={{ display: 'grid', gap: 6, padding: 12, margin: 0, borderColor: mode === recommended ? 'var(--accent, #2f6fde)' : undefined }}>

@@ -75,6 +75,11 @@ jobs:
           xvfb-run -a node e2e/race.e2e.mjs 2>&1 | tee .test-output/e2e-race.log
           xvfb-run -a node e2e/seam.e2e.mjs 2>&1 | tee .test-output/e2e-seam.log
           xvfb-run -a node e2e/far.e2e.mjs 2>&1 | tee .test-output/e2e-far.log
+          # Recognition in the browser with the real PaddleOCR networks (skipped when they cannot be fetched).
+          mkdir -p .test-output/ocr-models
+          base=https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6
+          curl -fsSL --retry 2 -o .test-output/ocr-models/PP-OCRv6_det_small.onnx "$base/det/PP-OCRv6_det_small.onnx" && curl -fsSL --retry 2 -o .test-output/ocr-models/PP-OCRv6_rec_small.onnx "$base/rec/PP-OCRv6_rec_small.onnx" || rm -rf .test-output/ocr-models
+          OCR_MODELS=$PWD/.test-output/ocr-models xvfb-run -a node e2e/ocr.e2e.mjs 2>&1 | tee .test-output/e2e-ocr.log
           pnpm --filter @ait/studio test
       - name: Why the end-to-end tests failed (as annotations, readable without the logs)
         if: failure()
@@ -134,12 +139,23 @@ jobs:
       - uses: actions/download-artifact@v4
         if: steps.v.outputs.skip != '1'
         with: { name: release-web, path: release }
+      - name: OCR models (a second source for the extension; PP-OCRv6, Apache-2.0)
+        if: steps.v.outputs.skip != '1'
+        continue-on-error: true
+        run: |
+          trap 'rm -f release/*.onnx' ERR
+          base=https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6
+          curl -fsSL --retry 3 -o release/PP-OCRv6_det_small.onnx "$base/det/PP-OCRv6_det_small.onnx"
+          curl -fsSL --retry 3 -o release/PP-OCRv6_rec_small.onnx "$base/rec/PP-OCRv6_rec_small.onnx"
+          printf '%s  %s\n' 090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f release/PP-OCRv6_det_small.onnx 6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884 release/PP-OCRv6_rec_small.onnx | sha256sum -c || { rm -f release/*.onnx; exit 1; }
       - uses: softprops/action-gh-release@v2
         if: steps.v.outputs.skip != '1'
         with:
           tag_name: ${{ steps.v.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: AI Translate ${{ steps.v.outputs.tag }}
-          files: release/*.zip
+          files: |
+            release/*.zip
+            release/*.onnx
           generate_release_notes: true
           make_latest: true

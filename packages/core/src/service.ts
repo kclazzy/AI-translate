@@ -13,6 +13,7 @@ import { sha256Hex, sniffImageMime } from './util/bytes';
 import { tr } from './i18n';
 import { preparePage, type Inpainter, type PreparedPage } from './pipeline/standalone';
 import type { TextDetector } from './pipeline/detect';
+import type { TextReader } from './pipeline/standalone';
 import { QA_BATCH, qaPages } from './translate/qa';
 import { translateBlocks } from './translate/translator';
 import { continuesNext } from './translate/continuation';
@@ -141,6 +142,8 @@ export class TranslateService {
   inpainter?: Inpainter;
   /** The neural text / bubble detector in this browser (set by the extension when the model is downloaded). */
   detector?: TextDetector;
+  /** Text recognition in this browser (set by the extension when the models are downloaded). */
+  reader?: TextReader;
   /**
    * A stored result changed after it was delivered (the batched translation check fixed it):
    * the app redraws the picture like after an edit (extension: 'result-changed').
@@ -276,7 +279,7 @@ export class TranslateService {
       const { value: out, lighter } = await this.runFitting(config, opts, (cfg) =>
         runPipeline(
           { bytes, mime: realMime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic, noSkip, prepared, batchReview: !!config.qaBatch && !opts.generic, freshContext },
-          { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector },
+          { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector, ocr: this.reader },
         ),
       );
       // A result made with lighter settings must not answer for the full-quality key.
@@ -408,7 +411,7 @@ export class TranslateService {
     const bytes = await this.backend.encode(single, 'image/png');
     releaseCanvas(single);
     band.dispose();
-    const out = await runPipeline({ bytes, mime: 'image/png', config, context, signal: opts.signal, noSkip: true }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector });
+    const out = await runPipeline({ bytes, mime: 'image/png', config, context, signal: opts.signal, noSkip: true }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector, ocr: this.reader });
     // Nothing read in the band: the pictures keep what they have.
     if (!out.page.blocks.length) {
       for (const o of originals) o.dispose();
@@ -552,7 +555,7 @@ export class TranslateService {
       if (known) return void (await known);
       // Already translated: nothing to prepare (reopening a chapter must not run the detector again).
       if (!opts.force && ((await this.db.get('kv', `${META}${key}`)) || (await this.db.get('results', key)))) return;
-      const promise = preparePage({ bytes, mime: realMime, config, generic: opts.generic, noSkip }, { backend: this.backend, fetchImpl: this.fetchImpl, detect: this.detector }).catch(() => undefined);
+      const promise = preparePage({ bytes, mime: realMime, config, generic: opts.generic, noSkip }, { backend: this.backend, fetchImpl: this.fetchImpl, detect: this.detector, ocr: this.reader }).catch(() => undefined);
       this.ahead.set(id, promise);
       while (this.ahead.size > 2) this.ahead.delete(this.ahead.keys().next().value!);
       await promise;

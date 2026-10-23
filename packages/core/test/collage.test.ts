@@ -178,3 +178,29 @@ describe('collage of the text pieces', () => {
     expect(await pipelineHash(pipelineConfigFromSettings(local))).not.toBe(await pipelineHash(pipelineConfigFromSettings({ ...local, readCrops: false })));
   });
 });
+
+describe('AI mode «Распознавание»: text read in the browser, a text model translates', () => {
+  it('no picture goes to the model; each piece the detector found is read and translated', async () => {
+    const { fetchImpl, calls } = mockOpenAi((body) => {
+      const blocks = JSON.parse(/<blocks>\n(.*)\n<\/blocks>/s.exec(body.messages.at(-1).content)?.[1] ?? '[]');
+      return JSON.stringify({ translations: blocks.map((b: any) => ({ id: b.id, text: /hello/i.test(b.text) ? 'Привет' : 'Пока' })), entities: [], summary: '' });
+    });
+    const read: number[] = [];
+    const ocr = async (px: any) => {
+      read.push(px.height);
+      return { text: read.length === 1 ? 'HELLO' : 'GOODBYE', lines: [] };
+    };
+    const cfg = { ...config(false), ocr: true, vision: { ...configFromPreset('lmstudio', 'text-model'), vision: false } };
+    const out = await runStandalonePipeline({ bytes: await page(), config: cfg }, { backend: napiBackend, fetchImpl: fetchImpl as any, detect: fakeDetector(dets, W, H), ocr });
+    expect(read).toHaveLength(2);
+    expect(calls.every((c) => c.body.messages.every((m: any) => typeof m.content === 'string'))).toBe(true);
+    expect(out.page.blocks.map((b) => b.translatedText).sort()).toEqual(['Пока', 'Привет']);
+    const hello = out.page.blocks.find((b) => b.translatedText === 'Привет')!;
+    expect(inside(hello.bbox, [bubbles[0].cx - bubbles[0].rx, bubbles[0].cy - bubbles[0].ry, bubbles[0].rx * 2, bubbles[0].ry * 2])).toBe(true);
+  });
+
+  it('without the reader the page says what to download', async () => {
+    const cfg = { ...config(false), ocr: true };
+    await expect(runStandalonePipeline({ bytes: await page(), config: cfg }, { backend: napiBackend, fetchImpl: mockOpenAi(() => '{}').fetchImpl as any, detect: fakeDetector(dets, W, H) })).rejects.toMatchObject({ code: 'SETUP_NEEDED' });
+  });
+});

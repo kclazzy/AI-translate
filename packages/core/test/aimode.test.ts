@@ -22,7 +22,7 @@ describe('three AI modes', () => {
   it('tells the mode and switches in one step, remembering the server of each mode', () => {
     let s = base();
     expect(aiModeOf(s)).toBe('ollama');
-    expect(aiModesAvailable(s)).toEqual({ ollama: true, cloud: true, engine: true });
+    expect(aiModesAvailable(s)).toEqual({ ollama: true, cloud: true, ocr: true, engine: true });
     s = apply(s, 'cloud');
     expect(aiModeOf(s)).toBe('cloud');
     expect(s.visionProviderId).toBe('gm');
@@ -39,7 +39,23 @@ describe('three AI modes', () => {
 
   it('a mode without a server or engine address cannot be switched to', () => {
     const s = { ...base(), providers: [base().providers[0]], engine: { ...base().engine, url: '' } };
-    expect(aiModesAvailable(s)).toEqual({ ollama: true, cloud: false, engine: false });
+    expect(aiModesAvailable(s)).toEqual({ ollama: true, cloud: false, ocr: true, engine: false });
     expect(applyAiMode(s, 'cloud')).toBeNull();
+  });
+});
+
+describe('the recognition mode', () => {
+  it('switches the detector on, uses any server as the translator, and comes back', () => {
+    let s: AppSettings = { ...base(), detectorMode: 'off' };
+    s = apply(s, 'ocr');
+    expect(aiModeOf(s)).toBe('ocr');
+    expect(s.readMode).toBe('ocr');
+    expect(s.detectorMode).toBe('browser');
+    expect(s.visionProviderId).toBe('ol');
+    s = apply(s, 'cloud');
+    expect(aiModeOf(s)).toBe('cloud');
+    expect(s.readMode).toBe('vision');
+    s = apply(s, 'ocr');
+    expect(s.visionProviderId).toBe('ol');
   });
 });

@@ -3,20 +3,22 @@ import type { ProviderConfig } from './llm/types';
 import { providerById, type AppSettings } from './settings';
 
 /**
- * Three ways to work, switched in one click (popup and settings):
+ * Ways to work, switched in one click (popup and settings):
  * - ollama: a vision model on this computer (Ollama, LM Studio) reads and translates the pictures;
  * - cloud: a vision model of an online service (Gemini, OpenAI, Claude…) does; the detector and
  *   LaMa still run on this computer;
- * - engine: the local AI Translate Engine finds and reads the text itself (its own recognition) and
- *   has it translated by a text model.
+ * - ocr: recognition right in the browser (PaddleOCR) reads the text the detector found, and any
+ *   text model (on this computer or online) translates it — no Python, no model that reads pictures;
+ * - engine: the separate AI Translate Engine (Python) does the reading (settings only).
  */
-export type AiMode = 'ollama' | 'cloud' | 'engine';
+export type AiMode = 'ollama' | 'cloud' | 'ocr' | 'engine';
 
 const sees = (p: ProviderConfig) => p.vision !== false;
 
 /** The mode the settings are in now. */
 export function aiModeOf(s: AppSettings): AiMode {
   if (s.pipeline === 'engine') return 'engine';
+  if (s.readMode === 'ocr') return 'ocr';
   const v = providerById(s, s.visionProviderId);
   return v && !isLocalProvider(v) ? 'cloud' : 'ollama';
 }
@@ -33,7 +35,12 @@ function providerFor(s: AppSettings, mode: 'ollama' | 'cloud'): ProviderConfig |
 
 /** Which modes can be switched to (a mode without a model server or engine address cannot). */
 export function aiModesAvailable(s: AppSettings): Record<AiMode, boolean> {
-  return { ollama: !!providerFor(s, 'ollama'), cloud: !!providerFor(s, 'cloud'), engine: !!s.engine?.url };
+  return { ollama: !!providerFor(s, 'ollama'), cloud: !!providerFor(s, 'cloud'), ocr: s.providers.length > 0, engine: !!s.engine?.url };
+}
+
+/** The model that translates the recognised text: the one used for it last, else a local one, else any. */
+function textProviderFor(s: AppSettings): ProviderConfig | undefined {
+  return providerById(s, s.modeProviders?.ocr) ?? providerById(s, s.visionProviderId) ?? s.providers.find((p) => isLocalProvider(p)) ?? s.providers[0];
 }
 
 /**
@@ -49,12 +56,20 @@ export function applyAiMode(s: AppSettings, mode: AiMode): Partial<AppSettings> 
     if (!s.engine?.url) return null;
     return { pipeline: 'engine', modeProviders: remember };
   }
+  if (mode === 'ocr') {
+    const t = textProviderFor(s);
+    if (!t) return null;
+    remember.ocr = t.id;
+    // The text is found by the detector: it is switched on with this mode.
+    return { pipeline: 'standalone', readMode: 'ocr', detectorMode: 'browser', visionProviderId: t.id, translationProviderId: null, modeProviders: remember };
+  }
   const p = providerFor(s, mode);
   if (!p) return null;
   remember[mode] = p.id;
   const translator = providerById(s, s.translationProviderId);
   return {
     pipeline: 'standalone',
+    readMode: 'vision',
     visionProviderId: p.id,
     // A separate translator of the other kind (a cloud one in the local mode) is not carried over.
     ...(translator && isLocalProvider(translator) !== (mode === 'ollama') ? { translationProviderId: null } : {}),

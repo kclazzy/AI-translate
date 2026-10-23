@@ -661,7 +661,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
 
       <div className="ait-panel">
         <h2>{tr('Режим работы ИИ')}</h2>
-        <AiModeSwitch settings={s} update={update} force />
+        <AiModeSwitch settings={s} update={update} force ocrHere={!!platform.ocr} />
         {s.pipeline === 'engine' ? (
           <div className="ait-grid2" style={{ marginTop: 12 }}>
             <Field label={tr('Адрес движка')} hint={tr('На ПК: http://127.0.0.1:8765. С телефона: LAN-адрес из окна движка.')}>

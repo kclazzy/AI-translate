@@ -11,6 +11,7 @@ import { memoryKey, mergeContext, rememberedTranslation, withoutPage, type Conte
 import { applyForbiddenFixes, findGlossaryHits, findViolations } from '../translate/glossary';
 import { isDegenerate, parseVisionAnswer, tameRuns, type Look, type VisionAnswer } from '../translate/parse';
 import { FONT_STACKS } from '../render/style';
+import { tr } from '../i18n';
 import { buildSystemPrompt, contextData, visionCollageInstruction, visionFullInstruction, visionOcrInstruction, visionPhrasebook, type PromptInput } from '../translate/prompt';
 import { completeFitted, CONTEXT_LEVELS, estimateTokens, growRoom, imageTokens, OCR_LEVEL, windowOf } from '../translate/budget';
 import { translateBlocks, usageFrom } from '../translate/translator';
@@ -128,9 +129,14 @@ function usesDetector(req: Pick<PipelineRequest, 'config' | 'generic'>, deps: St
   return req.config.mode === 'standalone' && !!req.config.detector && !!deps.detect && !req.generic;
 }
 
+/** Text recognition in this browser (PaddleOCR, see ocr/paddle.ts): the text of one piece of a page. */
+export type TextReader = (px: PixelData, lang: string) => Promise<{ text: string; lines: { box: Box; text: string; score: number; vertical: boolean }[] }>;
+
 export interface StandaloneDeps {
   backend: ImageBackend;
   fetchImpl?: FetchLike;
+  /** Recognition without a vision model (settings → AI mode «Распознавание»). */
+  ocr?: TextReader;
   /** LaMa running in this browser (extension), used when the settings say so. */
   inpaint?: Inpainter;
   /** The neural text / bubble detector running in this browser, used when the settings say so. */
@@ -727,10 +733,15 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   const { config, signal } = req;
   const stage = (s: StageEvent['stage'], progress?: number) => req.onStage?.({ stage: s, progress });
   if (!config.vision) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: 'No vision provider' });
-  if (!config.vision.vision) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: `${config.vision.label} does not accept images; pick a vision model or use the engine` });
-  assertPrivacy(config.privacy, config.vision, 'image');
+  // Recognition in this browser: the picture never goes to a model, a text model translates.
+  const ocrMode = !!config.ocr && !req.generic;
+  if (ocrMode && !deps.ocr) throw new AppError('SETUP_NEEDED', { retryable: false, detail: tr('Скачайте модели распознавания текста (Настройки → Режим работы ИИ → Распознавание).') });
+  if (!ocrMode && !config.vision.vision) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: `${config.vision.label} does not accept images; pick a vision model or use the engine` });
+  if (!ocrMode) assertPrivacy(config.privacy, config.vision, 'image');
   // A separate translation request: another model, or the same one in two steps (more accurate).
-  const translatorCfg = config.translator && config.translator.id !== config.vision.id ? config.translator : config.twoStep ? config.vision : null;
+  const translatorCfg = ocrMode
+    ? (config.translator ?? config.vision)
+    : config.translator && config.translator.id !== config.vision.id ? config.translator : config.twoStep ? config.vision : null;
   const separate = !!translatorCfg;
   if (translatorCfg) assertPrivacy(config.privacy, translatorCfg, 'text');
 
@@ -788,7 +799,32 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   // smaller picture for the model than the whole page.
   let collageUsed = false;
   let answers: { view: View; answer: VisionAnswer; usage: Usage }[] = [];
-  const textDets = config.collage && dets && !req.generic ? dets.filter((d) => isTextKind(d.kind)) : [];
+  if (ocrMode) {
+    // The detector found the text; each piece of it is read here, line by line.
+    if (!dets) throw new AppError('SETUP_NEEDED', { retryable: false, detail: tr('Для распознавания нужен «Точный поиск текста»: скачайте его в настройках.') });
+    const found = dets.filter((d) => isTextKind(d.kind));
+    // A margin around each text box: a letter cut by a tight box is read wrong («HELLO» as «ELLO»).
+    const pieces = pieceBoxes(found.map((d) => d.box), original.width, original.height).map((b) => clampBox(expandBox(b, Math.max(10, Math.round(Math.min(b[2], b[3]) * 0.25))), original.width, original.height));
+    const blocks: VisionAnswer['blocks'] = [];
+    const t0 = performance.now();
+    for (const [i, b] of pieces.entries()) {
+      const r = await deps.ocr!(original.getRegion(b[0], b[1], b[2], b[3]), config.sourceLang);
+      stage('ocr', (i + 1) / pieces.length);
+      if (!r.text) continue;
+      const inside = found.filter((d) => overlapRatio(d.box, b) > 0.5);
+      const free = inside.length > 0 && inside.every((d) => d.kind === 'text_free');
+      blocks.push({
+        box: [(b[0] / original.width) * 1000, (b[1] / original.height) * 1000, ((b[0] + b[2]) / original.width) * 1000, ((b[1] + b[3]) / original.height) * 1000],
+        text: r.text,
+        type: free ? 'NARRATION' : 'DIALOGUE',
+        vertical: r.lines.length > 0 && r.lines.filter((l) => l.vertical).length > r.lines.length / 2,
+      });
+    }
+    addStep(debug, `text recognition in the browser: ${pieces.length} piece(s), ${blocks.length} with text, ${Math.round(performance.now() - t0)} ms`);
+    answers = [{ view: { y: 0, h: original.height }, answer: { blocks, entities: [], summary: '' }, usage: { provider: 'ocr', model: 'PP-OCR', inputTokens: 0, outputTokens: 0, costUsd: 0 } }];
+    collageUsed = true;
+  }
+  const textDets = !ocrMode && config.collage && dets && !req.generic ? dets.filter((d) => isTextKind(d.kind)) : [];
   if (textDets.length) {
     const boxes = pieceBoxes(textDets.map((d) => d.box), original.width, original.height);
     const area = boxes.reduce((a, b) => a + b[2] * b[3], 0);

@@ -153,17 +153,18 @@ try {
   await popup.goto(`chrome-extension://${extId}/popup.html`);
   await popup.waitForSelector('[data-testid="ai-mode"] button', { timeout: 15000 });
   const modes = () => popup.$$eval('[data-testid="ai-mode"] button', (bs) => bs.map((b) => `${b.dataset.mode}:${b.getAttribute('aria-pressed')}:${b.disabled ? 'off' : 'on'}`).join(' '));
-  check('the popup shows the modes; cloud needs an online server', /ollama:true:on/.test(await modes()) && /cloud:false:off/.test(await modes()), await modes());
-  await popup.click('[data-mode="engine"]');
+  check('the popup shows the modes; cloud needs an online server', /ollama:true:on/.test(await modes()) && /cloud:false:off/.test(await modes()) && /ocr:false:on/.test(await modes()), await modes());
+  await popup.click('[data-mode="ocr"]');
   await new Promise((r) => setTimeout(r, 600));
-  const pipelineOf = () => studio.evaluate(async () => {
+  const readModeOf = () => studio.evaluate(async () => {
     const db = await new Promise((res) => { const r = indexedDB.open('ai-translate', 1); r.onsuccess = () => res(r.result); });
-    return new Promise((res) => { const g = db.transaction('kv').objectStore('kv').get('settings'); g.onsuccess = () => res(g.result.pipeline); });
+    return new Promise((res) => { const g = db.transaction('kv').objectStore('kv').get('settings'); g.onsuccess = () => res(g.result.readMode ?? 'vision'); });
   });
-  const afterEngine = await pipelineOf();
+  const afterOcr = await readModeOf();
+  const notice = await popup.$('[data-testid="ocr-missing"]');
   await popup.click('[data-mode="ollama"]');
   await new Promise((r) => setTimeout(r, 600));
-  check('one click switches to the engine and back', afterEngine === 'engine' && (await pipelineOf()) === 'standalone', `${afterEngine} → ${await pipelineOf()}`);
+  check('one click switches to recognition (models offered) and back', afterOcr === 'ocr' && !!notice && (await readModeOf()) === 'vision', `${afterOcr} → ${await readModeOf()}, notice=${!!notice}`);
 } catch (e) {
   check('no crash', false, String(e?.stack ?? e));
 } finally {

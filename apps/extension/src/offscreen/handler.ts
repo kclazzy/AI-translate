@@ -9,6 +9,7 @@ import { db, loadSettings, secrets } from '../shared/store';
 import { lamaDownloaded, lamaInpainter, releaseLama } from './lama';
 import { detectorDownloaded, releaseDetector, textDetector } from './detector';
 import { gpuFetch, setWorkWaiting } from './gpuLane';
+import { ocrDownloaded, readText } from './ocr';
 import { setUiLang, tr } from '@ait/core/i18n';
 
 /**
@@ -291,7 +292,9 @@ function watchdogError(limitMin: number) {
 async function prepare() {
   const settings = await loadSettings();
   service.inpainter = await browserLama(settings.lamaMode);
-  service.detector = settings.detectorMode === 'browser' && (await detectorDownloaded()) ? textDetector : undefined;
+  service.detector = (settings.detectorMode === 'browser' || settings.readMode === 'ocr') && (await detectorDownloaded()) ? textDetector : undefined;
+  // Recognition in the browser (AI mode «Распознавание»): when its models are here.
+  service.reader = settings.readMode === 'ocr' && (await ocrDownloaded(settings.sourceLang.split('-')[0] === 'ko')) ? readText : undefined;
   // This document can live for days: follow a language changed since it opened.
   setUiLang(settings.interfaceLang, false);
   const vision = settings.providers.find((p) => p.id === settings.visionProviderId);

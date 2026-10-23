@@ -47,6 +47,8 @@ export interface PipelineConfig {
   detector?: boolean;
   /** Read a collage of the text the detector found instead of the whole page (pipeline/collage.ts). */
   collage?: boolean;
+  /** Read the text with recognition in this browser (PaddleOCR) instead of a vision model; a text model translates. */
+  ocr?: boolean;
   /** Разговорник: hints for recurring expressions (see translate/phrasebook). */
   phrasebook?: PhrasebookSettings;
   /** Pictures without lettering (local check) are not sent to the model; default on. */
@@ -138,7 +140,9 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     inpaintExpand: s.inpaintExpand,
     phrasebook: s.phrasebook,
     lama: (s.lamaMode ?? (s.lamaEngine ? 'engine' : 'off')) === 'off' ? undefined : (s.lamaMode ?? 'engine') as 'engine' | 'browser',
-    detector: s.detectorMode === 'browser' || undefined,
+    // Recognition needs the detector to find the text.
+    detector: s.detectorMode === 'browser' || s.readMode === 'ocr' || undefined,
+    ocr: s.readMode === 'ocr' || undefined,
     skipEmptyPages: s.skipEmptyPages ?? true,
     qaBatch: s.qaBatch || undefined,
     selfCheck: s.selfCheck ?? true,
@@ -184,6 +188,7 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     nsc: c.selfCheck === false ? 1 : undefined,
     tl: c.translateLogo ? 1 : undefined,
     col: c.collage && c.detector ? 1 : undefined,
+    ocr: c.ocr ? 1 : undefined,
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);
 }

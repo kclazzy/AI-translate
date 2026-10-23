@@ -25,6 +25,8 @@ export interface StudioPlatform {
   lama?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void> };
   /** Optional: the neural text / bubble detector in this browser (model downloaded once). */
   detector?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void>; detect?: TextDetector };
+  /** Optional: text recognition in this browser (PaddleOCR), for the AI mode «Распознавание». */
+  ocr?: { downloaded(korean?: boolean): Promise<boolean>; download(progress: (share: number) => void, korean?: boolean): Promise<void>; remove(): Promise<void> };
   /** Optional: LaMa itself (needs the downloaded model), for the editor's «Дорисовать фон». */
   inpaint?: Inpainter;
 }

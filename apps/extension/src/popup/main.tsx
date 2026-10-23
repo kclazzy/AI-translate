@@ -6,6 +6,8 @@ import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
 import { AiModeSwitch } from '@ait/studio/ai-mode';
+import { ocrDownloaded } from '../offscreen/ocr';
+import { detectorDownloaded } from '../offscreen/detector';
 import './popup.css';
 import type { PageLangs, SpeedStats } from '../shared/messages';
 import { db, hostOf, loadSettings, saveSettings, secrets } from '../shared/store';
@@ -68,6 +70,18 @@ function Popup() {
   const [s, setS] = useState<AppSettings | null>(null);
   const [tab, setTab] = useState<chrome.tabs.Tab | null>(null);
   const [engine, setEngine] = useState<'ok' | 'down' | 'unpaired' | null>(null);
+  // In the recognition mode: are its models here (the detector and the readers)?
+  const [ocrReady, setOcrReady] = useState<boolean | null>(null);
+  const ocrMode = s?.readMode === 'ocr';
+  const korean = s?.sourceLang.split('-')[0] === 'ko';
+  useEffect(() => {
+    if (!ocrMode) return setOcrReady(null);
+    let off = false;
+    void Promise.all([ocrDownloaded(korean), detectorDownloaded()]).then(([a, b]) => !off && setOcrReady(a && b), () => !off && setOcrReady(false));
+    return () => {
+      off = true;
+    };
+  }, [ocrMode, korean]);
   // Is the engine there (checked when the window opens and whenever the engine mode is chosen)?
   const enginePipeline = s?.pipeline === 'engine';
   const engineUrl = s?.engine.url;
@@ -141,7 +155,8 @@ function Popup() {
     if (command !== 'toggle-original' && command !== 'clear-page' && command !== 'refresh-look') window.close();
   };
   const open = (path: string) => void chrome.tabs.create({ url: chrome.runtime.getURL(path) });
-  const missing = s.pipeline === 'standalone' && !vision?.vision;
+  // Recognition in the browser needs only a text model for the translation.
+  const missing = s.pipeline === 'standalone' && (s.readMode === 'ocr' ? !vision : !vision?.vision);
   const on = s.enabled !== false;
   const toggle = async () => {
     const next = !on;
@@ -188,6 +203,12 @@ function Popup() {
         <AiModeSwitch settings={s} update={update} compact />
       </div>
 
+      {s.readMode === 'ocr' && ocrReady === false ? (
+        <div className="ait-notice" data-testid="ocr-missing">
+          {tr('Для режима «Распознавание» скачайте модели (~76 МБ).')}{' '}
+          <button className="pp-link" onClick={() => open('studio.html?view=settings')}>{tr('Скачать в настройках')}</button>
+        </div>
+      ) : null}
       {missing ? (
         <div className="ait-notice">{tr('Выберите модель, которая читает изображения.')}{' '}<button className="pp-link" onClick={() => chrome.runtime.openOptionsPage()}>{tr('Открыть настройки')}</button></div>
       ) : null}

@@ -1,5 +1,6 @@
 import { deleteLama, downloadLama, lamaDownloaded, lamaInpainter } from '../offscreen/lama';
 import { deleteDetector, detectorDownloaded, downloadDetector, textDetector } from '../offscreen/detector';
+import { deleteOcr, downloadOcr, ocrDownloaded } from '../offscreen/ocr';
 import { browserBackend, TranslateService } from '@ait/core';
 import { downloadFile, type StudioPlatform } from '@ait/studio';
 import { db, loadSettings, saveSettings, secrets } from '../shared/store';
@@ -21,6 +22,8 @@ export function extensionPlatform(): StudioPlatform {
     ...(lamaHere ? { lama: { downloaded: lamaDownloaded, download: (p: (share: number) => void) => downloadLama(p), remove: deleteLama }, inpaint: lamaInpainter } : {}),
     // The text detector runs on the same runtime as LaMa: wherever LaMa can.
     ...(lamaHere ? { detector: { downloaded: detectorDownloaded, download: (p: (share: number) => void) => downloadDetector(p), remove: deleteDetector, detect: textDetector } } : {}),
+    // Text recognition (AI mode «Распознавание») on the same runtime.
+    ...(lamaHere ? { ocr: { downloaded: (korean?: boolean) => ocrDownloaded(korean), download: (p: (share: number) => void, korean?: boolean) => downloadOcr(p, undefined, korean), remove: deleteOcr } } : {}),
     notifyResultChanged: (key) => void chrome.runtime.sendMessage({ type: 'result-changed', key }).catch(() => undefined),
     version: chrome.runtime.getManifest().version,
     installUpdate: installExtensionUpdate,

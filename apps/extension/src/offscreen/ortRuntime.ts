@@ -76,7 +76,12 @@ export async function downloadWithRuntime(modelUrl: string, modelGuess: number, 
 export const LAMA_URL = 'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx';
 export const DETECTOR_URL = 'https://huggingface.co/ogkalu/comic-text-and-bubble-detector/resolve/main/detector_int8.onnx';
 export const DETECTOR_FP32_URL = 'https://huggingface.co/ogkalu/comic-text-and-bubble-detector/resolve/main/detector.onnx';
-const RUNTIME_USERS = [LAMA_URL, DETECTOR_URL, DETECTOR_FP32_URL];
+/** Text recognition (see ocr.ts): RapidOCR's model hub, PP-OCRv6 small and the Korean reader. */
+export const OCR_HUB = 'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx';
+export const OCR_DET_URL = `${OCR_HUB}/PP-OCRv6/det/PP-OCRv6_det_small.onnx`;
+export const OCR_REC_URL = `${OCR_HUB}/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx`;
+export const OCR_REC_KO_URL = `${OCR_HUB}/PP-OCRv5/rec/korean_PP-OCRv5_rec_mobile.onnx`;
+const RUNTIME_USERS = [LAMA_URL, DETECTOR_URL, DETECTOR_FP32_URL, OCR_DET_URL, OCR_REC_URL, OCR_REC_KO_URL];
 
 /** Remove a model; the runtime goes too when no other model needs it. */
 export async function removeModel(modelUrls: string[]): Promise<void> {
