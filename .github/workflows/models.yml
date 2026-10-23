@@ -24,7 +24,7 @@ jobs:
       - id: have
         run: |
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -q '^SHA256SUMS$'; then echo "skip=1" >> "$GITHUB_OUTPUT"; fi
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         if: steps.have.outputs.skip != '1'
         with: { python-version: '3.12' }
       - name: Download (checked)
