@@ -1,6 +1,6 @@
-import { deleteLama, downloadLama, lamaDownloaded, lamaInpainter } from '../offscreen/lama';
+import { deleteLama, downloadLama, lamaDownloaded, lamaInpainter, lamaKind, upgradeLama } from '../offscreen/lama';
 import { deleteDetector, detectorDownloaded, downloadDetector, textDetector } from '../offscreen/detector';
-import { deleteOcr, downloadOcr, ocrDownloaded } from '../offscreen/ocr';
+import { deleteMangaOcr, deleteOcr, downloadMangaOcr, downloadOcr, mangaOcrDownloaded, ocrDownloaded } from '../offscreen/ocr';
 import { browserBackend, TranslateService } from '@ait/core';
 import { downloadFile, type StudioPlatform } from '@ait/studio';
 import { db, loadSettings, saveSettings, secrets } from '../shared/store';
@@ -19,11 +19,11 @@ export function extensionPlatform(): StudioPlatform {
     loadSettings,
     saveSettings,
     saveFile: downloadFile,
-    ...(lamaHere ? { lama: { downloaded: lamaDownloaded, download: (p: (share: number) => void) => downloadLama(p), remove: deleteLama }, inpaint: lamaInpainter } : {}),
+    ...(lamaHere ? { lama: { downloaded: lamaDownloaded, download: (p: (share: number) => void) => downloadLama(p), remove: deleteLama, kind: lamaKind, upgrade: (p: (share: number) => void) => upgradeLama(p) }, inpaint: lamaInpainter } : {}),
     // The text detector runs on the same runtime as LaMa: wherever LaMa can.
     ...(lamaHere ? { detector: { downloaded: detectorDownloaded, download: (p: (share: number) => void) => downloadDetector(p), remove: deleteDetector, detect: textDetector } } : {}),
     // Text recognition (AI mode «Распознавание») on the same runtime.
-    ...(lamaHere ? { ocr: { downloaded: (korean?: boolean) => ocrDownloaded(korean), download: (p: (share: number) => void, korean?: boolean) => downloadOcr(p, undefined, korean), remove: deleteOcr } } : {}),
+    ...(lamaHere ? { ocr: { downloaded: (korean?: boolean) => ocrDownloaded(korean), download: (p: (share: number) => void, korean?: boolean) => downloadOcr(p, undefined, korean), remove: deleteOcr, manga: { downloaded: mangaOcrDownloaded, download: (p: (share: number) => void) => downloadMangaOcr(p), remove: deleteMangaOcr } } } : {}),
     notifyResultChanged: (key) => void chrome.runtime.sendMessage({ type: 'result-changed', key }).catch(() => undefined),
     version: chrome.runtime.getManifest().version,
     installUpdate: installExtensionUpdate,

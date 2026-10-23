@@ -264,6 +264,14 @@ function LamaChoice({ settings: s, update, offer }: { settings: AppSettings; upd
   const [have, setHave] = useLamaDownloaded();
   const [pct, setPct] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [kind, setKind] = useState<'manga' | 'general' | null>(null);
+  useEffect(() => {
+    let off = false;
+    if (have) void platform.lama?.kind?.().then((k) => !off && setKind(k), () => undefined);
+    return () => {
+      off = true;
+    };
+  }, [platform, have]);
   const ref = useRef<HTMLDivElement>(null);
   // Came from the offer on a page (?offer=lama): show this setting right away.
   const highlight = !!offer && !!platform.lama;
@@ -317,6 +325,28 @@ function LamaChoice({ settings: s, update, offer }: { settings: AppSettings; upd
             </button>
           )}
           {err ? <small style={{ color: 'var(--err)' }}>{tr('Не удалось скачать: {0}', err)}</small> : null}
+        </span>
+      ) : null}
+      {mode === 'browser' && have && kind === 'general' && platform.lama?.upgrade && pct === null ? (
+        <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }} data-testid="lama-upgrade">
+          <small className="ait-muted">{tr('Есть LaMa, обученная на манге: лучше дорисовывает штриховку, волосы и тона.')}</small>
+          <button
+            className="ait-btn small"
+            onClick={async () => {
+              setErr(null);
+              setPct(0);
+              try {
+                await platform.lama!.upgrade!(setPct);
+                setKind('manga');
+              } catch (e) {
+                setErr(e instanceof Error ? e.message : String(e));
+              } finally {
+                setPct(null);
+              }
+            }}
+          >
+            {tr('Заменить на LaMa для манги (~200 МБ)')}
+          </button>
         </span>
       ) : null}
     </div>

@@ -72,8 +72,57 @@ export async function downloadWithRuntime(modelUrl: string, modelGuess: number, 
   progress(1);
 }
 
+/** A model file pinned by its SHA-256, with a second source (this repository's releases). */
+export interface ModelFile {
+  url: string;
+  sha256: string;
+  size: number;
+  /** The same file elsewhere (tried when the first source fails or sends something else). */
+  mirror?: string;
+}
+
+/** Networks attached to this repository's «models-1» release (see .github/workflows/models.yml). */
+export const MODELS_RELEASE = 'https://github.com/kclazzy/AI-translate/releases/download/models-1';
+
+/** Download the runtime (unless there) and the files that are missing, checking every one; progress 0–1. */
+export async function downloadChecked(files: ModelFile[], progress: (share: number) => void, signal?: AbortSignal): Promise<void> {
+  const cache = await caches.open(MODELS_CACHE);
+  const want: ModelFile[] = [];
+  if (!(await cache.match(ORT_WASM_URL))) want.push({ url: ORT_WASM_URL, sha256: ORT_WASM_SHA256, size: ORT_WASM_SIZE });
+  for (const f of files) if (!(await cache.match(f.url))) want.push(f);
+  const total = want.reduce((n, f) => n + f.size, 0) || 1;
+  let done = 0;
+  for (const f of want) {
+    const sources = [f.url, ...(f.mirror ? [f.mirror] : [])];
+    let ok: Blob | null = null;
+    let last: unknown = null;
+    for (const src of sources) {
+      try {
+        const blob = await fetchAll(src, (got) => progress(Math.min(0.99, (done + Math.min(got, f.size)) / total)), f.size, signal);
+        if ((await sha256(await blob.arrayBuffer())) !== f.sha256) throw new Error(tr('файл скачался с ошибкой или подменён (контрольная сумма не совпала)'));
+        ok = blob;
+        break;
+      } catch (e) {
+        if (signal?.aborted) throw e;
+        last = e;
+      }
+    }
+    if (!ok) throw last ?? new Error('download');
+    await cache.put(f.url, new Response(ok, { headers: { 'content-length': String(ok.size) } }));
+    done += f.size;
+  }
+  progress(1);
+}
+
 /** Every model that runs on this runtime: it is removed with the last of them. */
 export const LAMA_URL = 'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx';
+/** LaMa trained on manga and anime (AnimeMangaInpainting by dreMaz, MIT; ONNX by mayocream for Koharu). */
+export const LAMA_MANGA: ModelFile = {
+  url: 'https://huggingface.co/mayocream/lama-manga-onnx/resolve/b55497aadbfcb9740e1ed16f008268d71b4f3f79/lama-manga.onnx',
+  sha256: '4512adab295ee5a5e02ccd1bdf8d45dccbac88309d9cff1532ffd5de876f02a4',
+  size: 207_482_644,
+  mirror: `${MODELS_RELEASE}/lama-manga.onnx`,
+};
 export const DETECTOR_URL = 'https://huggingface.co/ogkalu/comic-text-and-bubble-detector/resolve/main/detector_int8.onnx';
 export const DETECTOR_FP32_URL = 'https://huggingface.co/ogkalu/comic-text-and-bubble-detector/resolve/main/detector.onnx';
 /** Text recognition (see ocr.ts): RapidOCR's model hub, PP-OCRv6 small and the Korean reader. */
@@ -81,7 +130,14 @@ export const OCR_HUB = 'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolv
 export const OCR_DET_URL = `${OCR_HUB}/PP-OCRv6/det/PP-OCRv6_det_small.onnx`;
 export const OCR_REC_URL = `${OCR_HUB}/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx`;
 export const OCR_REC_KO_URL = `${OCR_HUB}/PP-OCRv5/rec/korean_PP-OCRv5_rec_mobile.onnx`;
-const RUNTIME_USERS = [LAMA_URL, DETECTOR_URL, DETECTOR_FP32_URL, OCR_DET_URL, OCR_REC_URL, OCR_REC_KO_URL];
+/** Manga OCR (Japanese; kha-white/manga-ocr-base, Apache-2.0), int8 weights made by models.yml. */
+export const MANGA_OCR: Record<'encoder' | 'decoder' | 'vocab', ModelFile> = {
+  encoder: { url: `${MODELS_RELEASE}/manga-ocr-encoder-int8.onnx`, sha256: '0eaf2b867292a44700ce38ef028b90639a2e36fc4c18c2bcdd1de7409488adb3', size: 87_074_595 },
+  decoder: { url: `${MODELS_RELEASE}/manga-ocr-decoder-int8.onnx`, sha256: '3ff0d4c34c4a66613d98ff93e0b17f22a7b09dfbeec195c3e4d6f595af3a6b6c', size: 29_675_736 },
+  vocab: { url: `${MODELS_RELEASE}/manga-ocr-vocab.txt`, sha256: '5cb5c5586d98a2f331d9f8828e4586479b0611bfba5d8c3b6dadffc84d6a36a3', size: 30_216 },
+};
+export const MANGA_OCR_URLS = [MANGA_OCR.encoder.url, MANGA_OCR.decoder.url, MANGA_OCR.vocab.url];
+const RUNTIME_USERS = [LAMA_URL, LAMA_MANGA.url, ...MANGA_OCR_URLS, DETECTOR_URL, DETECTOR_FP32_URL, OCR_DET_URL, OCR_REC_URL, OCR_REC_KO_URL];
 
 /** Remove a model; the runtime goes too when no other model needs it. */
 export async function removeModel(modelUrls: string[]): Promise<void> {

@@ -188,10 +188,21 @@ try {
   }
   await tab.screenshot({ path: join(OUT, 'lama.png') });
   check('text over the art is redrawn by LaMa running in the browser', grey > 300, `grey pixels where the letters were: ${grey}`);
+  // The general LaMa of older versions is there: the settings offer the one trained on manga.
+  {
+    const sp = await browser.newPage();
+    await sp.goto(`chrome-extension://${extId}/studio.html?view=settings`);
+    const up = await sp.waitForSelector('[data-testid="lama-upgrade"]', { timeout: 15000 }).catch(() => null);
+    check('with the old general LaMa the settings offer the manga one', !!up);
+    await sp.close();
+  }
 
   // ---- LaMa is off and not downloaded: the program offers it ----------------------------------------
   const modelBytes = readFileSync(new URL('./fixtures/fake-lama.onnx', import.meta.url));
-  const LAMA = 'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx';
+  // Downloads bring the LaMa trained on manga; the general one (seeded above) is what older versions had.
+  const LAMA = 'https://huggingface.co/mayocream/lama-manga-onnx/resolve/b55497aadbfcb9740e1ed16f008268d71b4f3f79/lama-manga.onnx';
+  const LAMA_OLD = 'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx';
+  const LAMA_SHA = '4512adab295ee5a5e02ccd1bdf8d45dccbac88309d9cff1532ffd5de876f02a4';
   const readSettings = () =>
     studio.evaluate(async () => {
       const db = await new Promise((res) => {
@@ -221,7 +232,7 @@ try {
       await new Promise((r) => (tx.oncomplete = r));
     }, patch);
   const modelCached = () => studio.evaluate(async (urls) => (await Promise.all(urls.map(async (u) => !!(await (await caches.open('ait-models')).match(u))))).every(Boolean), [LAMA, ORT_WASM_URL]);
-  const dropModel = () => studio.evaluate(async (urls) => Promise.all(urls.map(async (u) => (await caches.open('ait-models')).delete(u))), [LAMA, ORT_WASM_URL]);
+  const dropModel = () => studio.evaluate(async (urls) => Promise.all(urls.map(async (u) => (await caches.open('ait-models')).delete(u))), [LAMA, LAMA_OLD, ORT_WASM_URL]);
   /** Texts and labels on a page, closed shadow roots included (our page UI lives there). */
   const pageTexts = async (p) => {
     const c = await p.target().createCDPSession();
@@ -258,7 +269,14 @@ try {
   };
   /** The model download is answered with the stand-in model, the runtime with the real .wasm. */
   const fetched = new Set();
+  // The stand-in is not the real 207 MB file: on these test pages its checksum is taken as the real one's.
+  const fakeDigest = (size, hex) => {
+    const orig = crypto.subtle.digest.bind(crypto.subtle);
+    crypto.subtle.digest = async (alg, buf) => (buf.byteLength === size ? Uint8Array.from(hex.match(/../g).map((h) => parseInt(h, 16))).buffer : orig(alg, buf));
+  };
   const serveModel = async (p) => {
+    await p.evaluateOnNewDocument(fakeDigest, modelBytes.length, LAMA_SHA);
+    await p.evaluate(fakeDigest, modelBytes.length, LAMA_SHA).catch(() => undefined);
     await p.setRequestInterception(true);
     p.on('request', (r) => {
       const body = r.url() === ORT_WASM_URL ? wasmBytes : r.url().startsWith('https://huggingface.co/') ? modelBytes : null;

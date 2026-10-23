@@ -4,6 +4,7 @@ export * from './errors';
 export * from './settings';
 export * from './aiMode';
 export * from './ocr/paddle';
+export * from './ocr/mangaOcr';
 export * from './service';
 export * from './util/bytes';
 export * from './util/retry';

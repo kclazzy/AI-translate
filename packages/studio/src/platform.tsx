@@ -22,11 +22,25 @@ export interface StudioPlatform {
   /** Optional: the setup helper finished; continue what the user started (params of the page URL). */
   setupReady?(params: URLSearchParams): void;
   /** Optional: LaMa running in this browser (download the model once, then it redraws art under text). */
-  lama?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void> };
+  lama?: {
+    downloaded(): Promise<boolean>;
+    download(progress: (share: number) => void): Promise<void>;
+    remove(): Promise<void>;
+    /** Which model is there: the one trained on manga, or the general one older versions downloaded. */
+    kind?(): Promise<'manga' | 'general' | null>;
+    /** Replace the general model with the one for manga. */
+    upgrade?(progress: (share: number) => void): Promise<void>;
+  };
   /** Optional: the neural text / bubble detector in this browser (model downloaded once). */
   detector?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void>; detect?: TextDetector };
   /** Optional: text recognition in this browser (PaddleOCR), for the AI mode «Распознавание». */
-  ocr?: { downloaded(korean?: boolean): Promise<boolean>; download(progress: (share: number) => void, korean?: boolean): Promise<void>; remove(): Promise<void> };
+  ocr?: {
+    downloaded(korean?: boolean): Promise<boolean>;
+    download(progress: (share: number) => void, korean?: boolean): Promise<void>;
+    remove(): Promise<void>;
+    /** Optional: Manga OCR, the reader for Japanese manga (a whole bubble at once). */
+    manga?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void> };
+  };
   /** Optional: LaMa itself (needs the downloaded model), for the editor's «Дорисовать фон». */
   inpaint?: Inpainter;
 }

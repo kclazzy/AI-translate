@@ -1,27 +1,42 @@
 import type { Inpainter, PixelData } from '@ait/core';
 import { GPU_NETS, GpuTimeout, NETS_LIMIT_MS, NETS_LOAD_LIMIT_MS, onGpu, releaseWhenIdle, withLimit } from './gpuLane';
-import { cached, downloadWithRuntime, LAMA_URL, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, resizePixels, type Ort } from './ortRuntime';
+import { cached, downloadChecked, LAMA_MANGA, LAMA_URL, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, resizePixels, type Ort } from './ortRuntime';
 
 /**
- * LaMa in the browser: the same model the local engine uses (Carve/LaMa-ONNX, 512×512), run with
- * ONNX Runtime on the video card (WebGPU) or the processor (WebAssembly). The model (~200 MB) is
- * downloaded once, on request, and kept in the extension's cache (with the runtime, see ortRuntime).
+ * LaMa in the browser, 512×512, run with ONNX Runtime on the video card (WebGPU) or the processor
+ * (WebAssembly). The model (~200 MB) is downloaded once, on request, and kept in the extension's
+ * cache (with the runtime, see ortRuntime). Since 1.1.22 it is the one trained on manga and anime
+ * (as in Koharu); the general one (Carve/LaMa-ONNX) downloaded before keeps working until replaced.
  */
 export { LAMA_URL, MODELS_CACHE as LAMA_CACHE, ORT_VERSION, ORT_WASM_SHA256, ORT_WASM_URL } from './ortRuntime';
 const SIZE = 512;
 
-export async function lamaDownloaded(): Promise<boolean> {
-  return (await cached(LAMA_URL)) && (await cached(ORT_WASM_URL));
+/** Which LaMa is in the cache: the one for manga, the general one (older versions), or none. */
+export async function lamaKind(): Promise<'manga' | 'general' | null> {
+  if (!(await cached(ORT_WASM_URL))) return null;
+  if (await cached(LAMA_MANGA.url)) return 'manga';
+  return (await cached(LAMA_URL)) ? 'general' : null;
 }
 
-/** Download the runtime and the model into the cache, reporting progress (0–1) over both. */
+export async function lamaDownloaded(): Promise<boolean> {
+  return (await lamaKind()) !== null;
+}
+
+/** Download the runtime and the model (for manga, checked) into the cache, reporting progress (0–1) over both. */
 export async function downloadLama(progress: (share: number) => void, signal?: AbortSignal): Promise<void> {
-  await downloadWithRuntime(LAMA_URL, 208_000_000, progress, signal);
+  await downloadChecked([LAMA_MANGA], progress, signal);
+}
+
+/** Replace the general LaMa with the one for manga (the old file goes once the new one is in). */
+export async function upgradeLama(progress: (share: number) => void, signal?: AbortSignal): Promise<void> {
+  await downloadLama(progress, signal);
+  await releaseLama();
+  await (await caches.open(MODELS_CACHE)).delete(LAMA_URL);
 }
 
 export async function deleteLama(): Promise<void> {
   await releaseLama();
-  await removeModel([LAMA_URL]);
+  await removeModel([LAMA_URL, LAMA_MANGA.url]);
 }
 
 /** After a run on the card stopped answering: on the processor from now on (until the extension restarts). */
@@ -50,7 +65,8 @@ let session: Promise<{ ort: Ort; s: import('onnxruntime-web').InferenceSession; 
 
 function load() {
   session ??= (async () => {
-    const hit = await (await caches.open(MODELS_CACHE)).match(LAMA_URL);
+    const cache = await caches.open(MODELS_CACHE);
+    const hit = (await cache.match(LAMA_MANGA.url)) ?? (await cache.match(LAMA_URL));
     if (!hit || !(await cached(ORT_WASM_URL))) throw new Error('LaMa is not downloaded');
     const ort = await loadOrt();
     const bytes = new Uint8Array(await hit.arrayBuffer());

@@ -34,6 +34,10 @@ const files = {
   'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx': readFileSync(join(MODELS, 'PP-OCRv6_det_small.onnx')),
   'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx': readFileSync(join(MODELS, 'PP-OCRv6_rec_small.onnx')),
 };
+// Manga OCR (Japanese) when its files are in the same folder (from the models-1 release).
+const MANGA = ['manga-ocr-encoder-int8.onnx', 'manga-ocr-decoder-int8.onnx', 'manga-ocr-vocab.txt'];
+const haveManga = MANGA.every((f) => existsSync(join(MODELS, f)));
+if (haveManga) for (const f of MANGA) files[`https://github.com/kclazzy/AI-translate/releases/download/models-1/${f}`] = readFileSync(join(MODELS, f));
 
 const ext = join(tmpdir(), 'ait-ext-ocr');
 if (existsSync(ext)) rmSync(ext, { recursive: true });
@@ -46,7 +50,14 @@ writeFileSync(join(ext, 'manifest.json'), JSON.stringify(manifest));
 const W = 600;
 const H = 700;
 let picture = null;
+let pictureJa = null;
 const site = createServer((req, res) => {
+  if (req.url.startsWith('/models/')) {
+    const body = files[decodeURIComponent(req.url.slice(8))];
+    if (body) return res.writeHead(200, { 'access-control-allow-origin': '*', 'content-type': 'application/octet-stream', 'content-length': String(body.length) }).end(body);
+  }
+  if (req.url === '/ja') return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><title>Bubble</title><body style="margin:0"><img src="/page-ja.png" width="${W}" height="${H}"></body>`);
+  if (req.url === '/page-ja.png' && pictureJa) return res.writeHead(200, { 'content-type': 'image/png' }).end(pictureJa);
   if (req.url === '/') return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><title>Bubble</title><body style="margin:0"><img src="/page.png" width="${W}" height="${H}"></body>`);
   if (req.url === '/page.png' && picture) return res.writeHead(200, { 'content-type': 'image/png' }).end(picture);
   res.writeHead(404).end();
@@ -85,8 +96,8 @@ browser.on('targetcreated', async (t) => {
 try {
   const helper = await browser.newPage();
   await helper.goto('http://127.0.0.1:18171/x');
-  picture = Buffer.from(
-    await helper.evaluate(async (W, H) => {
+  const drawBubble = async (text, font) => Buffer.from(
+    await helper.evaluate(async (W, H, text, font) => {
       const c = document.createElement('canvas');
       c.width = W;
       c.height = H;
@@ -100,14 +111,16 @@ try {
       g.lineWidth = 4;
       g.stroke();
       g.fillStyle = '#000';
-      g.font = 'bold 22px sans-serif';
+      g.font = font;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.fillText('HELLO THERE', W / 2, H / 2);
+      g.fillText(text, W / 2, H / 2);
       return c.toDataURL('image/png').split(',')[1];
-    }, W, H),
+    }, W, H, text, font),
     'base64',
   );
+  picture = await drawBubble('HELLO THERE', 'bold 22px sans-serif');
+  pictureJa = await drawBubble('なにしてるの', '24px "Noto Sans CJK JP", sans-serif');
   const sw = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().endsWith('background.js'), { timeout: 15000 });
   const extId = new URL(sw.url()).host;
   const studio = await browser.newPage();
@@ -116,8 +129,11 @@ try {
   studio.on('request', (r) => {
     const body = files[r.url()];
     if (body) {
-      fetched.add(r.url().split('/').pop());
-      void r.respond({ status: 200, headers: { 'access-control-allow-origin': '*', 'content-length': String(body.length) }, contentType: 'application/octet-stream', body });
+      const name = r.url().split('/').pop();
+      fetched.add(name);
+      // Large files come from the local server (a body this size through the protocol stalls the browser).
+      if (body.length > 20_000_000) void r.continue({ url: `http://127.0.0.1:18171/models/${encodeURIComponent(r.url())}` });
+      else void r.respond({ status: 200, headers: { 'access-control-allow-origin': '*', 'content-length': String(body.length) }, contentType: 'application/octet-stream', body });
     } else void r.continue();
   });
   await studio.goto(`chrome-extension://${extId}/studio.html?view=settings`);
@@ -188,6 +204,47 @@ try {
   });
   check('the page gets the translation', stored.includes('Где ты?'), `${JSON.stringify(stored)} errors=${JSON.stringify(errors).slice(0, 400)}`);
   await tab.screenshot({ path: join(OUT, 'ocr.png') });
+
+  if (haveManga) {
+    // Japanese: the card offers Manga OCR, which then reads the bubble whole.
+    await studio.bringToFront();
+    await studio.evaluate(async () => {
+      const db = await new Promise((res) => {
+        const r = indexedDB.open('ai-translate', 1);
+        r.onsuccess = () => res(r.result);
+      });
+      const tx = db.transaction('kv', 'readwrite');
+      const store = tx.objectStore('kv');
+      const s = await new Promise((res) => {
+        const g = store.get('settings');
+        g.onsuccess = () => res(g.result ?? {});
+      });
+      s.sourceLang = 'ja';
+      store.put(s, 'settings');
+      await new Promise((r) => (tx.oncomplete = r));
+    });
+    await studio.reload();
+    const offer = await studio.waitForSelector('[data-testid="manga-ocr"] button', { timeout: 15000 }).catch(() => null);
+    check('for Japanese the card offers Manga OCR', !!offer);
+    if (offer) {
+      await offer.click();
+      const got = await studio.waitForSelector('[data-testid="manga-ocr-ready"]', { timeout: 90000 }).catch(() => null);
+      check('«Скачать Manga OCR» brings its files (checked)', !!got && fetched.has('manga-ocr-encoder-int8.onnx') && fetched.has('manga-ocr-vocab.txt'), [...fetched].join(', '));
+      await studio.evaluate(() => chrome.runtime.sendMessage({ type: 'settings-changed' })).catch(() => undefined);
+      asked.length = 0;
+      const tabJa = await browser.newPage();
+      await tabJa.goto('http://127.0.0.1:18171/ja');
+      await tabJa.waitForFunction(() => document.images[0].complete && document.images[0].naturalWidth);
+      await new Promise((r) => setTimeout(r, 800));
+      await studio.evaluate(async () => {
+        const [t] = await chrome.tabs.query({ url: 'http://127.0.0.1:18171/ja' });
+        await chrome.tabs.sendMessage(t.id, { type: 'translate-src', src: 'http://127.0.0.1:18171/page-ja.png' });
+      });
+      await tabJa.bringToFront();
+      for (let i = 0; i < 120 && !asked.length; i++) await new Promise((r) => setTimeout(r, 500));
+      check('Manga OCR reads the Japanese bubble', asked.some((t) => t.includes('なにしてる')), `asked=${JSON.stringify(asked)}`);
+    }
+  }
 } catch (e) {
   check('no crash', false, String(e?.stack ?? e));
 } finally {

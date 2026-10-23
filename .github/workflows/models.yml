@@ -2,8 +2,8 @@ name: Models
 
 # Networks for the browser that the extension downloads from this repository's "models-1" release:
 # Manga OCR (Japanese, Apache-2.0, kha-white/manga-ocr-base exported to ONNX by mayocream for Koharu)
-# made smaller (int8 for the processor, fp16 for the video card), and LaMa trained on manga
-# (AnimeMangaInpainting, Apache-2.0, ONNX by mayocream). Each source file is checked by SHA-256.
+# made smaller (int8 weights, run on the processor), and LaMa trained on manga
+# (AnimeMangaInpainting by dreMaz, MIT; ONNX by mayocream, Apache-2.0). Each source file is checked by SHA-256.
 on:
   push:
     branches: [main]
@@ -44,7 +44,7 @@ jobs:
       - name: Make smaller
         if: steps.have.outputs.skip != '1'
         run: |
-          pip install -q onnx==1.19.1 onnxruntime==1.22.1 onnxconverter-common==1.16.0
+          pip install -q onnx==1.19.1 onnxruntime==1.22.1
           python scripts/models/shrink.py src out
           (cd out && sha256sum * > SHA256SUMS && cat SHA256SUMS && ls -l) | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Publish
