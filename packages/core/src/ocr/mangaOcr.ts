@@ -84,3 +84,4 @@ export async function mangaOcrRead(px: PixelData, run: MangaOcrRun, vocab: strin
   const vertical = px.height > px.width * 1.2;
   return { text, lines: text ? [{ box: [0, 0, px.width, px.height], text, score: 1, vertical }] : [] };
 }
+

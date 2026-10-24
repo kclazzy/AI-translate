@@ -148,6 +148,20 @@ export async function removeModel(modelUrls: string[]): Promise<void> {
   if (!other) await cache.delete(ORT_WASM_URL);
 }
 
+/**
+ * Processor threads for the networks: several where the page is cross-origin isolated (the
+ * extension's pages are, see manifest.ts) and in the offscreen document only, half the cores and at most 4 (the model and the page
+ * need the rest); one elsewhere.
+ */
+export function wasmThreads(): number {
+  if (typeof crossOriginIsolated === 'undefined' || !crossOriginIsolated) return 1;
+  // Only in the background document that translates the pages: on a page the user looks at
+  // (settings, studio) the main thread must stay free.
+  if (typeof location === 'undefined' || !location.pathname.endsWith('offscreen.html')) return 1;
+  const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2;
+  return Math.max(1, Math.min(4, Math.floor(cores / 2)));
+}
+
 /** The runtime, loaded once, from the cached .wasm (no URL to fetch, nothing for the CSP to block). */
 let ortPromise: Promise<Ort> | null = null;
 export function loadOrt(): Promise<Ort> {
@@ -155,8 +169,7 @@ export function loadOrt(): Promise<Ort> {
     const runtime = await (await caches.open(MODELS_CACHE)).match(ORT_WASM_URL);
     if (!runtime) throw new Error('ONNX Runtime is not downloaded');
     const ort = await import('onnxruntime-web/webgpu');
-    // No threads: the page is not cross-origin isolated.
-    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.numThreads = wasmThreads();
     ort.env.wasm.wasmBinary = await runtime.arrayBuffer();
     return ort;
   })();

@@ -155,6 +155,9 @@ export interface PageTimings {
   renderMs?: number;
   /** The check after typesetting (pipeline/selfcheck.ts), part of renderMs. */
   selfCheckMs?: number;
+  /** Drawing the translation over the cleaned picture, and encoding the drawn tiles (parts of renderMs). */
+  drawMs?: number;
+  encodeMs?: number;
   /** All model requests of the page together: wall time, count, tokens, mean generation speed. */
   llmMs?: number;
   llmCalls?: number;

@@ -38,6 +38,10 @@ export function buildManifest(target: 'chrome' | 'firefox', version: string): Re
     base.background = { service_worker: 'background.js', type: 'module' };
     (base.permissions as string[]).push('offscreen');
     base.minimum_chrome_version = '116';
+    // Cross-origin isolated pages: the neural networks run on several processor threads
+    // (SharedArrayBuffer). «credentialless»: pictures and files from other sites still load.
+    base.cross_origin_embedder_policy = { value: 'credentialless' };
+    base.cross_origin_opener_policy = { value: 'same-origin' };
   } else {
     base.background = { scripts: ['background.js'], type: 'module' };
     base.browser_specific_settings = { gecko: { id: 'ai-translate@kclazzy.github.io', strict_min_version: '128.0' }, gecko_android: { strict_min_version: '128.0' } };

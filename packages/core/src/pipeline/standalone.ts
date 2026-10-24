@@ -65,6 +65,9 @@ export interface PreparedPage {
   /** The views as sent to the vision model, for `viewsFor` (model + quality). */
   views?: EncodedView[];
   viewsFor?: string;
+  /** Recognition in this browser done ahead too: the pieces read and their text (for `readFor`, the language). */
+  reads?: { pieces: Box[]; results: ReadResult[]; ms: number };
+  readFor?: string;
 }
 
 interface EncodedView {
@@ -105,6 +108,19 @@ export async function preparePage(req: Pick<PipelineRequest, 'bytes' | 'mime' | 
     }
   }
   if (checksText(req) && !prep.textCheck) prep.textCheck = await checkForTextAsync(original);
+  // Recognition in this browser: the next page's text is read while this one is translated.
+  if (req.config.ocr && !req.generic && deps.ocr && prep.detections && !prep.textCheck?.noText) {
+    const t2 = performance.now();
+    try {
+      const pieces = ocrPieces(prep.detections, original.width, original.height);
+      prep.reads = { pieces, results: await readPieces(deps.ocr, original, pieces, req.config.sourceLang), ms: 0 };
+      prep.reads.ms = Math.round(performance.now() - t2);
+      prep.readFor = req.config.sourceLang;
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError') throw e;
+      // Read again with the page itself.
+    }
+  }
   if (req.config.mode === 'standalone' && req.config.vision?.vision && !prep.textCheck?.noText) {
     prep.views = [];
     for (const view of planViews(original.width, original.height)) prep.views.push(await encodeView(original, view, req.config, req.config.vision.model, deps));
@@ -133,6 +149,26 @@ function usesDetector(req: Pick<PipelineRequest, 'config' | 'generic'>, deps: St
 type ReadResult = { text: string; lines: { box: Box; text: string; score: number; vertical: boolean }[] };
 /** Reads one piece of a page; `all` (when there) reads every piece of a page in one go (faster). */
 export type TextReader = ((px: PixelData, lang: string) => Promise<ReadResult>) & { all?: (pieces: PixelData[], lang: string) => Promise<ReadResult[]> };
+
+/**
+ * The pieces of a page read by the recognition: the detector's text boxes put together, each with a
+ * margin (a letter cut by a tight box is read wrong: «HELLO» as «ELLO»).
+ */
+function ocrPieces(dets: Detection[], width: number, height: number): Box[] {
+  const found = dets.filter((d) => isTextKind(d.kind));
+  return pieceBoxes(found.map((d) => d.box), width, height).map((b) => clampBox(expandBox(b, Math.max(10, Math.round(Math.min(b[2], b[3]) * 0.25))), width, height));
+}
+
+/** Read the pieces: all at once when the reader can, else one by one. */
+async function readPieces(reader: TextReader, original: TiledImage, pieces: Box[], lang: string, onEach?: (done: number) => void): Promise<ReadResult[]> {
+  if (reader.all) return reader.all(pieces.map((b) => original.getRegion(b[0], b[1], b[2], b[3])), lang);
+  const out: ReadResult[] = [];
+  for (const [i, b] of pieces.entries()) {
+    out.push(await reader(original.getRegion(b[0], b[1], b[2], b[3]), lang));
+    onEach?.(i + 1);
+  }
+  return out;
+}
 
 export interface StandaloneDeps {
   backend: ImageBackend;
@@ -805,21 +841,13 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     // The detector found the text; each piece of it is read here, line by line.
     if (!dets) throw new AppError('SETUP_NEEDED', { retryable: false, detail: tr('Для распознавания нужен «Точный поиск текста»: скачайте его в настройках.') });
     const found = dets.filter((d) => isTextKind(d.kind));
-    // A margin around each text box: a letter cut by a tight box is read wrong («HELLO» as «ELLO»).
-    const pieces = pieceBoxes(found.map((d) => d.box), original.width, original.height).map((b) => clampBox(expandBox(b, Math.max(10, Math.round(Math.min(b[2], b[3]) * 0.25))), original.width, original.height));
     const blocks: VisionAnswer['blocks'] = [];
     const t0 = performance.now();
-    const reader = deps.ocr!;
-    const reads = reader.all
-      ? await reader.all(pieces.map((b) => original.getRegion(b[0], b[1], b[2], b[3])), config.sourceLang)
-      : await (async () => {
-          const out: ReadResult[] = [];
-          for (const [i, b] of pieces.entries()) {
-            out.push(await reader(original.getRegion(b[0], b[1], b[2], b[3]), config.sourceLang));
-            stage('ocr', (i + 1) / pieces.length);
-          }
-          return out;
-        })();
+    // Read ahead while the previous page was translated (the same detections, the same language)?
+    const ahead = prep.reads && prep.readFor === config.sourceLang && prep.detections === dets ? prep.reads : undefined;
+    const pieces = ahead?.pieces ?? ocrPieces(dets, original.width, original.height);
+    const reads = ahead?.results ?? (await readPieces(deps.ocr!, original, pieces, config.sourceLang, (n) => stage('ocr', n / pieces.length)));
+    if (ahead) addStep(debug, `text read ahead (while the page before was translated): ${ahead.ms} ms`);
     stage('ocr', 1);
     for (const [i, b] of pieces.entries()) {
       const r = reads[i];

@@ -88,14 +88,18 @@ export async function renderOutput(backend: ImageBackend, out: Pick<PipelineOutp
     }
     selfCheckMs = Math.round(performance.now() - ts);
   }
+  const td = performance.now();
   const { tiles, overflow } = await renderTilesAsync(backend, out.cleaned, src.blocks, defaults);
+  const te = performance.now();
   const encoded = await encodeTiles(backend, tiles, mime, mime === 'image/png' ? undefined : 0.92);
+  const drawMs = Math.round(te - td);
+  const encodeMs = Math.round(performance.now() - te);
   // The drawn tiles are bytes now: their canvases (video memory in a browser) go at once.
   for (const t of tiles) releaseCanvas(t.canvas);
   const page: PageResult = {
     ...src,
     blocks: src.blocks.map((b) => ({ ...b, overflow: overflow.has(b.id) })),
-    timings: { ...src.timings, ...llmSummary(src.usage), renderMs: Math.round(performance.now() - t0), ...(selfCheckMs !== undefined ? { selfCheckMs } : {}) },
+    timings: { ...src.timings, ...llmSummary(src.usage), renderMs: Math.round(performance.now() - t0), drawMs, encodeMs, ...(selfCheckMs !== undefined ? { selfCheckMs } : {}) },
   };
   return { page, tiles: encoded, mime };
 }

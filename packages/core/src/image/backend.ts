@@ -47,6 +47,13 @@ export const browserBackend: ImageBackend = {
   },
   async encode(canvas, mime, quality) {
     const anyCanvas = canvas as any;
+    // A document nobody looks at (the extension's offscreen one, where pages are translated, a
+    // tab in the background): there convertToBlob waits for an idle moment of the page, up to a
+    // second for every picture, and a page being translated has none. Encoded right away instead.
+    if (typeof document !== 'undefined' && (document.visibilityState === 'hidden' || !document.hasFocus())) {
+      const bytes = encodeNow(canvas, mime, quality);
+      if (bytes) return bytes;
+    }
     if (typeof anyCanvas.convertToBlob === 'function') {
       const blob: Blob = await anyCanvas.convertToBlob({ type: mime, quality });
       return new Uint8Array(await blob.arrayBuffer());
@@ -55,6 +62,27 @@ export const browserBackend: ImageBackend = {
     return new Uint8Array(await blob.arrayBuffer());
   },
 };
+
+/** Encode on the spot (a page canvas's toDataURL); null when the browser cannot write that type. */
+function encodeNow(canvas: AnyCanvas, mime: ImageMime, quality?: number): Uint8Array | null {
+  const c = document.createElement('canvas');
+  try {
+    c.width = canvas.width;
+    c.height = canvas.height;
+    c.getContext('2d')!.drawImage(canvas as unknown as CanvasImageSource, 0, 0);
+    const url = c.toDataURL(mime, quality);
+    if (!url.startsWith(`data:${mime};base64,`)) return null;
+    const bin = atob(url.slice(url.indexOf(',') + 1));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return null;
+  } finally {
+    c.width = 0;
+    c.height = 0;
+  }
+}
 
 /**
  * Let a canvas go at once: a browser keeps a canvas's memory (often on the video card) until it is
