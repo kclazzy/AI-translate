@@ -104,6 +104,8 @@ export const textDetector: TextDetector = (img) => {
       // A model that loads on the video card but fails there (int8 operators): once more on the processor.
       const L = await session?.catch(() => null);
       if (L?.ep !== 'webgpu') throw e;
+      // …and the card is not tried again (a lost device fails every run after it).
+      gpuBroken = true;
       await releaseDetector();
       await load('wasm');
       return runOnce(img);

@@ -34,10 +34,13 @@ export interface ImageBackend {
 /** Backend for browsers, workers, extension pages and WebViews. */
 export const browserBackend: ImageBackend = {
   createCanvas(width, height) {
-    if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(width, height) as unknown as AnyCanvas;
-    const c = document.createElement('canvas');
+    const c: OffscreenCanvas | HTMLCanvasElement = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(width, height) : document.createElement('canvas');
     c.width = width;
     c.height = height;
+    // The pipeline reads its canvases' pixels again and again (cleaning, checks, the detector):
+    // kept in ordinary memory, not on the video card, each read is not a copy back from the card.
+    // The first getContext fixes this; later calls get the same context.
+    c.getContext('2d', { willReadFrequently: true });
     return c as unknown as AnyCanvas;
   },
   async decode(bytes, mime) {

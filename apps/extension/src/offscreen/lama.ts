@@ -61,7 +61,7 @@ export async function releaseLama(): Promise<void> {
 let chain: Promise<unknown> = Promise.resolve();
 let cancelIdle: (() => void) | undefined;
 
-let session: Promise<{ ort: Ort; s: import('onnxruntime-web').InferenceSession; image: string; mask: string }> | null = null;
+let session: Promise<{ ort: Ort; s: import('onnxruntime-web').InferenceSession; image: string; mask: string; onGpu: boolean }> | null = null;
 
 function load() {
   session ??= (async () => {
@@ -72,14 +72,16 @@ function load() {
     const bytes = new Uint8Array(await hit.arrayBuffer());
     const gpu = !gpuBroken && typeof navigator !== 'undefined' && 'gpu' in navigator;
     let s: import('onnxruntime-web').InferenceSession;
+    let onGpu = gpu;
     try {
       s = await ort.InferenceSession.create(bytes, { executionProviders: gpu ? ['webgpu', 'wasm'] : ['wasm'] });
     } catch {
+      onGpu = false;
       s = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] });
     }
     const image = s.inputNames.find((n) => /image/i.test(n)) ?? s.inputNames[0];
     const mask = s.inputNames.find((n) => /mask/i.test(n)) ?? s.inputNames[s.inputNames.length - 1];
-    return { ort, s, image, mask };
+    return { ort, s, image, mask, onGpu };
   })();
   session.catch(() => (session = null));
   return session;
@@ -90,10 +92,19 @@ const resize = resizePixels;
 export const lamaInpainter: Inpainter = (img, mask) => {
   const limitMs = session ? NETS_LIMIT_MS : NETS_LOAD_LIMIT_MS;
   const job = chain.then(() =>
-    (gpuBroken ? withLimit(() => runOnce(img, mask), NETS_LOAD_LIMIT_MS) : onGpu(GPU_NETS, () => runOnce(img, mask), { limitMs })).catch((e: unknown) => {
+    (gpuBroken ? withLimit(() => runOnce(img, mask), NETS_LOAD_LIMIT_MS) : onGpu(GPU_NETS, () => runOnce(img, mask), { limitMs })).catch(async (e: unknown) => {
       // The card stopped answering: this picture is painted over simply, the next ones use the processor.
-      if (e instanceof GpuTimeout) abandon();
-      throw e;
+      if (e instanceof GpuTimeout) {
+        abandon();
+        throw e;
+      }
+      if ((e as Error)?.name === 'AbortError') throw e;
+      // The run failed on the video card (its device lost, out of its memory on a tall strip): the
+      // card is not used for LaMa again, and this picture is redrawn on the processor.
+      const L = await session?.catch(() => null);
+      if (!L?.onGpu) throw e;
+      abandon();
+      return withLimit(() => runOnce(img, mask), NETS_LOAD_LIMIT_MS);
     }),
   );
   chain = job.catch(() => undefined);

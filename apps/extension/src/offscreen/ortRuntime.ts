@@ -183,7 +183,8 @@ export function resizePixels(img: { width: number; height: number; data: Uint8Cl
   const src = new OffscreenCanvas(img.width, img.height);
   src.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(img.data), img.width, img.height), 0, 0);
   const dst = new OffscreenCanvas(w, h);
-  const ctx = dst.getContext('2d')!;
+  // Read back right away: kept in ordinary memory (see browserBackend.createCanvas).
+  const ctx = dst.getContext('2d', { willReadFrequently: true })!;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(src, 0, 0, w, h);
   return ctx.getImageData(0, 0, w, h).data;
