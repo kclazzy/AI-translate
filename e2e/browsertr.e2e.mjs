@@ -129,6 +129,17 @@ try {
   const ready = await studio.waitForSelector('[data-testid="ocr-ready"]', { timeout: 20000 }).catch(() => null);
   const packs = await studio.evaluate(() => JSON.parse(localStorage.getItem('fake-tr') ?? '[]'));
   check('choosing the mode downloads the language packs of the main languages', !!ready && packs.length >= 9 && packs.includes('ja>ru') && packs.includes('en>ru') && packs.includes('ko>ru'), JSON.stringify(packs));
+  // The languages stand first in the settings, and ⇄ swaps them.
+  {
+    const pair = await studio.$('[data-testid="languages"] [data-testid="language-pair"]');
+    await studio.select('[data-testid="languages"] select[aria-label="Исходный язык"]', 'ja');
+    await studio.click('[data-testid="languages"] .ait-langpair-swap');
+    await new Promise((r) => setTimeout(r, 500));
+    const after = await readSettings();
+    const first = await studio.evaluate(() => document.querySelector('.ait-panel')?.getAttribute('data-testid'));
+    check('the languages are the first thing in the settings, and ⇄ swaps them', !!pair && first === 'languages' && after.sourceLang === 'ru' && after.targetLang === 'ja', `${first} ${after.sourceLang}→${after.targetLang}`);
+    await setSettings({ sourceLang: 'ja', targetLang: 'ru' });
+  }
   await studio.screenshot({ path: join(OUT, 'browsertr.png') });
 } catch (e) {
   check('no crash', false, String(e?.stack ?? e));

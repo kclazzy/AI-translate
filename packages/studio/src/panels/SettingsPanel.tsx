@@ -30,6 +30,7 @@ import { usePlatform } from '../platform';
 import { LamaGetButton, lamaModeOf, useLamaDownloaded } from '../lama';
 import { DetectorChoice } from '../detector';
 import { SpeedBenchmark } from './SpeedBenchmark';
+import { LanguagePair } from '../LanguagePair';
 import { ErrorBox, Field, FoldPanel, NumberInput, Segmented, Switch, toast, useAction } from '../ui';
 import { resolveUiLang, tr, uiLocale, UI_LANGS } from '@ait/core/i18n';
 
@@ -569,6 +570,11 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
   return (
     <div>
       {params.get('setup') === '1' ? <LocalSetup settings={s} update={update} getKey={getKey} onReady={platform.setupReady ? () => platform.setupReady!(params) : undefined} /> : null}
+      {/* The languages first: the most asked-for setting, seen before anything else. */}
+      <div className="ait-panel" data-testid="languages">
+        <h2>{tr('Языки')}</h2>
+        <LanguagePair settings={s} update={update} />
+      </div>
       {s.pipeline === 'standalone' ? <ModelCheckCard settings={s} update={update} getKey={getKey} /> : null}
       <div className="ait-panel" style={{ display: 'grid', gap: 8 }}>
         <h2 style={{ margin: 0 }}>{tr('Скорость перевода')}</h2>
@@ -578,19 +584,6 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
       <div className="ait-panel" data-testid="how-to-translate">
         <h2>{tr('Как переводить')}</h2>
         <OptimalLocal settings={s} update={update} />
-        <div className="ait-set-langs">
-          <Field label={tr('Исходный язык')}>
-            <select className="ait-select" value={s.sourceLang} onChange={(e) => update({ sourceLang: e.target.value })}>
-              <option value="auto">{tr('Определять автоматически')}</option>
-              {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
-            </select>
-          </Field>
-          <Field label={tr('Язык перевода')}>
-            <select className="ait-select" value={s.targetLang} onChange={(e) => update({ targetLang: e.target.value, profiles: profilesForLanguage(s.profiles, s.targetLang, e.target.value) })}>
-              {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
-            </select>
-          </Field>
-        </div>
         <div className="ait-set-grid">
           <div className="ait-set-col">
             <SetGroup title={tr('Качество')}>

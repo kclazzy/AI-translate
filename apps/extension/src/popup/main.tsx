@@ -6,6 +6,7 @@ import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
 import { AiModeSwitch } from '@ait/studio/ai-mode';
+import { LanguagePair } from '@ait/studio/languages';
 import { ocrDownloaded } from '../offscreen/ocr';
 import { prepareTranslator, translatorStatus } from '../shared/browserTranslate';
 import { detectorDownloaded } from '../offscreen/detector';
@@ -237,6 +238,8 @@ function Popup() {
           }}
         />
       </div>
+
+      <LanguagePair settings={s} update={update} compact />
 
       {s.readMode === 'ocr' && ocrReady === false ? (
         <div className="ait-notice" data-testid="ocr-missing">
