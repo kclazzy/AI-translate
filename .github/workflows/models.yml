@@ -6,8 +6,9 @@ name: Models
 # (AnimeMangaInpainting by dreMaz, MIT; ONNX by mayocream, Apache-2.0). Each source file is checked by SHA-256.
 # "models-2": the upscaler for small scans — waifu2x CUNet, art, denoise 1 + 2× (nagadomi/nunif, MIT; ONNX
 # export mirrored by deepghs/waifu2x_onnx at a fixed revision).
-# "models-3": Manga OCR made faster — the decoder with a cache of past steps (int8) and the encoder in
-# fp16 for the video card, exported from kha-white/manga-ocr-base (Apache-2.0) with Hugging Face Optimum.
+# "models-3": Manga OCR made faster — the decoder with a cache of past steps (int8, written out from
+# kha-white/manga-ocr-base, Apache-2.0, in scripts/models/manga_ocr_kv.py) and the encoder in fp16 for the
+# video card (from mayocream's fp32 export).
 on:
   push:
     branches: [main]
@@ -106,26 +107,26 @@ jobs:
         if: steps.have.outputs.skip != '1'
         run: |
           set -o pipefail
-          mkdir -p log
+          mkdir -p log out old
           {
             sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
-            pip install -q torch==2.5.1 "transformers==4.46.3" "optimum[exporters]==1.23.3" onnx==1.17.0 onnxruntime==1.22.1 onnxconverter-common==1.14.0 pillow --extra-index-url https://download.pytorch.org/whl/cpu
-            pip list 2>/dev/null | grep -iE "torch|transformers|optimum|onnx"
+            pip install -q torch==2.5.1 "transformers==4.46.3" onnx==1.17.0 onnxruntime==1.22.1 onnxconverter-common==1.14.0 pillow huggingface_hub --extra-index-url https://download.pytorch.org/whl/cpu
+            pip list 2>/dev/null | grep -iE "torch|transformers|onnx"
             rev=$(curl -fsSL https://huggingface.co/api/models/kha-white/manga-ocr-base | python -c "import json,sys; print(json.load(sys.stdin)['sha'])")
-            echo "kha-white/manga-ocr-base@$rev" | tee SOURCE.txt
+            echo "kha-white/manga-ocr-base@$rev; encoder: mayocream/manga-ocr-onnx@24b12778d85800835e2ca409236de281b8ab7b9f" | tee SOURCE.txt
             python -c "from huggingface_hub import snapshot_download as d; d('kha-white/manga-ocr-base', revision='$rev', local_dir='src')"
-            optimum-cli export onnx --model src --task image-to-text-with-past exp
-            ls -l exp
-            mkdir -p old
+            curl -fsSL --retry 3 -o enc32.onnx https://huggingface.co/mayocream/manga-ocr-onnx/resolve/24b12778d85800835e2ca409236de281b8ab7b9f/encoder_model.onnx
+            echo "15fa8155fe9bc1a7d25d9bb353debaa4def033d0174e907dbd2dd6d995def85f  enc32.onnx" | sha256sum -c
             for f in manga-ocr-encoder-int8.onnx manga-ocr-decoder-int8.onnx manga-ocr-vocab.txt; do gh release download models-1 -R "$GITHUB_REPOSITORY" -p "$f" -D old; done
+            python scripts/models/manga_ocr_kv.py src out
           } 2>&1 | tee log/export.txt
       - name: Make the browser files and check them
         if: steps.have.outputs.skip != '1'
         run: |
           set -o pipefail
-          python scripts/models/manga_ocr_fast.py exp old/manga-ocr-encoder-int8.onnx old/manga-ocr-decoder-int8.onnx old/manga-ocr-vocab.txt out 2>&1 | tee log/check.txt
+          python scripts/models/manga_ocr_fast.py enc32.onnx old/manga-ocr-encoder-int8.onnx old/manga-ocr-decoder-int8.onnx old/manga-ocr-vocab.txt out 2>&1 | tee log/check.txt
           cp SOURCE.txt out/
-          (cd out && sha256sum * > SHA256SUMS && ls -l) | tee -a "$GITHUB_STEP_SUMMARY"
+          (cd out && sha256sum * > SHA256SUMS && ls -l) | tee -a "$GITHUB_STEP_SUMMARY" | tee -a log/check.txt
       - name: Publish
         if: steps.have.outputs.skip != '1'
         run: |
