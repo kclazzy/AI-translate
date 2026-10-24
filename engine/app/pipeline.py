@@ -58,7 +58,10 @@ class Engine:
         self.telea = TeleaInpainter()
         self._lama: LamaInpainter | None = None
         self._lama_error: str | None = None
-        self.cv_lock = threading.Lock()  # one heavy CV/GPU job at a time
+        # The detector and the redraw take turns each on their own: one page may look for text while
+        # another one's background is redrawn. A plain background is filled without either.
+        self.detect_lock = threading.Lock()
+        self.inpaint_lock = threading.Lock()
         self.page_slots = asyncio.Semaphore(2)
 
     # ---- capabilities ---------------------------------------------------------------
@@ -207,7 +210,7 @@ class Engine:
                 raise AppError("NOT_CONFIGURED", "The ONNX text detector is not bundled in this version; use classic or vision", retryable=False)
             blocks: list[RawBlock] = []
             if opts.detector in ("auto", "classic"):
-                blocks = await asyncio.to_thread(self._locked, self.classic.detect, rgb)
+                blocks = await asyncio.to_thread(self._locked, self.classic.detect, rgb)  # detect_lock
             if opts.detector == "vision" or (opts.detector == "auto" and not blocks and opts.vision and opts.vision.vision):
                 single_call = translator_cfg is None or (opts.vision is not None and translator_cfg.id == opts.vision.id)
                 blocks, entities, summary = await self.vision_detect(rgb, opts, single_call, usages)
@@ -252,7 +255,7 @@ class Engine:
 
             await emit("stage", {"stage": "cleaning"})
             cleaned = rgb.copy()
-            await asyncio.to_thread(self._locked, self._clean_all, cleaned, [b for b in blocks if erase[id(b)]], opts.inpainter)
+            await asyncio.to_thread(self._clean_all, cleaned, [b for b in blocks if erase[id(b)]], opts.inpainter)
             t_clean = time.perf_counter()
 
             tiles = []
@@ -292,7 +295,7 @@ class Engine:
             return payload
 
     def _locked(self, fn, *args):
-        with self.cv_lock:
+        with self.detect_lock:
             return fn(*args)
 
     def _clean_all(self, page: np.ndarray, blocks: list[RawBlock], choice: str) -> None:
@@ -303,7 +306,7 @@ class Engine:
             if b.interior is not None and choice in ("auto", "fill"):
                 self.fill.clean_block(page, b)
             else:
-                clean_region(page, b, lama or self.telea)
+                clean_region(page, b, lama or self.telea, lock=self.inpaint_lock)
 
     def _to_text_block(self, bid: str, b: RawBlock, opts: TranslateOptions) -> TextBlock:
         x, y, w, h = (int(v) for v in b.bbox)
@@ -362,7 +365,7 @@ class Engine:
             raise AppError("UNSUPPORTED_FORMAT", "Mask size differs from image size", retryable=False)
         mask = (mask_rgb.max(axis=2) > 127).astype(np.uint8)
         inp = self.lama() or self.telea
-        out = await asyncio.to_thread(self._locked, inpaint_or_fill, rgb, mask, inp)
+        out = await asyncio.to_thread(inpaint_or_fill, rgb, mask, inp, self.inpaint_lock)
         return await asyncio.to_thread(encode_png, out)
 
 

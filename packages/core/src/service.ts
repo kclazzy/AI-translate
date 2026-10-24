@@ -1,3 +1,4 @@
+import { isBrowserTranslator } from './llm/browserTranslator';
 import { AppError, toAppError } from './errors';
 import { losslessWebp, releaseCanvas, type ImageBackend, type ImageMime } from './image/backend';
 import { TiledImage } from './image/tiled';
@@ -270,8 +271,10 @@ export class TranslateService {
     let key = baseKey;
     // Never wait for ever: a previous page that is stuck (or slow) does not hold this one; it
     // translates with the context there is.
-    const waitMs = this.turnWaitMs ?? (config.vision && isLocalProvider(config.vision) ? TURN_WAIT_LOCAL_MS : TURN_WAIT_MS);
-    const freshContext = before ? async () => {
+    // The browser's translator uses no context of the series: nothing to wait for.
+    const textBy = config.ocr ? config.translator ?? config.vision : config.vision;
+    const waitMs = this.turnWaitMs ?? (isBrowserTranslator(textBy) ? 0 : textBy && isLocalProvider(textBy) ? TURN_WAIT_LOCAL_MS : TURN_WAIT_MS);
+    const freshContext = before && waitMs > 0 ? async () => {
       await waitFor(before, waitMs, opts.signal);
       return this.getContext(seriesKey);
     } : undefined;
@@ -396,103 +399,107 @@ export class TranslateService {
     const yA = Math.max(0, Math.min(H - 40, (cutUp.length ? Math.min(...cutUp.map(topOf)) : H - side) - pad));
     const hB = Math.min(lo.page.height, Math.max(40, (cutLo.length ? Math.max(...cutLo.map(bottomOf)) : side) + pad));
     const hA = H - yA;
-    const originals = await Promise.all(members.map((m) => TiledImage.fromBytes(this.backend, m.original.bytes, m.original.mime)));
-    const upImg = originals[left.length - 1];
-    const loImg = originals[left.length];
-    const band = new TiledImage(this.backend, W, hA + hB);
-    band.putRegion(upImg.getRegion(0, yA, W, hA), 0, 0);
-    band.putRegion(loImg.getRegion(0, 0, W, hB), 0, hA);
-    const seriesKey = up.seriesKey ?? lo.seriesKey;
-    const { settings, config } = await this.config(seriesKey);
-    // The pictures' own lines are in the context: the band repeats them and must not take them for echoes.
-    let context = await this.getContext(seriesKey);
-    for (const m of members) if (context && m.page.pageId) context = withoutPage(context, m.page.pageId.slice(0, 16));
-    const single = band.toSingleCanvas();
-    const bytes = await this.backend.encode(single, 'image/png');
-    releaseCanvas(single);
-    band.dispose();
-    const out = await runPipeline({ bytes, mime: 'image/png', config, context, signal: opts.signal, noSkip: true }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector, ocr: this.reader });
-    // Nothing read in the band: the pictures keep what they have.
-    if (!out.page.blocks.length) {
-      for (const o of originals) o.dispose();
-      out.cleaned.dispose();
-      if (out.original !== out.cleaned) out.original.dispose();
-      return false;
-    }
+    // Every picture made here is let go in the end, also when the band fails or is cancelled.
+    const owned: { dispose(): void }[] = [];
+    const keep = <T extends { dispose(): void }>(x: T): T => (owned.push(x), x);
+    try {
+      const originals = await Promise.all(members.map(async (m) => keep(await TiledImage.fromBytes(this.backend, m.original.bytes, m.original.mime))));
+      const upImg = originals[left.length - 1];
+      const loImg = originals[left.length];
+      const band = keep(new TiledImage(this.backend, W, hA + hB));
+      band.putRegion(upImg.getRegion(0, yA, W, hA), 0, 0);
+      band.putRegion(loImg.getRegion(0, 0, W, hB), 0, hA);
+      const seriesKey = up.seriesKey ?? lo.seriesKey;
+      const { settings, config } = await this.config(seriesKey);
+      // The pictures' own lines are in the context: the band repeats them and must not take them for echoes.
+      let context = await this.getContext(seriesKey);
+      for (const m of members) if (context && m.page.pageId) context = withoutPage(context, m.page.pageId.slice(0, 16));
+      const single = band.toSingleCanvas();
+      const bytes = await this.backend.encode(single, 'image/png');
+      releaseCanvas(single);
+      band.dispose();
+      const out = await runPipeline({ bytes, mime: 'image/png', config, context, signal: opts.signal, noSkip: true }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector, ocr: this.reader });
+      keep(out.cleaned);
+      if (out.original !== out.cleaned) keep(out.original);
+      // Nothing read in the band: the pictures keep what they have.
+      if (!out.page.blocks.length) return false;
 
-    // One strip of all the members: their own blocks (not the copies drawn across a seam), the band's in place of what it covers.
-    const offsets: number[] = [];
-    let total = 0;
-    for (const m of members) {
-      offsets.push(total);
-      total += m.page.height;
+      // One strip of all the members: their own blocks (not the copies drawn across a seam), the band's in place of what it covers.
+      const offsets: number[] = [];
+      let total = 0;
+      for (const m of members) {
+        offsets.push(total);
+        total += m.page.height;
+      }
+      const seamY = offsets[left.length];
+      const bandTop = seamY - hA;
+      const bandBottom = seamY + hB;
+      const ownBlocks = members.flatMap((m, i) => m.page.blocks.filter((b) => !b.continued).map((b) => shiftBlock(b, -offsets[i])));
+      const kept = ownBlocks.filter((b) => b.edited || b.bbox[1] + b.bbox[3] <= bandTop || b.bbox[1] >= bandBottom);
+      const n = members.length;
+      const fromBand = out.page.blocks.map((b) => ({ ...shiftBlock(b, -bandTop), id: `s${n}${b.id}` }));
+      const glued = keep(new TiledImage(this.backend, W, total));
+      const cleaned = keep(new TiledImage(this.backend, W, total));
+      for (const [i, m] of members.entries()) {
+        glued.putRegion(originals[i].getRegion(0, 0, W, m.page.height), 0, offsets[i]);
+        const c = await tilesToImage(this.backend, W, m.page.height, m.cleaned);
+        try {
+          cleaned.putRegion(c.getRegion(0, 0, W, m.page.height), 0, offsets[i]);
+        } finally {
+          c.dispose();
+        }
+      }
+      cleaned.putRegion(out.cleaned.getRegion(0, 0, W, hA + hB), 0, bandTop);
+      const page: PageResult = {
+        ...up.page,
+        pageId: `${members[0].page.pageId}~seam${n}`,
+        height: total,
+        blocks: [...kept, ...fromBand].sort((x, y) => x.bbox[1] - y.bbox[1]),
+        usage: out.page.usage,
+        debug: { ...(out.page.debug ?? { answers: [], modelBlocks: [], steps: [] }), steps: [...(out.page.debug?.steps ?? []), `seam between pictures ${left.length} and ${left.length + 1} translated as one band`] },
+      };
+      const rendered = await renderOutput(this.backend, { page, cleaned }, styleDefaultsFor(config, settings.fonts));
+      // Everything the strip is made of goes into bytes now; the canvases are let go right after.
+      const gluedCanvas = glued.toSingleCanvas();
+      const gluedBytes = await this.backend.encode(gluedCanvas, 'image/png');
+      releaseCanvas(gluedCanvas);
+      const cleanedBytes = await Promise.all(cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') })));
+      for (const o of owned.splice(0)) o.dispose();
+      const parentKey = `${members[0].key}~seam`;
+      const now = new Date().toISOString();
+      const parent: StoredResult = {
+        key: parentKey,
+        page: rendered.page,
+        rendered: rendered.tiles,
+        mime: rendered.mime,
+        original: { bytes: gluedBytes, mime: 'image/png' },
+        cleaned: cleanedBytes,
+        sourceUrl: up.sourceUrl,
+        title: up.title,
+        seriesKey,
+        createdAt: now,
+        lastHitAt: now,
+        fontScale: settings.fonts.scale,
+        parts: members.map((m) => m.key),
+        seamGroup: true,
+      };
+      for (const g of [left, right]) {
+        const old = g[0].strip?.parent;
+        if (old && old !== parentKey) await this.dropResult(old);
+      }
+      await this.putResult(parentKey, parent);
+      const parts = await this.deriveParts(parent, members.map((m, i) => ({ y: offsets[i], h: m.page.height })));
+      // Each picture keeps its own id (the series context knows it by it) and remembers the seam.
+      for (const [i, p] of parts.entries()) {
+        const m = members[i];
+        await this.putResult(p.key, { ...p, seamGroup: undefined, page: { ...p.page, pageId: m.page.pageId }, original: m.original, seams: [...new Set([...(m.seams ?? []), ...(i === left.length - 1 ? [lowerKey] : i === left.length ? [upperKey] : [])])] });
+      }
+      await this.recordUsage(out.page.usage, false);
+      for (const p of parts) this.onResultChanged?.(p.key);
+      return true;
+    } finally {
+      for (const o of owned) o.dispose();
     }
-    const seamY = offsets[left.length];
-    const bandTop = seamY - hA;
-    const bandBottom = seamY + hB;
-    const owned = members.flatMap((m, i) => m.page.blocks.filter((b) => !b.continued).map((b) => shiftBlock(b, -offsets[i])));
-    const kept = owned.filter((b) => b.edited || b.bbox[1] + b.bbox[3] <= bandTop || b.bbox[1] >= bandBottom);
-    const n = members.length;
-    const fromBand = out.page.blocks.map((b) => ({ ...shiftBlock(b, -bandTop), id: `s${n}${b.id}` }));
-    const glued = new TiledImage(this.backend, W, total);
-    const cleaned = new TiledImage(this.backend, W, total);
-    for (const [i, m] of members.entries()) {
-      glued.putRegion(originals[i].getRegion(0, 0, W, m.page.height), 0, offsets[i]);
-      const c = await tilesToImage(this.backend, W, m.page.height, m.cleaned);
-      cleaned.putRegion(c.getRegion(0, 0, W, m.page.height), 0, offsets[i]);
-    }
-    cleaned.putRegion(out.cleaned.getRegion(0, 0, W, hA + hB), 0, bandTop);
-    const page: PageResult = {
-      ...up.page,
-      pageId: `${members[0].page.pageId}~seam${n}`,
-      height: total,
-      blocks: [...kept, ...fromBand].sort((x, y) => x.bbox[1] - y.bbox[1]),
-      usage: out.page.usage,
-      debug: { ...(out.page.debug ?? { answers: [], modelBlocks: [], steps: [] }), steps: [...(out.page.debug?.steps ?? []), `seam between pictures ${left.length} and ${left.length + 1} translated as one band`] },
-    };
-    const rendered = await renderOutput(this.backend, { page, cleaned }, styleDefaultsFor(config, settings.fonts));
-    // Everything the strip is made of goes into bytes now; the canvases are let go right after.
-    const gluedCanvas = glued.toSingleCanvas();
-    const gluedBytes = await this.backend.encode(gluedCanvas, 'image/png');
-    releaseCanvas(gluedCanvas);
-    const cleanedBytes = await Promise.all(cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') })));
-    glued.dispose();
-    cleaned.dispose();
-    for (const o of originals) o.dispose();
-    out.cleaned.dispose();
-    if (out.original !== out.cleaned) out.original.dispose();
-    const parentKey = `${members[0].key}~seam`;
-    const now = new Date().toISOString();
-    const parent: StoredResult = {
-      key: parentKey,
-      page: rendered.page,
-      rendered: rendered.tiles,
-      mime: rendered.mime,
-      original: { bytes: gluedBytes, mime: 'image/png' },
-      cleaned: cleanedBytes,
-      sourceUrl: up.sourceUrl,
-      title: up.title,
-      seriesKey,
-      createdAt: now,
-      lastHitAt: now,
-      fontScale: settings.fonts.scale,
-      parts: members.map((m) => m.key),
-      seamGroup: true,
-    };
-    for (const g of [left, right]) {
-      const old = g[0].strip?.parent;
-      if (old && old !== parentKey) await this.dropResult(old);
-    }
-    await this.putResult(parentKey, parent);
-    const parts = await this.deriveParts(parent, members.map((m, i) => ({ y: offsets[i], h: m.page.height })));
-    // Each picture keeps its own id (the series context knows it by it) and remembers the seam.
-    for (const [i, p] of parts.entries()) {
-      const m = members[i];
-      await this.putResult(p.key, { ...p, seamGroup: undefined, page: { ...p.page, pageId: m.page.pageId }, original: m.original, seams: [...new Set([...(m.seams ?? []), ...(i === left.length - 1 ? [lowerKey] : i === left.length ? [upperKey] : [])])] });
-    }
-    await this.recordUsage(out.page.usage, false);
-    for (const p of parts) this.onResultChanged?.(p.key);
-    return true;
   }
 
   private rememberTail(seriesKey: string, key: string, page: PageResult): void {
@@ -1236,7 +1243,7 @@ function untranslatedOf(page: PageResult): { untranslated?: string[]; unsure?: s
 /** A block cut by the picture's top or bottom edge: its bubble (or its text) reaches the edge. */
 /** How long a page waits for the previous page of its series to leave its context. */
 export const TURN_WAIT_LOCAL_MS = 20_000;
-export const TURN_WAIT_MS = 60_000;
+export const TURN_WAIT_MS = 2_000;
 
 /** Wait for `p`, but at most `ms` (then go on), and not after `signal` aborts (then throw). */
 async function waitFor(p: Promise<unknown>, ms: number, signal?: AbortSignal): Promise<void> {

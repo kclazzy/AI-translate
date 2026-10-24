@@ -112,9 +112,11 @@ class MangaOcrProvider:
         import asyncio
 
         model = await asyncio.to_thread(_locked, self._get)
-        for b in blocks:
-            crop = Image.fromarray(crop_block(rgb, b))
-            b.text = sanitize(await asyncio.to_thread(_locked, model, crop), 1000)
+        crops = [Image.fromarray(crop_block(rgb, b)) for b in blocks]
+        # The whole page under one turn of the lock, in one thread hop.
+        texts = await asyncio.to_thread(_locked, lambda: [model(c) for c in crops])
+        for b, t in zip(blocks, texts):
+            b.text = sanitize(t, 1000)
         return []
 
 
@@ -140,9 +142,10 @@ class PaddleOcrProvider:
         import asyncio
 
         model = await asyncio.to_thread(_locked, self._get, lang_hint)
-        for b in blocks:
-            crop = crop_block(rgb, b)
-            result = await asyncio.to_thread(_locked, model.ocr, crop, True)  # type: ignore[attr-defined]
+        crops = [crop_block(rgb, b) for b in blocks]
+        # The whole page under one turn of the lock, in one thread hop.
+        results = await asyncio.to_thread(_locked, lambda: [model.ocr(c, True) for c in crops])  # type: ignore[attr-defined]
+        for b, result in zip(blocks, results):
             lines: list[str] = []
             for page in result or []:
                 for item in page or []:

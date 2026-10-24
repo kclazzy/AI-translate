@@ -81,7 +81,7 @@ async function run(W: number, H: number, n: number) {
     const onStage = (e: { stage: string }) => void (measuring ||= e.stage === 'cleaning');
     const out = await runStandalonePipeline({ bytes, noSkip: true, config, onStage }, { backend: napiBackend, fetchImpl: mock.fetchImpl });
     const rendered = await renderOutput(napiBackend, out, DEFAULT_STYLE_DEFAULTS);
-    if (process.env.PERF_LOG) console.log(`perf ${W}x${H}: cleanMs=${out.page.timings.cleanMs} longest=${Math.round(longest)} rss=${Math.round(process.memoryUsage().rss / 1e6)}MB`);
+    if (process.env.PERF_LOG) console.log(`perf ${W}x${H}: cleanMs=${out.page.timings.cleanMs} renderMs=${rendered.page.timings.renderMs} selfCheckMs=${rendered.page.timings.selfCheckMs} longest=${Math.round(longest)} rss=${Math.round(process.memoryUsage().rss / 1e6)}MB`);
     return { cleanMs: out.page.timings.cleanMs, blocks: rendered.page.blocks.length, longest };
   } finally {
     ticking = false;

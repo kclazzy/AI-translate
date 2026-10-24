@@ -1,7 +1,9 @@
 """Removing original text: bubble fill, OpenCV inpainting and LaMa (ONNX)."""
 from __future__ import annotations
 
+import contextlib
 import logging
+import threading
 from pathlib import Path
 from typing import Protocol
 
@@ -124,17 +126,22 @@ def flat_ring_color(rgb: np.ndarray, mask: np.ndarray, width: int = 3) -> tuple[
     return int(med[0]), int(med[1]), int(med[2])
 
 
-def inpaint_or_fill(rgb: np.ndarray, mask: np.ndarray, inpainter: Inpainter) -> np.ndarray:
-    """LaMa (or Telea) only where the background needs it; a plain one is filled with its colour."""
+def inpaint_or_fill(rgb: np.ndarray, mask: np.ndarray, inpainter: Inpainter, lock: "threading.Lock | None" = None) -> np.ndarray:
+    """LaMa (or Telea) only where the background needs it; a plain one is filled with its colour.
+
+    The plain-colour check runs outside `lock` (a fraction of a millisecond in NumPy): only the
+    network itself waits for its turn.
+    """
     color = flat_ring_color(rgb, mask)
     if color is None:
-        return inpainter.inpaint(rgb, mask)
+        with lock or contextlib.nullcontext():
+            return inpainter.inpaint(rgb, mask)
     out = rgb.copy()
     out[mask > 0] = np.array(color, dtype=np.uint8)
     return out
 
 
-def clean_region(page: np.ndarray, b: RawBlock, inpainter: Inpainter, context_pad: int = 24) -> None:
+def clean_region(page: np.ndarray, b: RawBlock, inpainter: Inpainter, context_pad: int = 24, lock: "threading.Lock | None" = None) -> None:
     """Inpaint one block in place using a crop with some surrounding context."""
     H, W = page.shape[:2]
     rx, ry, rw, rh = b.region
@@ -146,4 +153,4 @@ def clean_region(page: np.ndarray, b: RawBlock, inpainter: Inpainter, context_pa
     mask[ry - y0 : ry - y0 + rh, rx - x0 : rx - x0 + rw] = mask_full
     if not mask.any():
         return
-    page[y0:y1, x0:x1] = inpaint_or_fill(crop, mask, inpainter)
+    page[y0:y1, x0:x1] = inpaint_or_fill(crop, mask, inpainter, lock)

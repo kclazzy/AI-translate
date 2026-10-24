@@ -293,19 +293,23 @@ function artChanged(ctx: Ctx, b: TextBlock): { share: number; zone: Box; mask: U
   // in strokes no thicker than lettering is. A solid slab painted over the art survives an opening
   // (erode, grow back) of that size; strokes of letters vanish in it.
   const strong = new Uint8Array(n);
-  let changedAny = false;
-  for (let p = 0; p < n; p++) {
-    const v = diff(p * 4);
-    if (v > SELF_CHECK_LIMITS.changed) changedAny = true;
-    if (v > SELF_CHECK_LIMITS.ink) strong[p] = 1;
-  }
-  if (!changedAny) return { share: 0, zone, mask: null };
+  const bubbles = ctx.bubbles.filter((bb) => intersect(bb.box, zone));
+  // Changes outside every bubble interior at all? (A closed bubble filled inside: none, and the
+  // costly part below — finding the letter strokes — is not needed.)
+  let outsideAny = false;
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      const v = diff(p * 4);
+      if (v > SELF_CHECK_LIMITS.ink) strong[p] = 1;
+      if (!outsideAny && v > SELF_CHECK_LIMITS.changed && !bubbles.some((bb) => inInterior(bb, zx + x, zy + y, 1))) outsideAny = true;
+    }
+  if (!outsideAny) return { share: 0, zone, mask: null };
   const r = Math.max(5, Math.round((b.fontSizeEstimate || 24) * 0.2));
   const solid = opening(strong, w, h, r);
   const ink = new Uint8Array(n);
   for (let p = 0; p < n; p++) if (strong[p] && !solid[p]) ink[p] = 1;
   const near = dilate(ink, w, h, SELF_CHECK_LIMITS.letterReach);
-  const bubbles = ctx.bubbles.filter((bb) => intersect(bb.box, zone));
   const mask = new Uint8Array(n);
   let bad = 0;
   for (let y = 0; y < h; y++)

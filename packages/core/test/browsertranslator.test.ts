@@ -58,3 +58,14 @@ describe('the browser\'s own translator in «Распознавание»', () =
     expect(guessLanguage(['hello'])).toBe('en');
   });
 });
+
+describe('lines said again come from memory', () => {
+  it('a repeated line is not sent to the translator again', async () => {
+    const { translateWithBrowser } = await import('../src');
+    const sent: string[][] = [];
+    setBrowserTranslate(async (texts) => (sent.push(texts), texts.map((t) => `ru:${t}`)));
+    expect(await translateWithBrowser(['What?!', 'Run'], 'en', 'ru')).toEqual(['ru:What?!', 'ru:Run']);
+    expect(await translateWithBrowser(['What?!', 'Stop'], 'en', 'ru')).toEqual(['ru:What?!', 'ru:Stop']);
+    expect(sent).toEqual([['What?!', 'Run'], ['Stop']]);
+  });
+});

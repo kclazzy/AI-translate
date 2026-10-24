@@ -1235,23 +1235,34 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       // …and lettering in light areas nobody reported: a bubble of an unusual shape the model skipped.
       probes.push(...(await findTextRegions(cleaned)));
       const known = blocks.flatMap((b) => (b.textBox ? [b.bbox, b.textBox] : [b.bbox]));
-      for (const [k, box] of (await findLeftoverText(cleaned, probes, known)).slice(0, 4).entries()) {
+      // What to read again: left-over lettering on bubbles (at most 4) and text the detector is sure
+      // of that no block covers (read as a collage already when the page was: then nothing new).
+      // All of it in one request — a collage of the crops — not one request each; not in «Быстро»,
+      // and not without a model that reads pictures (recognition in the browser).
+      const again: { box: Box; near: number; kind?: Detection['kind']; label: string }[] = [];
+      if (config.quality !== 'fast' && !ocrMode && config.vision.vision) {
+        for (const box of (await findLeftoverText(cleaned, probes, known)).slice(0, 4)) again.push({ box, near: 6, label: 'left-over lettering' });
+        for (const det of dets && !collageUsed ? missedDetections(blocks, dets).slice(0, 6) : []) again.push({ box: det.box.map(Math.round) as Box, near: 4, kind: det.kind, label: 'text found by the detector' });
+      }
+      if (again.length) {
         try {
-          const pad = Math.round(Math.max(box[2], box[3]) * 0.3) + 12;
-          addStep(debug, `left-over lettering read again at [${box.join(',')}]`);
-          const r = await recognizeRegion(original, expandBox(box, pad), config, deps, { context: req.context, signal, idPrefix: `x${k}`, debug });
+          for (const a of again) addStep(debug, `${a.label} read again at [${a.box.join(',')}]`);
+          const crops = again.map((a) => clampBox(expandBox(a.box, Math.round(Math.max(a.box[2], a.box[3]) * 0.3) + 12), original.width, original.height));
+          const r = await recognizeRegions(original, crops, config, deps, { context: req.context, signal, idPrefix: 'x', debug });
           usage.push(...r.usage);
-          const near = expandBox(box, 6);
           for (const nb of r.blocks) {
-            // We know where the left-over letters are; the model's box in a crop is only approximate.
-            const cut = r.blocks.length === 1 ? near : intersectBox(nb.bbox, near);
+            // The crop it came from: we know where the missed letters are; the model's box is only approximate.
+            const from = again[r.from.get(nb.id) ?? 0];
+            const near = clampBox(expandBox(from.box, from.near), original.width, original.height);
+            const alone = r.blocks.filter((o) => r.from.get(o.id) === r.from.get(nb.id)).length === 1;
+            const cut = alone ? near : intersectBox(nb.bbox, near);
             if (!cut) continue;
             nb.bbox = clampBox(cut.map(Math.round) as Box, original.width, original.height);
             nb.polygon = boxToPolygon(nb.bbox);
             nb.fontSizeEstimate = estimateFontSize(nb.bbox, nb.originalText);
             if (!nb.originalText.trim() || !nb.translatedText.trim() || blocks.some((o) => overlapRatio(o.bbox, nb.bbox) > 0.5)) continue;
-            // The user's filters, and no second copy of a text already on the page.
-            if (!wanted(config, nb.textType, nb.originalText) || (nb.textType === 'SFX' && !config.translateSfx)) continue;
+            // The user's filters (with the detector's own word: text outside bubbles), and no second copy of a known text.
+            if (!wanted(config, nb.textType, nb.originalText, from.kind) || (nb.textType === 'SFX' && !config.translateSfx)) continue;
             if (repeatsKnown(nb)) {
               addStep(debug, `re-read ${nb.id} repeats a known text → skipped`);
               continue;
@@ -1266,39 +1277,6 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         } catch (e) {
           if ((e as { code?: string }).code === 'CANCELLED') throw e;
           // A failed extra read never fails the page.
-        }
-      }
-      // Text the detector is sure of that no block covers: the model skipped it; read it from there.
-      // Read as a collage: every text the detector found was a piece of it already (a piece read as empty has no letters).
-      for (const [k, det] of (dets && !collageUsed ? missedDetections(blocks, dets) : []).entries()) {
-        const box = det.box;
-        try {
-          addStep(debug, `text found by the detector read again at [${box.map(Math.round).join(',')}]`);
-          const pad = Math.round(Math.max(box[2], box[3]) * 0.3) + 12;
-          const r = await recognizeRegion(original, expandBox(box, pad), config, deps, { context: req.context, signal, idPrefix: `d${k}`, debug });
-          usage.push(...r.usage);
-          const near = clampBox(expandBox(box, 4), original.width, original.height);
-          for (const nb of r.blocks) {
-            const cut = r.blocks.length === 1 ? near : intersectBox(nb.bbox, near);
-            if (!cut) continue;
-            nb.bbox = clampBox(cut.map(Math.round) as Box, original.width, original.height);
-            nb.polygon = boxToPolygon(nb.bbox);
-            nb.fontSizeEstimate = estimateFontSize(nb.bbox, nb.originalText);
-            if (!nb.originalText.trim() || !nb.translatedText.trim() || blocks.some((o) => overlapRatio(o.bbox, nb.bbox) > 0.5)) continue;
-            // The user's filters (with the detector's own word: text outside bubbles), sound effects left as they are.
-            if (!wanted(config, nb.textType, nb.originalText, det.kind) || (nb.textType === 'SFX' && !config.translateSfx)) continue;
-            if (repeatsKnown(nb)) {
-              addStep(debug, `re-read ${nb.id} repeats a known text → skipped`);
-              continue;
-            }
-            nb.language = blocks[0]?.language ?? nb.language;
-            await cleanOne(nb);
-            await yieldIfBusy();
-            const at = blocks.findIndex((o) => o.bbox[1] > nb.bbox[1]);
-            blocks.splice(at < 0 ? blocks.length : at, 0, nb);
-          }
-        } catch (e) {
-          if ((e as { code?: string }).code === 'CANCELLED') throw e;
         }
       }
     }
@@ -1460,6 +1438,78 @@ export async function recognizeRegion(
     }
   }
   return { blocks, usage: usages };
+}
+
+/**
+ * Several regions of a page read in one request: the crops put together as a collage (one crop:
+ * read as it is). `from` tells which crop each block came from.
+ */
+export async function recognizeRegions(
+  image: TiledImage,
+  boxes: Box[],
+  config: PipelineConfig,
+  deps: StandaloneDeps,
+  opts: { context?: TranslationContext; signal?: AbortSignal; idPrefix?: string; debug?: PageDebug } = {},
+): Promise<{ blocks: TextBlock[]; usage: Usage[]; from: Map<string, number> }> {
+  const from = new Map<string, number>();
+  if (boxes.length === 1) {
+    const r = await recognizeRegion(image, boxes[0], config, deps, opts);
+    for (const b of r.blocks) from.set(b.id, 0);
+    return { ...r, from };
+  }
+  if (!config.vision?.vision) throw new AppError('NOT_CONFIGURED', { retryable: false });
+  assertPrivacy(config.privacy, config.vision, 'image');
+  const plan = planCollage(boxes, COLLAGE_MAX);
+  const drawn = await drawCollage(deps.backend, image, plan);
+  const separate = !!config.translator && config.translator.id !== config.vision.id;
+  const vision = recording(createProvider(config.vision, deps.fetchImpl), 'region', opts.debug);
+  const ctx = opts.context ? { ...opts.context, summaries: [], recentLines: [] } : undefined;
+  const { answer, usage } = await readView(vision, image, { y: 0, h: image.height }, { ...config, quality: 'best' }, ctx, !separate, deps, opts.signal, undefined, opts.debug, { jpeg: drawn.jpeg, dw: drawn.width, dh: drawn.height, pieces: plan.pieces });
+  const usages = [usage];
+  const W = image.width;
+  const H = image.height;
+  const blocks: TextBlock[] = answer.blocks.map((b, i): TextBlock => {
+    const rounded = [(b.box[0] / 1000) * W, (b.box[1] / 1000) * H, ((b.box[2] - b.box[0]) / 1000) * W, ((b.box[3] - b.box[1]) / 1000) * H].map(Math.round) as Box;
+    const id = `${opts.idPrefix ?? 'm'}${Date.now().toString(36)}${i}`;
+    // The crop it lies in most.
+    let best = 0;
+    let bestV = -1;
+    for (const [k, box] of boxes.entries()) {
+      const v = overlapRatio(rounded, box);
+      if (v > bestV) {
+        bestV = v;
+        best = k;
+      }
+    }
+    from.set(id, best);
+    return {
+      id,
+      textType: b.type,
+      originalText: b.text,
+      translatedText: b.translation ?? '',
+      confidence: 0.9,
+      language: config.sourceLang,
+      bbox: rounded,
+      polygon: boxToPolygon(rounded),
+      orientation: 0,
+      writingDirection: b.vertical ? 'ttb-rl' : 'ltr',
+      fontSizeEstimate: estimateFontSize(rounded, b.text),
+      bubble: null,
+      translate: true,
+      ...(answer.repaired ? { lowConfidence: true } : {}),
+    };
+  });
+  if (separate && blocks.length) {
+    assertPrivacy(config.privacy, config.translator!, 'text');
+    const res = await translateBlocks(recording(createProvider(config.translator!, deps.fetchImpl), 'region', opts.debug), promptInput(config, opts.context), blocks.map((b) => ({ id: b.id, type: b.textType, text: b.originalText })), { signal: opts.signal });
+    usages.push(...res.usage);
+    for (const b of blocks) {
+      const t = res.translations.get(b.id);
+      b.translatedText = t?.text ?? b.originalText;
+      if (!t || t.lowConfidence) b.lowConfidence = true;
+    }
+  }
+  return { blocks, usage: usages, from };
 }
 
 /** Re-translate edited source texts (editor "Retranslate"). */

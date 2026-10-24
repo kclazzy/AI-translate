@@ -37,6 +37,7 @@ let supported = false;
 /** Register the browser's translator (`isSupported`: the browser has one at all, for the mode switch). */
 export function setBrowserTranslate(fn: BrowserTranslate | null, isSupported = !!fn): void {
   impl = fn;
+  phrases.clear();
   supported = isSupported;
 }
 
@@ -76,8 +77,43 @@ export async function translateWithBrowser(texts: string[], from: string, to: st
   const src = translatorLang(from === 'auto' ? guessLanguage(texts) : from);
   const dst = translatorLang(to);
   if (src === dst) return texts;
-  const out = await impl(texts, src, dst, signal);
-  return texts.map((t, i) => out[i]?.trim() || t);
+  // Lines said again and again (sounds, «What?!», «Wait!») come from memory, the rest in one go.
+  const key = (t: string) => `${src}>${dst}|${t.trim()}`;
+  const result: (string | undefined)[] = texts.map((t) => phraseGet(key(t)));
+  const todo = texts.map((t, i) => (result[i] === undefined ? i : -1)).filter((i) => i >= 0);
+  if (todo.length) {
+    const out = await impl(todo.map((i) => texts[i]), src, dst, signal);
+    todo.forEach((i, k) => {
+      const t = out[k]?.trim();
+      result[i] = t || texts[i];
+      if (t) phrasePut(key(texts[i]), t);
+    });
+  }
+  return texts.map((t, i) => result[i] ?? t);
+}
+
+/** Translations of recent lines (at most PHRASES_MAX; the least recently used go first). */
+const PHRASES_MAX = 1000;
+const phrases = new Map<string, string>();
+function phraseGet(k: string): string | undefined {
+  const v = phrases.get(k);
+  if (v !== undefined) {
+    phrases.delete(k);
+    phrases.set(k, v);
+  }
+  return v;
+}
+function phrasePut(k: string, v: string): void {
+  // Long lines are not worth keeping: they rarely come again.
+  if (k.length > 120) return;
+  phrases.delete(k);
+  phrases.set(k, v);
+  if (phrases.size > PHRASES_MAX) phrases.delete(phrases.keys().next().value!);
+}
+
+/** Forget the remembered lines (tests; another translator registered). */
+export function clearBrowserPhrases(): void {
+  phrases.clear();
 }
 
 /**
