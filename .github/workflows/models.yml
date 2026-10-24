@@ -6,6 +6,8 @@ name: Models
 # (AnimeMangaInpainting by dreMaz, MIT; ONNX by mayocream, Apache-2.0). Each source file is checked by SHA-256.
 # "models-2": the upscaler for small scans — waifu2x CUNet, art, denoise 1 + 2× (nagadomi/nunif, MIT; ONNX
 # export mirrored by deepghs/waifu2x_onnx at a fixed revision).
+# "models-3": Manga OCR made faster — the decoder with a cache of past steps (int8) and the encoder in
+# fp16 for the video card, exported from kha-white/manga-ocr-base (Apache-2.0) with Hugging Face Optimum.
 on:
   push:
     branches: [main]
@@ -85,4 +87,41 @@ jobs:
         if: steps.have.outputs.skip != '1'
         run: |
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --prerelease --latest=false --title "Upscaler for the browser" --notes "waifu2x CUNet (art, denoise 1, 2x) by nagadomi/nunif, MIT. See .github/workflows/models.yml."
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber out/*
+
+  mangafast:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: models-3
+    steps:
+      - uses: actions/checkout@v4
+      - id: have
+        run: |
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -q '^SHA256SUMS$'; then echo "skip=1" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-python@v5
+        if: steps.have.outputs.skip != '1'
+        with: { python-version: '3.11' }
+      - name: Export
+        if: steps.have.outputs.skip != '1'
+        run: |
+          sudo apt-get install -y -qq fonts-noto-cjk >/dev/null
+          pip install -q torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -q "transformers==4.46.3" "optimum[exporters]==1.23.3" onnx==1.17.0 onnxruntime==1.22.1 onnxconverter-common==1.14.0 pillow
+          rev=$(curl -fsSL https://huggingface.co/api/models/kha-white/manga-ocr-base | python -c "import json,sys; print(json.load(sys.stdin)['sha'])")
+          echo "kha-white/manga-ocr-base@$rev" | tee SOURCE.txt
+          optimum-cli export onnx --model kha-white/manga-ocr-base --revision "$rev" --task image-to-text-with-past exp
+          ls -l exp
+          mkdir -p old
+          for f in manga-ocr-encoder-int8.onnx manga-ocr-decoder-int8.onnx manga-ocr-vocab.txt; do gh release download models-1 -R "$GITHUB_REPOSITORY" -p "$f" -D old; done
+      - name: Make the browser files and check them
+        if: steps.have.outputs.skip != '1'
+        run: |
+          python scripts/models/manga_ocr_fast.py exp old/manga-ocr-encoder-int8.onnx old/manga-ocr-decoder-int8.onnx old/manga-ocr-vocab.txt out
+          cp SOURCE.txt out/
+          (cd out && sha256sum * > SHA256SUMS && ls -l) | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Publish
+        if: steps.have.outputs.skip != '1'
+        run: |
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --prerelease --latest=false --title "Manga OCR made faster" --notes "kha-white/manga-ocr-base (Apache-2.0) exported with Optimum: decoder with a cache of past steps (int8), encoder fp16. See .github/workflows/models.yml."
           gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber out/*
