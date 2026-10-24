@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AppSettings } from '@ait/core';
+import { BROWSER_TRANSLATOR_ID, translatorLang, type AppSettings } from '@ait/core';
 import { tr } from '@ait/core/i18n';
 import { usePlatform } from './platform';
 
@@ -34,6 +34,7 @@ export function OcrModelsCard({ settings: s }: { settings: AppSettings }) {
       <span style={{ display: 'grid', gap: 6 }}>
         <small className="ait-badge ok" data-testid="ocr-ready">{tr('Модели распознавания готовы')}</small>
         {japanese ? <MangaOcrOffer /> : null}
+        {s.visionProviderId === BROWSER_TRANSLATOR_ID ? <TranslatorPack settings={s} /> : null}
       </span>
     );
   const mb = (have.det ? 0 : 45) + (have.ocr ? 0 : korean ? 23 : 31);
@@ -68,6 +69,7 @@ export function OcrModelsCard({ settings: s }: { settings: AppSettings }) {
         </button>
       )}
       {err ? <small style={{ color: 'var(--err)' }}>{tr('Не удалось скачать: {0}', err)}</small> : null}
+      {s.visionProviderId === BROWSER_TRANSLATOR_ID ? <TranslatorPack settings={s} /> : null}
     </div>
   );
 }
@@ -122,6 +124,59 @@ export function MangaOcrOffer() {
       ) : (
         <button className="ait-bubble-btn" style={{ justifySelf: 'start' }} onClick={() => void run()}>
           {tr('Скачать Manga OCR (~{0} МБ)', MANGA_MB)}
+        </button>
+      )}
+      {err ? <small style={{ color: 'var(--err)' }}>{tr('Не удалось скачать: {0}', err)}</small> : null}
+    </div>
+  );
+}
+
+/** The browser's translator needs its language pack for this pair, downloaded once (from a click). */
+export function TranslatorPack({ settings: s }: { settings: AppSettings }) {
+  const platform = usePlatform();
+  const bt = platform.browserTranslator;
+  const from = s.sourceLang === 'auto' ? '' : translatorLang(s.sourceLang);
+  const to = translatorLang(s.targetLang);
+  const [state, setState] = useState<string | null>(null);
+  const [pct, setPct] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let off = false;
+    if (bt && from) void bt.status(from, to).then((v) => !off && setState(v), () => !off && setState('unavailable'));
+    return () => {
+      off = true;
+    };
+  }, [bt, from, to]);
+  if (!bt) return null;
+  if (!from) return <small className="ait-muted" data-testid="translator-pack">{tr('Для встроенного переводчика выберите исходный язык (а не «авто»): под него скачивается языковой пакет.')}</small>;
+  if (state === null) return null;
+  if (state === 'available') return <small className="ait-badge ok" data-testid="translator-pack-ready">{tr('Переводчик браузера готов: {0} → {1}', from, to)}</small>;
+  if (state === 'unavailable') return <small className="ait-badge" data-testid="translator-pack">{tr('Встроенный переводчик не умеет переводить с «{0}» на «{1}» — выберите модель для перевода.', from, to)}</small>;
+  const run = async () => {
+    setErr(null);
+    try {
+      setPct(0);
+      await bt.prepare(from, to, setPct);
+      setState('available');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPct(null);
+    }
+  };
+  return (
+    <div className="ait-notice" data-testid="translator-pack" style={{ display: 'grid', gap: 6 }}>
+      <span>{tr('Встроенному переводчику нужен языковой пакет {0} → {1}: браузер скачает его один раз.', from, to)}</span>
+      {pct !== null ? (
+        <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span className="ait-progress" style={{ flex: 1, minWidth: 120 }} role="progressbar" aria-label={tr('Скачивание языкового пакета')} aria-valuenow={Math.round(pct * 100)} aria-valuemin={0} aria-valuemax={100}>
+            <i style={{ width: `${Math.round(pct * 100)}%` }} />
+          </span>
+          <small className="ait-muted">{Math.round(pct * 100)}%</small>
+        </span>
+      ) : (
+        <button className="ait-bubble-btn" style={{ justifySelf: 'start' }} onClick={() => void run()}>
+          {tr('Скачать языковой пакет')}
         </button>
       )}
       {err ? <small style={{ color: 'var(--err)' }}>{tr('Не удалось скачать: {0}', err)}</small> : null}

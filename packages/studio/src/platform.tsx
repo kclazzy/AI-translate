@@ -41,6 +41,11 @@ export interface StudioPlatform {
     /** Optional: Manga OCR, the reader for Japanese manga (a whole bubble at once). */
     manga?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void> };
   };
+  /** Optional: the browser's own translator (Chrome's Translator API) — state of a language pair, and its download (from a click). */
+  browserTranslator?: {
+    status(from: string, to: string): Promise<'unavailable' | 'downloadable' | 'downloading' | 'available'>;
+    prepare(from: string, to: string, progress?: (share: number) => void): Promise<void>;
+  };
   /** Optional: LaMa itself (needs the downloaded model), for the editor's «Дорисовать фон». */
   inpaint?: Inpainter;
 }

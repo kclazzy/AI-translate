@@ -4,6 +4,7 @@ import { providerById } from '../settings';
 import { ollamaStatus } from './discover';
 import { isOllama } from './openai';
 import { isLocalUrl } from './privacy';
+import { isBrowserTranslator } from './browserTranslator';
 import type { FetchLike, ProviderConfig } from './types';
 import { tr } from '../i18n';
 
@@ -33,6 +34,8 @@ async function reachable(url: string, fetchImpl: FetchLike, ms = 2500): Promise<
 }
 
 async function checkProvider(p: ProviderConfig, fetchImpl: FetchLike): Promise<Readiness> {
+  // The browser's own translator: no program to start.
+  if (isBrowserTranslator(p)) return { ok: true };
   if (!isLocalUrl(p.baseUrl) || p.kind !== 'openai-compatible') return { ok: true };
   if (isOllama(p)) {
     const st = await ollamaStatus(p.baseUrl, p.model, fetchImpl);

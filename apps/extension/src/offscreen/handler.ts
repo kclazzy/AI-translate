@@ -10,6 +10,7 @@ import { lamaDownloaded, lamaInpainter, releaseLama } from './lama';
 import { detectorDownloaded, releaseDetector, textDetector } from './detector';
 import { gpuFetch, setWorkWaiting } from './gpuLane';
 import { ocrDownloaded, readText } from './ocr';
+import '../shared/browserTranslate';
 import { setUiLang, tr } from '@ait/core/i18n';
 
 /**

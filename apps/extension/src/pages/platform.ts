@@ -5,6 +5,7 @@ import { browserBackend, TranslateService } from '@ait/core';
 import { downloadFile, type StudioPlatform } from '@ait/studio';
 import { db, loadSettings, saveSettings, secrets } from '../shared/store';
 import { installExtensionUpdate, pickUpdateFolder } from './updater';
+import { browserTranslatorHere, prepareTranslator, translatorStatus } from '../shared/browserTranslate';
 
 /** LaMa needs WebAssembly and the Cache API (where the model is kept). */
 const lamaHere = typeof caches !== 'undefined' && typeof WebAssembly !== 'undefined';
@@ -24,6 +25,7 @@ export function extensionPlatform(): StudioPlatform {
     ...(lamaHere ? { detector: { downloaded: detectorDownloaded, download: (p: (share: number) => void) => downloadDetector(p), remove: deleteDetector, detect: textDetector } } : {}),
     // Text recognition (AI mode «Распознавание») on the same runtime.
     ...(lamaHere ? { ocr: { downloaded: (korean?: boolean) => ocrDownloaded(korean), download: (p: (share: number) => void, korean?: boolean) => downloadOcr(p, undefined, korean), remove: deleteOcr, manga: { downloaded: mangaOcrDownloaded, download: (p: (share: number) => void) => downloadMangaOcr(p), remove: deleteMangaOcr } } } : {}),
+    ...(browserTranslatorHere() ? { browserTranslator: { status: translatorStatus, prepare: prepareTranslator } } : {}),
     notifyResultChanged: (key) => void chrome.runtime.sendMessage({ type: 'result-changed', key }).catch(() => undefined),
     version: chrome.runtime.getManifest().version,
     installUpdate: installExtensionUpdate,

@@ -1,3 +1,4 @@
+import { BrowserTranslatorProvider, isBrowserTranslator } from './browserTranslator';
 import type { ProviderConfig } from './types';
 import { AnthropicProvider } from './anthropic';
 import { OpenAICompatibleProvider } from './openai';
@@ -210,6 +211,7 @@ export function configFromPreset(preset: string, id?: string): ProviderConfig {
 }
 
 export function createProvider(config: ProviderConfig, fetchImpl?: FetchLike): LlmProvider {
+  if (isBrowserTranslator(config)) return new BrowserTranslatorProvider(config);
   const p: LlmProvider = config.kind === 'anthropic' ? new AnthropicProvider(config, fetchImpl) : new OpenAICompatibleProvider(config, fetchImpl);
   // Every request timed (the page journal and the speed benchmark show where the time goes).
   const complete = p.complete.bind(p);

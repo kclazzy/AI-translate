@@ -1,4 +1,4 @@
-import { aiModeOf, aiModesAvailable, applyAiMode, type AiMode, type AppSettings } from '@ait/core';
+import { aiModeOf, aiModesAvailable, applyAiMode, applyOcrTranslator, BROWSER_TRANSLATOR_ID, ocrTranslators, type AiMode, type AppSettings } from '@ait/core';
 import { tr } from '@ait/core/i18n';
 import { OcrModelsCard } from './ocr';
 
@@ -14,7 +14,7 @@ export function aiModeHint(m: AiMode): string {
     : m === 'cloud'
       ? tr('Картинку читает и переводит онлайн-модель (Gemini, OpenAI, Claude…); поиск текста и LaMa — на этом компьютере. Несколько страниц одновременно.')
       : m === 'ocr'
-        ? tr('Текст распознаётся прямо в браузере (PaddleOCR), переводит любая текстовая модель — на ПК или онлайн. Без Python и без модели, читающей картинки; быстро, но рисованные надписи читает хуже.')
+        ? tr('Текст распознаётся прямо в браузере (PaddleOCR), переводит встроенный переводчик браузера — без Ollama и интернета — или любая текстовая модель (лучше учитывает контекст). Быстро, но рисованные надписи читает хуже.')
         : tr('Движок AI Translate на ПК сам находит и распознаёт текст, текстовая модель переводит. Быстрее на простых страницах, хуже на стилизованных надписях.');
 }
 
@@ -26,7 +26,7 @@ export function aiModeHint(m: AiMode): string {
 export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = true }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; compact?: boolean; force?: boolean; ocrHere?: boolean }) {
   const now = aiModeOf(s);
   const can = { ...aiModesAvailable(s), ...(ocrHere ? {} : { ocr: false }) };
-  const need = (m: AiMode) => (m === 'engine' ? tr('Укажите адрес движка в настройках') : m === 'cloud' ? tr('Добавьте онлайн-сервер с моделью, читающей картинки') : m === 'ocr' ? (ocrHere ? tr('Добавьте сервер с моделью для перевода') : tr('Распознавание в браузере доступно в расширении для ПК')) : tr('Добавьте Ollama или LM Studio'));
+  const need = (m: AiMode) => (m === 'engine' ? tr('Укажите адрес движка в настройках') : m === 'cloud' ? tr('Добавьте онлайн-сервер с моделью, читающей картинки') : m === 'ocr' ? (ocrHere ? tr('Нужен Chrome 138 или новее (встроенный переводчик) либо сервер с моделью для перевода') : tr('Распознавание в браузере доступно в расширении для ПК')) : tr('Добавьте Ollama или LM Studio'));
   return (
     <div data-testid="ai-mode" style={{ display: 'grid', gap: 6 }}>
       <div className="ait-seg" role="group" aria-label={tr('Режим работы ИИ')}>
@@ -51,6 +51,7 @@ export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = tr
         })}
       </div>
       {compact ? null : <small className="ait-muted ait-set-hint">{aiModeHint(now)}</small>}
+      {now === 'ocr' ? <OcrTranslatorPick settings={s} update={update} /> : null}
       {now === 'ocr' && !compact ? <OcrModelsCard settings={s} /> : null}
       {force ? (
         <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -59,5 +60,24 @@ export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = tr
         </label>
       ) : null}
     </div>
+  );
+}
+
+/** What translates the recognised text: the browser's own translator or one of the model servers. */
+function OcrTranslatorPick({ settings: s, update }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void }) {
+  const list = ocrTranslators(s);
+  if (!list.length) return null;
+  const now = s.visionProviderId ?? '';
+  return (
+    <label className="ait-field" data-testid="ocr-translator">
+      <span>{tr('Чем переводить')}</span>
+      <select className="ait-select" value={now} onChange={(e) => update(applyOcrTranslator(s, e.target.value))}>
+        {list.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.id === BROWSER_TRANSLATOR_ID ? tr('Встроенный переводчик браузера — без Ollama и интернета') : `${p.label} — ${p.model}`}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

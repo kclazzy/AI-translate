@@ -1,3 +1,4 @@
+import { BROWSER_TRANSLATOR_ID, browserTranslateSupported } from './llm/browserTranslator';
 import { isLocalProvider } from './llm/privacy';
 import type { ProviderConfig } from './llm/types';
 import { providerById, type AppSettings } from './settings';
@@ -35,12 +36,29 @@ function providerFor(s: AppSettings, mode: 'ollama' | 'cloud'): ProviderConfig |
 
 /** Which modes can be switched to (a mode without a model server or engine address cannot). */
 export function aiModesAvailable(s: AppSettings): Record<AiMode, boolean> {
-  return { ollama: !!providerFor(s, 'ollama'), cloud: !!providerFor(s, 'cloud'), ocr: s.providers.length > 0, engine: !!s.engine?.url };
+  return { ollama: !!providerFor(s, 'ollama'), cloud: !!providerFor(s, 'cloud'), ocr: s.providers.length > 0 || browserTranslateSupported(), engine: !!s.engine?.url };
 }
 
-/** The model that translates the recognised text: the one used for it last, else a local one, else any. */
+/**
+ * What translates the recognised text: the choice made for this mode last; else the browser's own
+ * translator (the mode needs no other program); else a local model, else any.
+ */
 function textProviderFor(s: AppSettings): ProviderConfig | undefined {
-  return providerById(s, s.modeProviders?.ocr) ?? providerById(s, s.visionProviderId) ?? s.providers.find((p) => isLocalProvider(p)) ?? s.providers[0];
+  const last = s.modeProviders?.ocr;
+  const browser = browserTranslateSupported() ? providerById(s, BROWSER_TRANSLATOR_ID) : undefined;
+  if (last === BROWSER_TRANSLATOR_ID) return browser ?? s.providers.find((p) => isLocalProvider(p)) ?? s.providers[0];
+  return providerById(s, last) ?? browser ?? providerById(s, s.visionProviderId) ?? s.providers.find((p) => isLocalProvider(p)) ?? s.providers[0];
+}
+
+/** The choices of what translates in the mode «Распознавание»: the browser's translator, then every model server. */
+export function ocrTranslators(s: AppSettings): ProviderConfig[] {
+  const browser = browserTranslateSupported() ? [providerById(s, BROWSER_TRANSLATOR_ID)!] : [];
+  return [...browser, ...s.providers];
+}
+
+/** Switch what translates in the mode «Распознавание». */
+export function applyOcrTranslator(s: AppSettings, id: string): Partial<AppSettings> {
+  return { visionProviderId: id, translationProviderId: null, modeProviders: { ...(s.modeProviders ?? {}), ocr: id } };
 }
 
 /**

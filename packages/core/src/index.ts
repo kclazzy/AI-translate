@@ -13,6 +13,7 @@ export * from './util/mutex';
 export * from './util/yield';
 export * from './llm/types';
 export * from './llm/presets';
+export * from './llm/browserTranslator';
 export * from './llm/privacy';
 export * from './llm/openai';
 export * from './llm/discover';

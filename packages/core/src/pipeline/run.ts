@@ -1,3 +1,4 @@
+import { isBrowserTranslator } from '../llm/browserTranslator';
 import { releaseCanvas } from '../image/backend';
 import type { PageTimings } from '../types';
 import type { ImageBackend, ImageMime } from '../image/backend';
@@ -23,7 +24,9 @@ export async function runPipeline(req: PipelineRequest & { batchReview?: boolean
     const cfg = req.config.translator ?? req.config.vision;
     let provider = cfg ? recording(createProvider(cfg, deps.fetchImpl), 'review', out.page.debug) : null;
     // The review sends the texts to that model: never outside the privacy mode (rule checks still run).
-    if (cfg) {
+    // The browser's translator cannot review: rule checks only.
+    if (cfg && isBrowserTranslator(cfg)) provider = null;
+    else if (cfg) {
       try {
         assertPrivacy(req.config.privacy, cfg, 'text');
       } catch {

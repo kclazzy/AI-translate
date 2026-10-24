@@ -1,5 +1,6 @@
 import { AppError } from '../errors';
 import { estimateCost } from '../llm/presets';
+import { isBrowserTranslator, translateWithBrowser } from '../llm/browserTranslator';
 import type { ChatMessage, CompletionResult, LlmProvider } from '../llm/types';
 import type { TextType, Usage } from '../types';
 import { withRetry } from '../util/retry';
@@ -53,6 +54,13 @@ export async function translateBlocks(
   // Speech answered in capitals reads as shouting in the text list; labels of game windows stay as they are.
   const speech = new Set(blocks.filter((b) => b.type === 'DIALOGUE').map((b) => b.id));
   blocks = blocks.map((b) => (shouted.has(b.id) ? { ...b, text: sentenceCase(b.text, (w) => keepWords.has(w.toLowerCase())) } : b));
+  if (isBrowserTranslator(provider.config)) {
+    // The browser's translator (capitals made normal case above): line by line, the glossary's own translations kept where a line is just a term.
+    const out = await translateWithBrowser(blocks.map((b) => b.text), input.sourceLang, input.targetLang, opts.signal);
+    const exact = new Map(input.glossary.map((g) => [g.source.trim().toLowerCase(), g.target]));
+    const translations = new Map(blocks.map((b, i) => [b.id, { text: exact.get(b.text.trim().toLowerCase()) ?? out[i] }]));
+    return { translations, entities: [], summary: '', usage: [{ provider: provider.config.label, model: 'browser', inputTokens: 0, outputTokens: 0, costUsd: 0 }] };
+  }
   // A line that goes on in the next speech block: translated as one sentence (continuesNext).
   blocks = blocks.map((b, i) => {
     const next = blocks[i + 1];

@@ -31,6 +31,7 @@ import {
   type ProviderConfig,
   type Readiness,
   type UpdateInfo,
+  isBrowserTranslator,
 } from '@ait/core';
 import { FoldPanel } from './ui';
 import { tr, uiLocale, fmtNumber } from '@ait/core/i18n';
@@ -210,6 +211,8 @@ export function ModelCheckCard({ settings, update, getKey, compact, onOpenSettin
     const msg = tr('Не выбрана модель, которая читает картинки.');
     return compact ? <div className="ait-notice">{msg} {onOpenSettings ? <button className="pp-link" onClick={() => onOpenSettings()}>{tr('Выбрать')}</button> : null}</div> : <div className="ait-panel ait-notice">{msg}</div>;
   }
+  // The browser's own translator: nothing to test or download here (its language pack: see ocr.tsx).
+  if (isBrowserTranslator(vision)) return null;
   const check = settings.modelChecks?.[modelCheckKey(vision)];
   const busy = running === modelCheckKey(vision);
   const level = busy ? null : check?.level ?? 'none';

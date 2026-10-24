@@ -1,12 +1,13 @@
 import '@ait/core/i18n/all';
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { aiModesAvailable, applyAiMode, applyPreset, checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, modelTiers, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, profilesForLanguage, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
+import { aiModesAvailable, applyAiMode, applyOcrTranslator, translatorLang, BROWSER_TRANSLATOR_ID, browserTranslateSupported, applyPreset, checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, modelTiers, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, profilesForLanguage, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
 import { AiModeSwitch } from '@ait/studio/ai-mode';
 import { ocrDownloaded } from '../offscreen/ocr';
+import { translatorStatus } from '../shared/browserTranslate';
 import { detectorDownloaded } from '../offscreen/detector';
 import './popup.css';
 import type { PageLangs, SpeedStats } from '../shared/messages';
@@ -143,8 +144,26 @@ function Popup() {
       // Before a local translation: is everything installed and running? If not, open the helper,
       // which offers the downloads and continues this translation once ready.
       setPreflight(true);
-      const ready = await checkReadiness(s);
+      let ready = await checkReadiness(s);
       setPreflight(false);
+      // «Распознавание» needs no program: with Ollama (or another local server) not running, the
+      // browser's own translator takes over (the choice is seen in the mode switch above).
+      if (!ready.ok && s.pipeline === 'standalone' && s.readMode === 'ocr' && browserTranslateSupported()) {
+        const next = { ...s, ...applyOcrTranslator(s, BROWSER_TRANSLATOR_ID) };
+        setS(next);
+        await saveSettings(next);
+        ready = await checkReadiness(next);
+      }
+      // The browser's translator without its language pack: the settings card downloads it (a click there).
+      const cur = await loadSettings();
+      if (ready.ok && cur.pipeline === 'standalone' && cur.readMode === 'ocr' && cur.visionProviderId === BROWSER_TRANSLATOR_ID && cur.sourceLang !== 'auto') {
+        const st = await translatorStatus(translatorLang(cur.sourceLang), translatorLang(cur.targetLang)).catch(() => 'available');
+        if (st === 'downloadable') {
+          open('studio.html?view=settings');
+          window.close();
+          return;
+        }
+      }
       if (!ready.ok) {
         void chrome.tabs.create({ url: chrome.runtime.getURL(`studio.html?view=settings&setup=1&resume=${tab.id}&cmd=${command}${command === 'download-chapter' ? `&format=${fmt}` : ''}`) });
         window.close();

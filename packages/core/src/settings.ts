@@ -1,4 +1,5 @@
-import { systemLanguage } from './i18n';
+import { BROWSER_TRANSLATOR, BROWSER_TRANSLATOR_ID } from './llm/browserTranslator';
+import { systemLanguage, tr } from './i18n';
 import { LANGUAGES } from './languages';
 import type { ModelCheck } from './llm/selftest';
 import type { PrivacyMode } from './llm/privacy';
@@ -431,6 +432,8 @@ export function activeProfile(s: AppSettings, seriesKey?: string): PromptProfile
 }
 
 export function providerById(s: AppSettings, id: string | null | undefined): ProviderConfig | undefined {
+  // The browser's own translator is not in the list: it is always there (where the browser has it).
+  if (id === BROWSER_TRANSLATOR_ID) return { ...BROWSER_TRANSLATOR, label: tr('Переводчик браузера') };
   return id ? s.providers.find((p) => p.id === id) : undefined;
 }
 

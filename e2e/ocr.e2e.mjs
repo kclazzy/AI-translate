@@ -51,11 +51,14 @@ const W = 600;
 const H = 700;
 let picture = null;
 let pictureJa = null;
+let pictureTwo = null;
 const site = createServer((req, res) => {
   if (req.url.startsWith('/models/')) {
     const body = files[decodeURIComponent(req.url.slice(8))];
     if (body) return res.writeHead(200, { 'access-control-allow-origin': '*', 'content-type': 'application/octet-stream', 'content-length': String(body.length) }).end(body);
   }
+  if (req.url === '/two') return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><title>Bubble</title><body style="margin:0"><img src="/page-two.png" width="${W}" height="${H}"></body>`);
+  if (req.url === '/page-two.png' && pictureTwo) return res.writeHead(200, { 'content-type': 'image/png' }).end(pictureTwo);
   if (req.url === '/ja') return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><title>Bubble</title><body style="margin:0"><img src="/page-ja.png" width="${W}" height="${H}"></body>`);
   if (req.url === '/page-ja.png' && pictureJa) return res.writeHead(200, { 'content-type': 'image/png' }).end(pictureJa);
   if (req.url === '/') return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><title>Bubble</title><body style="margin:0"><img src="/page.png" width="${W}" height="${H}"></body>`);
@@ -126,6 +129,7 @@ try {
     'base64',
   );
   picture = await drawBubble('HELLO THERE', 'bold 22px sans-serif');
+  pictureTwo = await drawBubble('HELLO THERE', 'bold 23px sans-serif');
   pictureJa = await drawBubble('なにしてるの', '24px "Noto Sans CJK JP", sans-serif');
   const studio = await browser.newPage();
   const fetched = new Set();
@@ -156,6 +160,8 @@ try {
     // A text model only (it cannot read pictures): enough for «Распознавание».
     s.providers = [{ id: 'mock', label: 'Text model', kind: 'openai-compatible', preset: 'custom', baseUrl: 'http://127.0.0.1:18170/v1', model: 'text-model', vision: false, jsonMode: 'json_object' }];
     s.visionProviderId = 'mock';
+    // The text model translates here (the browser's own translator is checked further on).
+    s.modeProviders = { ocr: 'mock' };
     s.translationProviderId = null;
     s.privacy = 'local';
     s.pipeline = 'standalone';
@@ -209,6 +215,59 @@ try {
   check('the page gets the translation', stored.includes('Где ты?'), `${JSON.stringify(stored)} errors=${JSON.stringify(errors).slice(0, 400)}`);
   await tab.screenshot({ path: join(OUT, 'ocr.png') });
 
+  // Without Ollama: the browser's own translator (a stand-in for Chrome's Translator API, put into
+  // the extension's offscreen document where the pages are translated).
+  {
+    const off = browser.targets().find((t) => t.url().includes('offscreen'));
+    if (off) {
+      const cdpOff = await off.createCDPSession();
+      await cdpOff.send('Runtime.evaluate', { expression: `globalThis.Translator = { availability: async () => 'available', create: async () => ({ translate: async (t) => 'RU:' + t }) }; true` });
+      await cdpOff.detach();
+    }
+    await studio.evaluate(async () => {
+      const db = await new Promise((res) => {
+        const r = indexedDB.open('ai-translate', 1);
+        r.onsuccess = () => res(r.result);
+      });
+      const tx = db.transaction('kv', 'readwrite');
+      const store = tx.objectStore('kv');
+      const s = await new Promise((res) => {
+        const g = store.get('settings');
+        g.onsuccess = () => res(g.result ?? {});
+      });
+      s.visionProviderId = 'browser-translator';
+      s.modeProviders = { ...(s.modeProviders ?? {}), ocr: 'browser-translator' };
+      store.put(s, 'settings');
+      await new Promise((r) => (tx.oncomplete = r));
+      await chrome.runtime.sendMessage({ type: 'settings-changed' }).catch(() => undefined);
+    });
+    const before = asked.length;
+    const tab2 = await browser.newPage();
+    await tab2.goto('http://127.0.0.1:18171/two');
+    await tab2.waitForFunction(() => document.images[0].complete && document.images[0].naturalWidth);
+    await new Promise((r) => setTimeout(r, 800));
+    await studio.evaluate(async () => {
+      const [t] = await chrome.tabs.query({ url: 'http://127.0.0.1:18171/two' });
+      await chrome.tabs.sendMessage(t.id, { type: 'translate-src', src: 'http://127.0.0.1:18171/page-two.png' });
+    });
+    let got = [];
+    for (let i = 0; i < 60 && !got.length; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      got = await studio.evaluate(async () => {
+        const db = await new Promise((res) => {
+          const r = indexedDB.open('ai-translate', 1);
+          r.onsuccess = () => res(r.result);
+        });
+        return new Promise((res) => {
+          const g = db.transaction('results').objectStore('results').getAll();
+          g.onsuccess = () => res(g.result.flatMap((x) => x.page.blocks.map((b) => b.translatedText)).filter((t) => t.startsWith('RU:')));
+        });
+      });
+    }
+    check('without Ollama the browser translator translates the recognised text', got.some((t) => /RU:\s*hello there/i.test(t)) && asked.length === before, `${JSON.stringify(got)} model asked ${asked.length - before}×`);
+    await tab2.close();
+  }
+
   if (haveManga) {
     // Japanese: the card offers Manga OCR, which then reads the bubble whole.
     await studio.bringToFront();
@@ -224,6 +283,8 @@ try {
         g.onsuccess = () => res(g.result ?? {});
       });
       s.sourceLang = 'ja';
+      s.visionProviderId = 'mock';
+      s.modeProviders = { ...(s.modeProviders ?? {}), ocr: 'mock' };
       store.put(s, 'settings');
       await new Promise((r) => (tx.oncomplete = r));
     });
