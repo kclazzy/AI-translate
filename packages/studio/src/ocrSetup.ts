@@ -96,7 +96,11 @@ export function startOcrSetup(platform: StudioPlatform, s: AppSettings): Promise
       const total = parts.reduce((a, b) => a + b.mb, 0) || 1;
       let done = 0;
       for (const part of parts) {
-        await part.run((x) => set({ pct: (done + x * part.mb) / total }));
+        await part.run((x) => {
+          // The bar moves by whole per cent: a download reports every few kilobytes.
+          const pct = Math.floor(((done + x * part.mb) / total) * 100) / 100;
+          if (pct !== state.pct) set({ pct });
+        });
         done += part.mb;
       }
       const packErr = await pack;

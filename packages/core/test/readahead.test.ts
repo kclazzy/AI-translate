@@ -33,6 +33,6 @@ describe('text read ahead', () => {
     const out = await runStandalonePipeline({ bytes, config, noSkip: true, prepared }, { ...deps, fetchImpl: mock.fetchImpl });
     expect(reads).toBe(1);
     expect(out.page.blocks.map((b) => b.translatedText)).toEqual(['ПРИВЕТ']);
-    expect(out.page.debug?.steps.some((s) => s.includes('read ahead'))).toBe(true);
+    expect(out.page.debug?.steps?.some((s) => s.includes('read ahead'))).toBe(true);
   }, 60000);
 });
