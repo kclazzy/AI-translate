@@ -47,10 +47,10 @@ export const browserBackend: ImageBackend = {
   },
   async encode(canvas, mime, quality) {
     const anyCanvas = canvas as any;
-    // A document nobody looks at (the extension's offscreen one, where pages are translated, a
-    // tab in the background): there convertToBlob waits for an idle moment of the page, up to a
-    // second for every picture, and a page being translated has none. Encoded right away instead.
-    if (typeof document !== 'undefined' && (document.visibilityState === 'hidden' || !document.hasFocus())) {
+    // The document that translates in the background (the extension's offscreen one, see
+    // encodeAtOnce): there convertToBlob waits for an idle moment of the page, up to a second for
+    // every picture, and a page being translated has none. Encoded right away instead.
+    if (atOnce && typeof document !== 'undefined') {
       const bytes = encodeNow(canvas, mime, quality);
       if (bytes) return bytes;
     }
@@ -62,6 +62,12 @@ export const browserBackend: ImageBackend = {
     return new Uint8Array(await blob.arrayBuffer());
   },
 };
+
+let atOnce = false;
+/** Encode pictures at once in this document (one nobody looks at, that does the translating). */
+export function encodeAtOnce(on: boolean): void {
+  atOnce = on;
+}
 
 /** Encode on the spot (a page canvas's toDataURL); null when the browser cannot write that type. */
 function encodeNow(canvas: AnyCanvas, mime: ImageMime, quality?: number): Uint8Array | null {

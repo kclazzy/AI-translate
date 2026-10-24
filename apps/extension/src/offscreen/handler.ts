@@ -1,4 +1,4 @@
-import { AppError, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
+import { AppError, encodeAtOnce, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
 import { loadBundledFonts, loadUserFonts } from '@ait/studio/fonts';
 import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
 import { buildAnalysisPack, buildProblemReport, type AnalysisPage } from '@ait/studio/problem-report';
@@ -12,6 +12,9 @@ import { gpuFetch, setWorkWaiting } from './gpuLane';
 import { ocrDownloaded, readText } from './ocr';
 import '../shared/browserTranslate';
 import { setUiLang, tr } from '@ait/core/i18n';
+
+// Nobody looks at this document: pictures are encoded at once (see encodeAtOnce).
+encodeAtOnce(true);
 
 /**
  * The pipeline runs here (offscreen document in Chrome, the background page in Firefox):
