@@ -109,12 +109,12 @@ jobs:
           mkdir -p log
           {
             sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
-            pip install -q torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
-            pip install -q "transformers==4.46.3" "optimum[exporters]==1.23.3" onnx==1.17.0 onnxruntime==1.22.1 onnxconverter-common==1.14.0 pillow
+            pip install -q torch==2.5.1 "transformers==4.46.3" "optimum[exporters]==1.23.3" onnx==1.17.0 onnxruntime==1.22.1 onnxconverter-common==1.14.0 pillow --extra-index-url https://download.pytorch.org/whl/cpu
             pip list 2>/dev/null | grep -iE "torch|transformers|optimum|onnx"
             rev=$(curl -fsSL https://huggingface.co/api/models/kha-white/manga-ocr-base | python -c "import json,sys; print(json.load(sys.stdin)['sha'])")
             echo "kha-white/manga-ocr-base@$rev" | tee SOURCE.txt
-            optimum-cli export onnx --model kha-white/manga-ocr-base --revision "$rev" --task image-to-text-with-past exp
+            python -c "from huggingface_hub import snapshot_download as d; d('kha-white/manga-ocr-base', revision='$rev', local_dir='src')"
+            optimum-cli export onnx --model src --task image-to-text-with-past exp
             ls -l exp
             mkdir -p old
             for f in manga-ocr-encoder-int8.onnx manga-ocr-decoder-int8.onnx manga-ocr-vocab.txt; do gh release download models-1 -R "$GITHUB_REPOSITORY" -p "$f" -D old; done
