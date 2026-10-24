@@ -105,19 +105,25 @@ jobs:
       - name: Export
         if: steps.have.outputs.skip != '1'
         run: |
-          sudo apt-get install -y -qq fonts-noto-cjk >/dev/null
-          pip install -q torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
-          pip install -q "transformers==4.46.3" "optimum[exporters]==1.23.3" onnx==1.17.0 onnxruntime==1.22.1 onnxconverter-common==1.14.0 pillow
-          rev=$(curl -fsSL https://huggingface.co/api/models/kha-white/manga-ocr-base | python -c "import json,sys; print(json.load(sys.stdin)['sha'])")
-          echo "kha-white/manga-ocr-base@$rev" | tee SOURCE.txt
-          optimum-cli export onnx --model kha-white/manga-ocr-base --revision "$rev" --task image-to-text-with-past exp
-          ls -l exp
-          mkdir -p old
-          for f in manga-ocr-encoder-int8.onnx manga-ocr-decoder-int8.onnx manga-ocr-vocab.txt; do gh release download models-1 -R "$GITHUB_REPOSITORY" -p "$f" -D old; done
+          set -o pipefail
+          mkdir -p log
+          {
+            sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
+            pip install -q torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+            pip install -q "transformers==4.46.3" "optimum[exporters]==1.23.3" onnx==1.17.0 onnxruntime==1.22.1 onnxconverter-common==1.14.0 pillow
+            pip list 2>/dev/null | grep -iE "torch|transformers|optimum|onnx"
+            rev=$(curl -fsSL https://huggingface.co/api/models/kha-white/manga-ocr-base | python -c "import json,sys; print(json.load(sys.stdin)['sha'])")
+            echo "kha-white/manga-ocr-base@$rev" | tee SOURCE.txt
+            optimum-cli export onnx --model kha-white/manga-ocr-base --revision "$rev" --task image-to-text-with-past exp
+            ls -l exp
+            mkdir -p old
+            for f in manga-ocr-encoder-int8.onnx manga-ocr-decoder-int8.onnx manga-ocr-vocab.txt; do gh release download models-1 -R "$GITHUB_REPOSITORY" -p "$f" -D old; done
+          } 2>&1 | tee log/export.txt
       - name: Make the browser files and check them
         if: steps.have.outputs.skip != '1'
         run: |
-          python scripts/models/manga_ocr_fast.py exp old/manga-ocr-encoder-int8.onnx old/manga-ocr-decoder-int8.onnx old/manga-ocr-vocab.txt out
+          set -o pipefail
+          python scripts/models/manga_ocr_fast.py exp old/manga-ocr-encoder-int8.onnx old/manga-ocr-decoder-int8.onnx old/manga-ocr-vocab.txt out 2>&1 | tee log/check.txt
           cp SOURCE.txt out/
           (cd out && sha256sum * > SHA256SUMS && ls -l) | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Publish
@@ -125,3 +131,9 @@ jobs:
         run: |
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --prerelease --latest=false --title "Manga OCR made faster" --notes "kha-white/manga-ocr-base (Apache-2.0) exported with Optimum: decoder with a cache of past steps (int8), encoder fp16. See .github/workflows/models.yml."
           gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber out/*
+      - name: Keep the log (readable without the Actions logs)
+        if: always() && steps.have.outputs.skip != '1'
+        run: |
+          gh release view models-log -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create models-log -R "$GITHUB_REPOSITORY" --prerelease --latest=false --title "Model build logs" --notes "Logs of .github/workflows/models.yml runs."
+          for f in log/*.txt; do [ -f "$f" ] && cp "$f" "mangafast-$(basename "$f")"; done
+          ls mangafast-*.txt >/dev/null 2>&1 && gh release upload models-log -R "$GITHUB_REPOSITORY" --clobber mangafast-*.txt || true
