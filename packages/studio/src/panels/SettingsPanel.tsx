@@ -11,13 +11,13 @@ import {
   LANGUAGES,
   listOpenAiModels,
   maskKey,
-  optimalLocalSettings,
+  optimalSettings,
+  providerById,
   PROVIDER_PRESETS,
   qaModeOf,
   languageInstruction,
   profilesForLanguage,
   nativeName,
-  readsLocally,
   shortId,
   type AppSettings,
   type PromptProfile,
@@ -30,6 +30,7 @@ import { usePlatform } from '../platform';
 import { LamaGetButton, lamaModeOf, useLamaDownloaded } from '../lama';
 import { DetectorChoice } from '../detector';
 import { SpeedBenchmark } from './SpeedBenchmark';
+import { clearAutoTuned, useAutoTuned } from '../autoOptimal';
 import { LanguagePair } from '../LanguagePair';
 import { ErrorBox, Field, FoldPanel, NumberInput, Segmented, Switch, toast, useAction } from '../ui';
 import { resolveUiLang, tr, uiLocale, UI_LANGS } from '@ait/core/i18n';
@@ -463,8 +464,9 @@ function StorageLine({ settings: s, update }: SettingsProps) {
 }
 
 /**
- * «Оптимально для локальной модели»: one click for the settings that suit a model on this computer
- * (see optimalLocalSettings); what will change is listed first, and the click can be undone.
+ * «Оптимально для этой модели»: one click for the settings that suit the model in use (see
+ * optimalSettings); what will change is listed first, and the click can be undone. A switch of
+ * model brings the model's part of them by itself (shown here too, with «Вернуть как было»).
  */
 /** What «Вернуть как было» restores; kept outside the component, which the saved settings may re-create. */
 let optimalUndo: Partial<AppSettings> | null = null;
@@ -472,42 +474,64 @@ let optimalUndo: Partial<AppSettings> | null = null;
 function OptimalLocal({ settings: s, update }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void }) {
   const [open, setOpen] = useState(false);
   const [undo, setUndoState] = useState<Partial<AppSettings> | null>(optimalUndo);
+  const tuned = useAutoTuned();
   const setUndo = (u: Partial<AppSettings> | null) => {
     optimalUndo = u;
     setUndoState(u);
   };
-  if (!readsLocally(s)) return null;
-  const { patch, changes } = optimalLocalSettings(s);
+  const hasModel = s.pipeline === 'engine' || !!providerById(s, s.visionProviderId);
+  if (!hasModel) return null;
+  const { patch, changes, profile } = optimalSettings(s);
+  const local = profile === 'local' || profile === 'ocr-local';
   const apply = () => {
     const before: Partial<AppSettings> = {};
     for (const k of Object.keys(patch) as (keyof AppSettings)[]) (before as Record<string, unknown>)[k] = s[k];
     update(patch);
     setUndo(before);
+    clearAutoTuned();
     setOpen(false);
-    toast(tr('Настройки для локальной модели применены'));
+    toast(tr('Настройки для этой модели применены'));
   };
   return (
-    <div className="ait-optimal" data-testid="optimal-local">
-      <button className="ait-btn small" disabled={!changes.length} onClick={() => setOpen(!open)} title={changes.length ? undefined : tr('Уже настроено')}>
-        {changes.length ? tr('Оптимально для локальной модели') : tr('Настроено оптимально для локальной модели ✓')}
-      </button>
-      {undo ? (
-        <button className="ait-btn small ghost" onClick={() => { update(undo); setUndo(null); }}>
-          {tr('Вернуть как было')}
+    <>
+      <div className="ait-optimal" data-testid="optimal-local">
+        <button className="ait-btn small" disabled={!changes.length} onClick={() => setOpen(!open)} title={changes.length ? undefined : tr('Уже настроено')}>
+          {profile === 'local'
+            ? changes.length ? tr('Оптимально для локальной модели') : tr('Настроено оптимально для локальной модели ✓')
+            : changes.length ? tr('Оптимально для этой модели') : tr('Настроено оптимально для этой модели ✓')}
         </button>
-      ) : null}
-      {open && changes.length ? (
-        <div className="ait-optimal-list" role="dialog" aria-label={tr('Что изменится')}>
-          <p className="ait-muted" style={{ margin: '0 0 6px' }}>{tr('Для видеокарты {0} ГБ изменится:', s.gpuVramGb ?? 12)}</p>
-          <ul>{changes.map((c) => <li key={c}>{c}</li>)}</ul>
-          <p className="ait-hint">{tr('Модели, ключи, языки и глоссарий не меняются.')}</p>
+        {undo ? (
+          <button className="ait-btn small ghost" onClick={() => { update(undo); setUndo(null); }}>
+            {tr('Вернуть как было')}
+          </button>
+        ) : null}
+        <label className="ait-check" title={tr('При смене режима, сервера или модели качество, проверка перевода и нейросети в браузере настраиваются под неё')}>
+          <input type="checkbox" data-testid="auto-optimal" checked={s.autoOptimal !== false} onChange={(e) => update({ autoOptimal: e.target.checked })} />
+          <span>{tr('Подбирать настройки под модель сами')}</span>
+        </label>
+        {open && changes.length ? (
+          <div className="ait-optimal-list" role="dialog" aria-label={tr('Что изменится')}>
+            <p className="ait-muted" style={{ margin: '0 0 6px' }}>{local ? tr('Для видеокарты {0} ГБ изменится:', s.gpuVramGb ?? 12) : tr('Изменится:')}</p>
+            <ul>{changes.map((c) => <li key={c}>{c}</li>)}</ul>
+            <p className="ait-hint">{tr('Модели, ключи, языки и глоссарий не меняются.')}</p>
+            <div className="ait-row">
+              <button className="ait-btn small" onClick={apply}>{tr('Применить')}</button>
+              <button className="ait-btn small ghost" onClick={() => setOpen(false)}>{tr('Отмена')}</button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+      {tuned ? (
+        <div className="ait-notice" data-testid="auto-tuned">
+          {tr('Под новую модель подобраны настройки:')}
+          <ul style={{ margin: '4px 0' }}>{tuned.changes.map((c) => <li key={c}>{c}</li>)}</ul>
           <div className="ait-row">
-            <button className="ait-btn small" onClick={apply}>{tr('Применить')}</button>
-            <button className="ait-btn small ghost" onClick={() => setOpen(false)}>{tr('Отмена')}</button>
+            <button className="ait-btn small ghost" onClick={() => { update(tuned.before); clearAutoTuned(); }}>{tr('Вернуть как было')}</button>
+            <button className="ait-btn small ghost" onClick={clearAutoTuned}>{tr('Понятно')}</button>
           </div>
         </div>
       ) : null}
-    </div>
+    </>
   );
 }
 

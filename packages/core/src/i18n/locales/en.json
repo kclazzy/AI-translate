@@ -1268,5 +1268,15 @@
  "⟳ — получить список моделей с сервера": "⟳ — get the model list from the server",
  "👁 читает изображения, ✎ только текст.": "👁 reads images, ✎ text only.",
  "🔒 Локально": "🔒 Local",
- "🔒 Локальный режим": "🔒 Local mode"
+ "🔒 Локальный режим": "🔒 Local mode",
+ "Изменится:": "Will change:",
+ "Настроено оптимально для этой модели ✓": "Optimal for this model ✓",
+ "Настройки для этой модели применены": "Settings for this model applied",
+ "Настройки подобраны под модель: {0}": "Settings matched to the model: {0}",
+ "Оптимально для этой модели": "Optimal for this model",
+ "Точный поиск текста: вкл": "Precise text search: on",
+ "Подбирать настройки под модель сами": "Match settings to the model automatically",
+ "При смене режима, сервера или модели качество, проверка перевода и нейросети в браузере настраиваются под неё": "When the mode, server or model changes, quality, the translation check and the in-browser neural networks are set to suit it",
+ "Под новую модель подобраны настройки:": "Settings matched to the new model:",
+ "Понятно": "Got it"
 }

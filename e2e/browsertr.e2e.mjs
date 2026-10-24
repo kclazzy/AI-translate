@@ -98,7 +98,7 @@ try {
       });
     });
   // No model server at all: neither Ollama nor an online one.
-  await setSettings({ providers: [], visionProviderId: null, translationProviderId: null, pipeline: 'standalone', readMode: 'vision', sourceLang: 'ja', targetLang: 'ru', onboarded: true, privacy: 'local' });
+  await setSettings({ providers: [], visionProviderId: null, translationProviderId: null, pipeline: 'standalone', readMode: 'vision', sourceLang: 'ja', targetLang: 'ru', onboarded: true, privacy: 'local', quality: 'best', qaMode: 'fix' });
   // The recognition models as if downloaded (only their presence is checked before a translation).
   await studio.evaluate(async (ver) => {
     const c = await caches.open('ait-models');
@@ -122,6 +122,11 @@ try {
   await new Promise((r) => setTimeout(r, 500));
   const s1 = await readSettings();
   check('the browser\'s own translator translates in it', s1.readMode === 'ocr' && s1.visionProviderId === 'browser-translator', `${s1.readMode} ${s1.visionProviderId}`);
+  {
+    // The switch of model brought the settings that suit the browser's translator, and says so.
+    const note = await studio.waitForSelector('[data-testid="auto-tuned"]', { timeout: 5000 }).catch(() => null);
+    check('the switch brings the settings that suit the new model at once', !!note && s1.quality === 'balanced' && s1.qaMode === 'rules', `${s1.quality} ${s1.qaMode} ${note ? 'note' : 'no note'}`);
+  }
   const label = await studio.$eval('[data-testid="ocr-translator"] select', (el) => el.selectedOptions[0]?.textContent ?? '');
   check('the choice is shown as the browser translator', /браузер/i.test(label), label);
   // The models count as downloaded here (cache entries); choosing the mode gets the language packs

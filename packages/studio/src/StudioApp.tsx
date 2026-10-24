@@ -12,7 +12,8 @@ import { ProjectPanel } from './panels/ProjectPanel';
 import { QuickPanel } from './panels/QuickPanel';
 import { SettingsPanel } from './panels/SettingsPanel';
 import { SetupWizard } from './panels/SetupWizard';
-import { Icon, Segmented, ToastHost } from './ui';
+import { Icon, Segmented, ToastHost, toast } from './ui';
+import { withAutoOptimal } from './autoOptimal';
 import { applyUiLangFromSettings, tr } from '@ait/core/i18n';
 
 export type View = 'quick' | 'projects' | 'glossary' | 'settings' | 'privacy' | 'history' | 'editor' | 'welcome';
@@ -113,26 +114,31 @@ export function StudioApp({ platform: hostPlatform, initialView, resultKey, chap
     };
   }, [platform]);
 
+  // The settings as last set here, for a change that needs to know what it changes (a switch of model).
+  const latest = useRef<AppSettings | null>(null);
+  latest.current = settings;
   const update = useCallback(
-    (patch: Partial<AppSettings>) => {
-      setSettings((prev) => {
-        if (!prev) return prev;
-        const next = { ...prev, ...patch };
-        if (patch.theme) applyTheme(patch.theme);
-        // Save at once: the translation service reads settings from storage, not from React state.
-        // Only what changed here goes onto the stored settings: another window (the popup, another
-        // tab of the studio) may have changed something meanwhile, and that must not be undone.
-        saveChain.current = saveChain.current
-          .then(async () => platform.saveSettings({ ...(await platform.loadSettings()), ...patch }))
-          .catch(() => undefined);
-        if ('interfaceLang' in patch) {
-          // Every text on the page follows the new language after a reload (once the setting is saved).
-          void saveChain.current.then(() => {
-            if (applyUiLangFromSettings(patch.interfaceLang)) location.reload();
-          });
-        }
-        return next;
-      });
+    (given: Partial<AppSettings>) => {
+      const prev = latest.current;
+      if (!prev) return;
+      // A switch of model brings the settings that suit it (shown in the settings, can be undone).
+      const { patch, tuned } = withAutoOptimal(prev, given);
+      if (tuned) toast(tr('Настройки подобраны под модель: {0}', tuned.changes.join('; ')));
+      latest.current = { ...prev, ...patch };
+      setSettings((p) => (p ? { ...p, ...patch } : p));
+      if (patch.theme) applyTheme(patch.theme);
+      // Save at once: the translation service reads settings from storage, not from React state.
+      // Only what changed here goes onto the stored settings: another window (the popup, another
+      // tab of the studio) may have changed something meanwhile, and that must not be undone.
+      saveChain.current = saveChain.current
+        .then(async () => platform.saveSettings({ ...(await platform.loadSettings()), ...patch }))
+        .catch(() => undefined);
+      if ('interfaceLang' in patch) {
+        // Every text on the page follows the new language after a reload (once the setting is saved).
+        void saveChain.current.then(() => {
+          if (applyUiLangFromSettings(patch.interfaceLang)) location.reload();
+        });
+      }
     },
     [platform],
   );

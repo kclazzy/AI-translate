@@ -177,6 +177,8 @@ export interface AppSettings {
    * otherwise shown among the editor's remarks.
    */
   selfCheck?: boolean;
+  /** A switch of model (mode, server, model) brings the settings that suit it (default on; see optimal.ts). */
+  autoOptimal?: boolean;
   /** Most space the translation cache may take, MB (default 2048); the least recently used pages go first. */
   cacheMaxMb?: number;
 }
@@ -413,6 +415,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     skipEmptyPages: 'boolean',
     qaBatch: 'boolean',
     selfCheck: 'boolean',
+    autoOptimal: 'boolean',
     cacheMaxMb: 'number',
   });
   // At least 50 MB (a few chapters), at most 100 GB.

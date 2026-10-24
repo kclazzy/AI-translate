@@ -9,6 +9,7 @@ import { loadBundledFonts } from '@ait/studio/fonts';
 import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
 import { AiModeSwitch } from '@ait/studio/ai-mode';
 import { LanguagePair } from '@ait/studio/languages';
+import { clearAutoTuned, withAutoOptimal, type AutoTuned } from '@ait/studio/auto-optimal';
 import { ocrDownloaded } from '../offscreen/ocr';
 import { prepareTranslator, translatorStatus } from '../shared/browserTranslate';
 import { detectorDownloaded } from '../offscreen/detector';
@@ -72,6 +73,7 @@ function VramLine({ settings }: { settings: AppSettings }) {
 
 function Popup() {
   const [s, setS] = useState<AppSettings | null>(null);
+  const [tuned, setTuned] = useState<AutoTuned | null>(null);
   const [tab, setTab] = useState<chrome.tabs.Tab | null>(null);
   const [engine, setEngine] = useState<'ok' | 'down' | 'unpaired' | null>(null);
   // In the recognition mode: are its models here (the detector and the readers)?
@@ -136,7 +138,10 @@ function Popup() {
   const vision = providerById(s, s.visionProviderId);
   const translator = providerById(s, s.translationProviderId) ?? vision;
   const canRun = !!tab?.id && /^https?:|^file:/.test(tab.url ?? '');
-  const update = (patch: Partial<AppSettings>) => {
+  const update = (given: Partial<AppSettings>) => {
+    // A switch of model brings the settings that suit it (seen below the mode switch, can be undone).
+    const { patch, tuned: t } = withAutoOptimal(s, given);
+    if (t) setTuned(t);
     const next = { ...s, ...patch };
     setS(next);
     // Only what changed here (a settings tab may have saved something meanwhile), one after another.
@@ -153,7 +158,7 @@ function Popup() {
       // «Распознавание» needs no program: with Ollama (or another local server) not running, the
       // browser's own translator takes over (the choice is seen in the mode switch above).
       if (!ready.ok && s.pipeline === 'standalone' && s.readMode === 'ocr' && browserTranslateSupported()) {
-        const next = { ...s, ...applyOcrTranslator(s, BROWSER_TRANSLATOR_ID) };
+        const next = { ...s, ...withAutoOptimal(s, applyOcrTranslator(s, BROWSER_TRANSLATOR_ID)).patch };
         setS(next);
         await saveSettings(next);
         ready = await checkReadiness(next);
@@ -241,6 +246,13 @@ function Popup() {
           }}
         />
       </div>
+
+      {tuned ? (
+        <div className="ait-notice" data-testid="auto-tuned">
+          {tr('Настройки подобраны под модель: {0}', tuned.changes.join('; '))}{' '}
+          <button className="pp-link" onClick={() => { update(tuned.before); setTuned(null); clearAutoTuned(); }}>{tr('Вернуть как было')}</button>
+        </div>
+      ) : null}
 
       <LanguagePair settings={s} update={update} compact />
 
