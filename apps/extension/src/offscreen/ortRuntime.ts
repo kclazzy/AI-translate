@@ -136,7 +136,33 @@ export const MANGA_OCR: Record<'encoder' | 'decoder' | 'vocab', ModelFile> = {
   decoder: { url: `${MODELS_RELEASE}/manga-ocr-decoder-int8.onnx`, sha256: '3ff0d4c34c4a66613d98ff93e0b17f22a7b09dfbeec195c3e4d6f595af3a6b6c', size: 29_675_736 },
   vocab: { url: `${MODELS_RELEASE}/manga-ocr-vocab.txt`, sha256: '5cb5c5586d98a2f331d9f8828e4586479b0611bfba5d8c3b6dadffc84d6a36a3', size: 30_216 },
 };
-export const MANGA_OCR_URLS = [MANGA_OCR.encoder.url, MANGA_OCR.decoder.url, MANGA_OCR.vocab.url];
+/**
+ * Manga OCR made faster (this repository's «models-3», see models.yml): the decoder that reads one
+ * character at a time with a cache (cross-attention once per bubble + one step per character), and
+ * the encoder in fp16 for the video card.
+ */
+const MODELS_3 = 'https://github.com/kclazzy/AI-translate/releases/download/models-3';
+export const MANGA_FAST: Record<'cross' | 'step' | 'encoderGpu', ModelFile> = {
+  cross: { url: `${MODELS_3}/manga-ocr-cross-int8.onnx`, sha256: '2723419079971e271d55952f4f2468e6d59bb741b427f130123c309974da42a3', size: 2_377_554 },
+  step: { url: `${MODELS_3}/manga-ocr-step-int8.onnx`, sha256: '4af7699fac866a38b3f12cd2e7a12280cd9f1fd2c7926b68dc89d9d454af1bcd', size: 27_127_257 },
+  encoderGpu: { url: `${MODELS_3}/manga-ocr-encoder-fp16.onnx`, sha256: '14e95f2e96a62cfcd9afb885279895af6229f20d9def183f9dc662c7becb6c08', size: 171_960_808 },
+};
+export const MANGA_OCR_URLS = [MANGA_OCR.encoder.url, MANGA_OCR.decoder.url, MANGA_OCR.vocab.url, MANGA_FAST.cross.url, MANGA_FAST.step.url, MANGA_FAST.encoderGpu.url];
+
+/** Does this browser's video card run fp16 networks (the fast encoder)? */
+let f16: Promise<boolean> | null = null;
+export function gpuF16(): Promise<boolean> {
+  f16 ??= (async () => {
+    try {
+      const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<{ features: Set<string> } | null> } }).gpu;
+      const adapter = gpu ? await gpu.requestAdapter() : null;
+      return !!adapter?.features.has('shader-f16');
+    } catch {
+      return false;
+    }
+  })();
+  return f16;
+}
 /** The upscaler for small scans: waifu2x CUNet, art, denoise 1, 2× (nagadomi/nunif, MIT), in this repository's «models-2». */
 export const UPSCALER: ModelFile = {
   url: 'https://github.com/kclazzy/AI-translate/releases/download/models-2/upscale-art-2x.onnx',

@@ -1316,5 +1316,6 @@
  "Только исправленные": "Seulement modifiées",
  "Только с замечаниями": "Seulement avec remarques",
  "Увеличивать маленькие сканы (нейросеть ~5 МБ)": "Agrandir les petits scans (réseau ~5 Mo)",
- "переводчик браузера": "traducteur du navigateur"
+ "переводчик браузера": "traducteur du navigateur",
+ "Распознавание текста: {0} с на {1}": "Reconnaissance du texte : {0} s sur {1}"
 }

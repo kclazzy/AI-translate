@@ -13,6 +13,8 @@ export interface OcrNeeds {
   ocr: boolean;
   /** Manga OCR (only asked for Japanese). */
   manga: boolean;
+  /** Megabytes still to download for it (with the encoder for the video card where it runs). */
+  mangaMb?: number;
   /** The translator's language pack: 'ok', 'download' (a click downloads it), 'none' (not this pair / no translator). */
   pack: 'ok' | 'download' | 'none';
 }
@@ -61,14 +63,15 @@ export async function checkOcrNeeds(platform: StudioPlatform, s: AppSettings): P
     // A pack still to get (of the chosen language or a main one) → 'download'; the chosen pair impossible → 'none'.
     pack = chosen === 'unavailable' ? 'none' : states.some((x) => x === 'downloadable' || x === 'downloading') ? 'download' : 'ok';
   }
-  const needs = { det, ocr, manga, pack };
+  const mangaMb = manga ? 0 : await platform.ocr?.manga?.mb?.().catch(() => undefined);
+  const needs = { det, ocr, manga, mangaMb, pack };
   set({ needs });
   return needs;
 }
 
 /** Megabytes still to download for the models. */
 export function needsMb(n: OcrNeeds, s: AppSettings): number {
-  return (n.det ? 0 : 45) + (n.ocr ? 0 : lang(s) === 'ko' ? 23 : 31) + (n.manga ? 0 : 117);
+  return (n.det ? 0 : 45) + (n.ocr ? 0 : lang(s) === 'ko' ? 23 : 31) + (n.manga ? 0 : n.mangaMb ?? 117);
 }
 
 /** Is everything there? */
@@ -92,7 +95,7 @@ export function startOcrSetup(platform: StudioPlatform, s: AppSettings): Promise
       const parts: { mb: number; run: (p: (x: number) => void) => Promise<void> }[] = [];
       if (!n.det && platform.detector) parts.push({ mb: 45, run: (p) => platform.detector!.download(p) });
       if (!n.ocr && platform.ocr) parts.push({ mb: lang(s) === 'ko' ? 23 : 31, run: (p) => platform.ocr!.download(p, lang(s) === 'ko') });
-      if (!n.manga && platform.ocr?.manga) parts.push({ mb: 117, run: (p) => platform.ocr!.manga!.download(p) });
+      if (!n.manga && platform.ocr?.manga) parts.push({ mb: n.mangaMb ?? 117, run: (p) => platform.ocr!.manga!.download(p) });
       const total = parts.reduce((a, b) => a + b.mb, 0) || 1;
       let done = 0;
       for (const part of parts) {

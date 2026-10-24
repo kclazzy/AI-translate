@@ -81,3 +81,29 @@ describe.skipIf(!have)('Manga OCR networks (local check)', () => {
     expect(r.text).toBe('なにをしてる');
   }, 120000);
 });
+
+describe('Manga OCR with a cache', () => {
+  it('one step per character: the cache grows, the masked first column stays, the text is the same', async () => {
+    const { mangaOcrReadCached } = await import('../src/ocr/mangaOcr');
+    const vocab = ['[PAD]', '[UNK]', '[CLS]', '[SEP]', '[MASK]', 'な', 'に', 'し'];
+    const want = [5, 6, 7, 3];
+    const seen: { pos: number; mask: number[]; past: number }[] = [];
+    const nets = {
+      encode: async () => ({ data: new Float32Array(197 * 768), dims: [1, 197, 768] }),
+      cross: async () => Array.from({ length: 4 }, () => ({ data: new Float32Array(12 * 197 * 64), dims: [1, 12, 197, 64] })),
+      step: async ({ pos, mask, past }: { id: number; pos: number; mask: BigInt64Array; past: { dims: number[] }[] }) => {
+        seen.push({ pos, mask: [...mask].map(Number), past: past[0].dims[2] });
+        const logits = new Float32Array(vocab.length);
+        logits[want[pos]] = 1;
+        const p = past[0].dims[2] + 1;
+        return { logits: { data: logits, dims: [1, 1, vocab.length] }, present: Array.from({ length: 4 }, () => ({ data: new Float32Array(12 * p * 64), dims: [1, 12, p, 64] })) };
+      },
+    };
+    const r = await mangaOcrReadCached({ width: 100, height: 300, data: new Uint8ClampedArray(100 * 300 * 4).fill(255) }, nets, vocab);
+    expect(r.text).toBe('なにし');
+    expect(r.lines[0].vertical).toBe(true);
+    expect(seen.map((s) => s.pos)).toEqual([0, 1, 2, 3]);
+    expect(seen.map((s) => s.past)).toEqual([1, 2, 3, 4]);
+    expect(seen[2].mask).toEqual([0, 1, 1, 1]);
+  });
+});

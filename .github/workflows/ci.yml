@@ -84,7 +84,7 @@ jobs:
           base=https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6
           curl -fsSL --retry 2 -o .test-output/ocr-models/PP-OCRv6_det_small.onnx "$base/det/PP-OCRv6_det_small.onnx" && curl -fsSL --retry 2 -o .test-output/ocr-models/PP-OCRv6_rec_small.onnx "$base/rec/PP-OCRv6_rec_small.onnx" || rm -rf .test-output/ocr-models
           # Manga OCR (Japanese) from this repository's models-1 release (see models.yml).
-          if [ -d .test-output/ocr-models ]; then for f in manga-ocr-encoder-int8.onnx manga-ocr-decoder-int8.onnx manga-ocr-vocab.txt; do curl -fsSL --retry 2 -o ".test-output/ocr-models/$f" "https://github.com/$GITHUB_REPOSITORY/releases/download/models-1/$f" || rm -f ".test-output/ocr-models/$f"; done; fi
+          if [ -d .test-output/ocr-models ]; then for f in manga-ocr-encoder-int8.onnx manga-ocr-vocab.txt; do curl -fsSL --retry 2 -o ".test-output/ocr-models/$f" "https://github.com/$GITHUB_REPOSITORY/releases/download/models-1/$f" || rm -f ".test-output/ocr-models/$f"; done; for f in manga-ocr-cross-int8.onnx manga-ocr-step-int8.onnx; do curl -fsSL --retry 2 -o ".test-output/ocr-models/$f" "https://github.com/$GITHUB_REPOSITORY/releases/download/models-3/$f" || rm -f ".test-output/ocr-models/$f"; done; fi
           OCR_MODELS=$PWD/.test-output/ocr-models xvfb-run -a node e2e/ocr.e2e.mjs 2>&1 | tee .test-output/e2e-ocr.log
           pnpm --filter @ait/studio test
       - name: Why the end-to-end tests failed (as annotations, readable without the logs)

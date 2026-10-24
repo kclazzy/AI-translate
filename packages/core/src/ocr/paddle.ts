@@ -82,18 +82,45 @@ function rotateLeft(px: PixelData): PixelData {
 const DET_MEAN = [0.485, 0.456, 0.406];
 const DET_STD = [0.229, 0.224, 0.225];
 
-/** The detector's input: the piece scaled so its sides are multiples of 32 (longest at most `maxSide`), BGR, normalised. */
-export function detInput(px: PixelData, maxSide = 960): { input: OcrTensor; w: number; h: number } {
-  const k = Math.min(1, maxSide / Math.max(px.width, px.height));
-  const w = Math.max(32, Math.round((px.width * k) / 32) * 32);
-  const h = Math.max(32, Math.round((px.height * k) / 32) * 32);
+/**
+ * Sizes for a video card: it compiles a network once per input size, so the pieces go in a few
+ * fixed sizes (padded with white) instead of each in its own. On the processor the sizes are free.
+ */
+export interface OcrShapes {
+  /** Square sizes for the line finder (the piece fits the smallest that holds it). */
+  det: number[];
+  /** Widths for the reader (lines padded to the next one). */
+  rec: number[];
+  /** Lines read per run (a batch is filled with empty lines). */
+  batch: number;
+}
+export const GPU_SHAPES: OcrShapes = { det: [320, 640, 960], rec: [320, 640, 960, 1600, 2400], batch: 8 };
+
+const bucket = (v: number, sizes: number[]) => sizes.find((s) => s >= v) ?? sizes[sizes.length - 1];
+
+/**
+ * The detector's input: the piece scaled so its sides are multiples of 32 (longest at most
+ * `maxSide`), BGR, normalised; `w`×`h` is the piece in it. With `square`, padded with white to that
+ * size (the network's size is fixed, the piece sits in its top left corner).
+ */
+export function detInput(px: PixelData, maxSide = 960, square?: number): { input: OcrTensor; w: number; h: number } {
+  const k = Math.min(1, (square ?? maxSide) / Math.max(px.width, px.height));
+  const w = Math.max(32, Math.min(square ?? Infinity, Math.round((px.width * k) / 32) * 32));
+  const h = Math.max(32, Math.min(square ?? Infinity, Math.round((px.height * k) / 32) * 32));
+  const W = square ?? w;
+  const H = square ?? h;
   const rgba = resizeRgba(px, w, h);
-  const data = new Float32Array(3 * w * h);
-  for (let i = 0; i < w * h; i++) {
-    // BGR order, as the networks were trained on OpenCV pictures.
-    for (let c = 0; c < 3; c++) data[c * w * h + i] = (rgba[i * 4 + (2 - c)] / 255 - DET_MEAN[c]) / DET_STD[c];
+  const data = new Float32Array(3 * W * H);
+  // White around the piece (normalised as the network sees white).
+  if (square) for (let c = 0; c < 3; c++) data.fill((1 - DET_MEAN[c]) / DET_STD[c], c * W * H, (c + 1) * W * H);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      // BGR order, as the networks were trained on OpenCV pictures.
+      for (let c = 0; c < 3; c++) data[c * W * H + y * W + x] = (rgba[i + (2 - c)] / 255 - DET_MEAN[c]) / DET_STD[c];
+    }
   }
-  return { input: { data, dims: [1, 3, h, w] }, w, h };
+  return { input: { data, dims: [1, 3, H, W] }, w, h };
 }
 
 /**
@@ -144,12 +171,16 @@ export function detBoxes(prob: Float32Array, w: number, h: number, scaleX: numbe
 export const REC_HEIGHT = 48;
 const REC_MAX_WIDTH = 2400;
 
-/** Lines for the recogniser: each scaled to 48 px high, padded to the widest, BGR, normalised to −1…1. */
-export function recInput(lines: PixelData[]): OcrTensor {
-  const widths = lines.map((l) => Math.min(REC_MAX_WIDTH, Math.max(8, Math.ceil((REC_HEIGHT * l.width) / Math.max(1, l.height)))));
-  const W = Math.max(...widths);
+/**
+ * Lines for the recogniser: each scaled to 48 px high, padded to the widest (or to `width`), BGR,
+ * normalised to −1…1; `rows` lines in all (the missing ones empty).
+ */
+export function recInput(lines: PixelData[], fixed?: { width: number; rows: number }): OcrTensor {
+  const widths = lines.map((l) => Math.min(fixed?.width ?? REC_MAX_WIDTH, Math.max(8, Math.ceil((REC_HEIGHT * l.width) / Math.max(1, l.height)))));
+  const W = fixed?.width ?? Math.max(...widths);
   const H = REC_HEIGHT;
-  const data = new Float32Array(lines.length * 3 * H * W);
+  const N = Math.max(lines.length, fixed?.rows ?? 0);
+  const data = new Float32Array(N * 3 * H * W);
   for (const [n, l] of lines.entries()) {
     const w = widths[n];
     const rgba = resizeRgba(l, w, H);
@@ -161,7 +192,7 @@ export function recInput(lines: PixelData[]): OcrTensor {
       }
     }
   }
-  return { data, dims: [lines.length, 3, H, W] };
+  return { data, dims: [N, 3, H, W] };
 }
 
 /** Greedy CTC: the most likely class per step, repeats joined, blanks (class 0) dropped. */
@@ -192,11 +223,15 @@ export function ctcDecode(out: OcrTensor, dict: string[]): { text: string; score
 }
 
 /** The lines the detector finds in a piece: boxes in its pixels, crops (vertical ones turned to lie flat). */
-async function findLines(px: PixelData, run: OcrRun): Promise<{ boxes: Box[]; vertical: boolean[]; crops: PixelData[] }> {
-  const det = detInput(px);
+async function findLines(px: PixelData, run: OcrRun, shapes?: OcrShapes): Promise<{ boxes: Box[]; vertical: boolean[]; crops: PixelData[] }> {
+  const square = shapes ? bucket(Math.max(px.width, px.height), shapes.det) : undefined;
+  const det = detInput(px, 960, square);
   const prob = await run('det', det.input);
-  const [, , ph, pw] = prob.dims.length === 4 ? prob.dims : [1, 1, det.h, det.w];
-  const boxes = detBoxes(prob.data, pw, ph, px.width / pw, px.height / ph)
+  const [, , ph, pw] = prob.dims.length === 4 ? prob.dims : [1, 1, det.input.dims[2], det.input.dims[3]];
+  // The map's pixels per piece pixel (the piece may sit in a bigger, padded input).
+  const sx = (det.w * pw) / det.input.dims[3];
+  const sy = (det.h * ph) / det.input.dims[2];
+  const boxes = detBoxes(prob.data, pw, ph, px.width / sx, px.height / sy)
     .map((b) => {
       const x = Math.max(0, Math.floor(b[0]));
       const y = Math.max(0, Math.floor(b[1]));
@@ -207,15 +242,23 @@ async function findLines(px: PixelData, run: OcrRun): Promise<{ boxes: Box[]; ve
   return { boxes, vertical, crops: boxes.map((b, i) => (vertical[i] ? rotateLeft(crop(px, b)) : crop(px, b))) };
 }
 
-/** Read line crops in batches of lines of a similar length (less padding), at most 16 at a time. */
-async function readLines(crops: PixelData[], run: OcrRun, dict: string[]): Promise<{ text: string; score: number }[]> {
-  const order = crops.map((_, i) => i).sort((a, b) => crops[a].width / crops[a].height - crops[b].width / crops[b].height);
+/**
+ * Read line crops in batches of lines of a similar length (less padding), at most 16 at a time —
+ * or, with fixed shapes, `batch` at a time padded to the next fixed width.
+ */
+async function readLines(crops: PixelData[], run: OcrRun, dict: string[], shapes?: OcrShapes): Promise<{ text: string; score: number }[]> {
+  const wide = (c: PixelData) => (REC_HEIGHT * c.width) / Math.max(1, c.height);
+  const order = crops.map((_, i) => i).sort((a, b) => wide(crops[a]) - wide(crops[b]));
   const read: { text: string; score: number }[] = new Array(crops.length);
-  for (let i = 0; i < order.length; i += 16) {
-    const group = order.slice(i, i + 16);
-    const out = await run('rec', recInput(group.map((j) => crops[j])));
-    const dims = out.dims.length === 3 ? out.dims : [group.length, out.data.length / group.length / dict.length, dict.length];
-    for (const [k, r] of ctcDecode({ data: out.data, dims }, dict).entries()) read[group[k]] = r;
+  const per = shapes?.batch ?? 16;
+  for (let i = 0; i < order.length; i += per) {
+    const group = order.slice(i, i + per);
+    const fixed = shapes ? { width: bucket(Math.max(...group.map((j) => wide(crops[j]))), shapes.rec), rows: shapes.batch } : undefined;
+    const input = recInput(group.map((j) => crops[j]), fixed);
+    const rows = input.dims[0];
+    const out = await run('rec', input);
+    const dims = out.dims.length === 3 ? out.dims : [rows, out.data.length / rows / dict.length, dict.length];
+    for (const [k, r] of ctcDecode({ data: out.data, dims }, dict).entries()) if (k < group.length) read[group[k]] = r;
   }
   return read;
 }
@@ -242,21 +285,21 @@ function assemble(boxes: Box[], vertical: boolean[], read: { text: string; score
  * Read one piece of a page (a bubble, a caption): the lines the detector finds, each read, put in
  * reading order — top to bottom for lines, right to left for vertical columns.
  */
-export async function readPiece(px: PixelData, run: OcrRun, dict: string[], opts: { minScore?: number } = {}): Promise<OcrResult> {
-  const f = await findLines(px, run);
+export async function readPiece(px: PixelData, run: OcrRun, dict: string[], opts: { minScore?: number; shapes?: OcrShapes } = {}): Promise<OcrResult> {
+  const f = await findLines(px, run, opts.shapes);
   if (!f.boxes.length) return { text: '', lines: [] };
-  return assemble(f.boxes, f.vertical, await readLines(f.crops, run, dict), opts.minScore ?? 0.5);
+  return assemble(f.boxes, f.vertical, await readLines(f.crops, run, dict, opts.shapes), opts.minScore ?? 0.5);
 }
 
 /**
  * All the pieces of a page at once: the lines of every piece found first, then read together in
  * batches across the pieces (a page of short bubbles needs a few runs of the reader, not one each).
  */
-export async function readPieces(pieces: PixelData[], run: OcrRun, dict: string[], opts: { minScore?: number } = {}): Promise<OcrResult[]> {
+export async function readPieces(pieces: PixelData[], run: OcrRun, dict: string[], opts: { minScore?: number; shapes?: OcrShapes } = {}): Promise<OcrResult[]> {
   const found = [];
-  for (const px of pieces) found.push(await findLines(px, run));
+  for (const px of pieces) found.push(await findLines(px, run, opts.shapes));
   const all = found.flatMap((f) => f.crops);
-  const read = all.length ? await readLines(all, run, dict) : [];
+  const read = all.length ? await readLines(all, run, dict, opts.shapes) : [];
   let at = 0;
   return found.map((f) => {
     const mine = read.slice(at, at + f.crops.length);

@@ -85,3 +85,43 @@ export async function mangaOcrRead(px: PixelData, run: MangaOcrRun, vocab: strin
   return { text, lines: text ? [{ box: [0, 0, px.width, px.height], text, score: 1, vertical }] : [] };
 }
 
+
+/**
+ * The networks of Manga OCR read with a cache (models-3, see scripts/models/manga_ocr_kv.py): the
+ * picture's features become the cross-attention's keys and values once per bubble, and each next
+ * character is one small step with the cache of the steps before — instead of running the whole
+ * text against the picture again for every character.
+ */
+export interface MangaOcrNets {
+  encode(input: OcrTensor): Promise<OcrTensor>;
+  /** Keys and values of the cross-attention of both layers (ck0, cv0, ck1, cv1). */
+  cross(hidden: OcrTensor): Promise<OcrTensor[]>;
+  /** One character: its id and place, the mask over the cache, the cache (k0, v0, k1, v1) → scores and the cache with it. */
+  step(input: { id: number; pos: number; mask: BigInt64Array; past: OcrTensor[]; cross: OcrTensor[] }): Promise<{ logits: OcrTensor; present: OcrTensor[] }>;
+}
+
+const KV_HEADS = 12;
+const KV_DIM = 64;
+
+export async function mangaOcrReadCached(px: PixelData, nets: MangaOcrNets, vocab: string[], opts: { maxTokens?: number; signal?: AbortSignal } = {}): Promise<OcrResult> {
+  const hidden = await nets.encode(mangaOcrInput(px));
+  const cross = await nets.cross(hidden);
+  // A first column that is masked out keeps every shape non-empty.
+  let past: OcrTensor[] = Array.from({ length: 4 }, () => ({ data: new Float32Array(KV_HEADS * KV_DIM), dims: [1, KV_HEADS, 1, KV_DIM] }));
+  const ids = [START];
+  const max = opts.maxTokens ?? 120;
+  for (let t = 0; t < max; t++) {
+    if (opts.signal?.aborted) throw opts.signal.reason ?? new DOMException('Aborted', 'AbortError');
+    const mask = new BigInt64Array(t + 2).fill(1n);
+    mask[0] = 0n;
+    const { logits, present } = await nets.step({ id: ids[ids.length - 1], pos: t, mask, past, cross });
+    past = present;
+    const next = argmaxLast(logits);
+    if (next === END) break;
+    ids.push(next);
+    if (ids.length > 12 && ids.slice(-8).every((x) => x === next)) break;
+  }
+  const text = mangaOcrText(ids, vocab);
+  const vertical = px.height > px.width * 1.2;
+  return { text, lines: text ? [{ box: [0, 0, px.width, px.height], text, score: 1, vertical }] : [] };
+}

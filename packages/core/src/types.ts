@@ -136,6 +136,8 @@ export interface PageTimings {
   /** The vision model reading the picture (with the translation in single-call mode). */
   detectMs?: number;
   ocrMs?: number;
+  /** Where the recognition in the browser read the text («Распознавание»). */
+  ocrEp?: 'webgpu' | 'wasm';
   /** Separate text translation request(s). */
   translateMs?: number;
   /** Translation check (rules + the model's review). */

@@ -1,3 +1,4 @@
+import { remembered } from './memo';
 import { familyFor } from '../llm/catalog';
 import { AppError } from '../errors';
 import { releaseCanvas, type ImageBackend, type PixelData } from '../image/backend';
@@ -84,6 +85,14 @@ function checksText(req: Pick<PipelineRequest, 'config' | 'generic' | 'noSkip'>)
 
 const viewsKey = (config: PipelineConfig) => `${config.vision?.model ?? ''}|${config.quality}`;
 
+/** A short key of a picture's bytes (the same picture, the same boxes and texts; see memo.ts). */
+const keys = new WeakMap<Uint8Array, Promise<string>>();
+function pictureKey(bytes: Uint8Array): Promise<string> {
+  let k = keys.get(bytes);
+  if (!k) keys.set(bytes, (k = sha256Hex(bytes).then((h) => h.slice(0, 32))));
+  return k;
+}
+
 /**
  * Everything before the first model call that needs only this computer: decode the picture, look
  * for lettering, encode the views for the vision model. Run for the next page while the model
@@ -98,7 +107,7 @@ export async function preparePage(req: Pick<PipelineRequest, 'bytes' | 'mime' | 
     const t1 = performance.now();
     try {
       const stats: DetectorStats = { windows: 0, runMs: 0, waitMs: 0 };
-      prep.detections = await detectPage(original, deps.detect!, deps.backend, undefined, stats);
+      prep.detections = await remembered(deps.detect!, await pictureKey(req.bytes), () => detectPage(original, deps.detect!, deps.backend, undefined, stats));
       prep.detectorMs = Math.round(performance.now() - t1);
       prep.detectorStats = stats;
       if (checksText(req)) prep.textCheck = { lines: prep.detections.length, letters: 0, noText: !detectorFindsText(prep.detections), ms: prep.detectorMs };
@@ -113,7 +122,7 @@ export async function preparePage(req: Pick<PipelineRequest, 'bytes' | 'mime' | 
     const t2 = performance.now();
     try {
       const pieces = ocrPieces(prep.detections, original.width, original.height);
-      prep.reads = { pieces, results: await readPieces(deps.ocr, original, pieces, req.config.sourceLang), ms: 0 };
+      prep.reads = { pieces, results: await remembered(deps.ocr, `${await pictureKey(req.bytes)}|${req.config.sourceLang}|${JSON.stringify(pieces)}`, () => readPieces(deps.ocr!, original, pieces, req.config.sourceLang)), ms: 0 };
       prep.reads.ms = Math.round(performance.now() - t2);
       prep.readFor = req.config.sourceLang;
     } catch (e) {
@@ -148,7 +157,11 @@ function usesDetector(req: Pick<PipelineRequest, 'config' | 'generic'>, deps: St
 /** Text recognition in this browser (PaddleOCR, see ocr/paddle.ts): the text of one piece of a page. */
 type ReadResult = { text: string; lines: { box: Box; text: string; score: number; vertical: boolean }[] };
 /** Reads one piece of a page; `all` (when there) reads every piece of a page in one go (faster). */
-export type TextReader = ((px: PixelData, lang: string) => Promise<ReadResult>) & { all?: (pieces: PixelData[], lang: string) => Promise<ReadResult[]> };
+export type TextReader = ((px: PixelData, lang: string) => Promise<ReadResult>) & {
+  all?: (pieces: PixelData[], lang: string) => Promise<ReadResult[]>;
+  /** Where it reads now: the video card or the processor (shown with the page's times). */
+  ep?: () => 'webgpu' | 'wasm';
+};
 
 /**
  * The pieces of a page read by the recognition: the detector's text boxes put together, each with a
@@ -773,6 +786,9 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   if (!config.vision) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: 'No vision provider' });
   // Recognition in this browser: the picture never goes to a model, a text model translates.
   const ocrMode = !!config.ocr && !req.generic;
+  /** Time the recognition read the pieces now (0 when read ahead), and where. */
+  let ocrMs = 0;
+  let ocrEp: 'webgpu' | 'wasm' | undefined;
   if (ocrMode && !deps.ocr) throw new AppError('SETUP_NEEDED', { retryable: false, detail: tr('Скачайте модели распознавания текста (Настройки → Режим работы ИИ → Распознавание).') });
   if (!ocrMode && !config.vision.vision) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: `${config.vision.label} does not accept images; pick a vision model or use the engine` });
   if (!ocrMode) assertPrivacy(config.privacy, config.vision, 'image');
@@ -816,7 +832,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   if (!dets && usesDetector(req, deps)) {
     const t1 = performance.now();
     try {
-      dets = await detectPage(original, deps.detect!, deps.backend, signal);
+      dets = await remembered(deps.detect!, await pictureKey(req.bytes), () => detectPage(original, deps.detect!, deps.backend, signal));
     } catch (e) {
       if ((e as Error)?.name === 'AbortError') throw e;
     }
@@ -846,8 +862,10 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     // Read ahead while the previous page was translated (the same detections, the same language)?
     const ahead = prep.reads && prep.readFor === config.sourceLang && prep.detections === dets ? prep.reads : undefined;
     const pieces = ahead?.pieces ?? ocrPieces(dets, original.width, original.height);
-    const reads = ahead?.results ?? (await readPieces(deps.ocr!, original, pieces, config.sourceLang, (n) => stage('ocr', n / pieces.length)));
+    const reads = ahead?.results ?? (await remembered(deps.ocr!, `${await pictureKey(req.bytes)}|${config.sourceLang}|${JSON.stringify(pieces)}`, () => readPieces(deps.ocr!, original, pieces, config.sourceLang, (n) => stage('ocr', n / pieces.length))));
     if (ahead) addStep(debug, `text read ahead (while the page before was translated): ${ahead.ms} ms`);
+    ocrMs = ahead ? 0 : Math.round(performance.now() - t0);
+    ocrEp = deps.ocr?.ep?.();
     stage('ocr', 1);
     for (const [i, b] of pieces.entries()) {
       const r = reads[i];
@@ -1355,8 +1373,10 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         // Decoded ahead (prefetch): the time it took then; it was not spent waiting now.
         decodeMs: prep.decodeMs,
         ...(prep.textCheck ? { textCheckMs: prep.textCheck.ms } : {}),
-        detectMs: Math.round(tDetected - tDecoded),
-        ocrMs: 0,
+        // Finding the text (the recognition's reading on its own line).
+        detectMs: Math.max(0, Math.round(tDetected - tDecoded) - ocrMs),
+        ocrMs,
+        ...(ocrEp ? { ocrEp } : {}),
         translateMs: blocksOut.length ? Math.round(tTranslated - tDetected) : 0,
         // Includes inpaintMs (as before LaMa was measured on its own).
         cleanMs: blocksOut.length ? Math.round(tCleaned - tTranslated) : 0,

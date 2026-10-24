@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createCanvas } from '@napi-rs/canvas';
 import { describe, expect, it } from 'vitest';
-import { ctcDecode, detBoxes, readPiece, readPieces, recDictionary } from '../src/ocr/paddle';
+import { ctcDecode, detBoxes, GPU_SHAPES, readPiece, readPieces, recDictionary } from '../src/ocr/paddle';
 
 // The real networks (PP-OCRv6 small): only where they are at hand (OCR_MODELS=folder with the .onnx files).
 const DIR = process.env.OCR_MODELS ?? '';
@@ -72,5 +72,11 @@ describe.skipIf(!have)('PaddleOCR networks (local check)', () => {
     const both = await readPieces([{ width: 420, height: 200, data: px.data }, { width: 300, height: 120, data: g2.getImageData(0, 0, 300, 120).data }], counted, dict);
     expect(both.map((x) => x.text)).toEqual(['WHAT ARE YOU DOING HERE?', 'RUN AWAY']);
     expect(recRuns).toBe(1);
+    // For a video card: a few fixed sizes (each compiled once), the same texts.
+    const shapes = new Set<string>();
+    const fixed = async (net: 'det' | 'rec', t: { data: Float32Array; dims: number[] }) => (shapes.add(`${net}:${t.dims.join('x')}`), run(net, t));
+    const onCard = await readPieces([{ width: 420, height: 200, data: px.data }, { width: 300, height: 120, data: g2.getImageData(0, 0, 300, 120).data }], fixed, dict, { shapes: GPU_SHAPES });
+    expect(onCard.map((x) => x.text)).toEqual(['WHAT ARE YOU DOING HERE?', 'RUN AWAY']);
+    expect([...shapes].sort()).toEqual(['det:1x3x320x320', 'det:1x3x640x640', 'rec:8x3x48x640'].sort());
   }, 60000);
 });

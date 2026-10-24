@@ -34,10 +34,16 @@ const files = {
   'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx': readFileSync(join(MODELS, 'PP-OCRv6_det_small.onnx')),
   'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx': readFileSync(join(MODELS, 'PP-OCRv6_rec_small.onnx')),
 };
-// Manga OCR (Japanese) when its files are in the same folder (from the models-1 release).
-const MANGA = ['manga-ocr-encoder-int8.onnx', 'manga-ocr-decoder-int8.onnx', 'manga-ocr-vocab.txt'];
-const haveManga = MANGA.every((f) => existsSync(join(MODELS, f)));
-if (haveManga) for (const f of MANGA) files[`https://github.com/kclazzy/AI-translate/releases/download/models-1/${f}`] = readFileSync(join(MODELS, f));
+// Manga OCR (Japanese) when its files are in the same folder: models-1 (the encoder, the alphabet)
+// and models-3 (the decoder that reads with a cache; the fp16 encoder for a video card is not asked
+// for here — the test browser has none).
+const MANGA = ['manga-ocr-encoder-int8.onnx', 'manga-ocr-vocab.txt'];
+const MANGA_FAST = ['manga-ocr-cross-int8.onnx', 'manga-ocr-step-int8.onnx'];
+const haveManga = [...MANGA, ...MANGA_FAST].every((f) => existsSync(join(MODELS, f)));
+if (haveManga) {
+  for (const f of MANGA) files[`https://github.com/kclazzy/AI-translate/releases/download/models-1/${f}`] = readFileSync(join(MODELS, f));
+  for (const f of MANGA_FAST) files[`https://github.com/kclazzy/AI-translate/releases/download/models-3/${f}`] = readFileSync(join(MODELS, f));
+}
 
 const ext = join(tmpdir(), 'ait-ext-ocr');
 if (existsSync(ext)) rmSync(ext, { recursive: true });
@@ -92,7 +98,7 @@ const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: false,
   ...(cdp ? { pipe: true, enableExtensions: [ext] } : {}),
-  args: [...(cdp ? [] : [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`]), '--no-sandbox', '--lang=ru', '--no-first-run', '--disable-gpu'],
+  args: [...(cdp ? [] : [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`]), '--no-sandbox', '--lang=ru', '--no-first-run', ...(process.env.E2E_WEBGPU ? ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader', '--enable-features=Vulkan'] : ['--disable-gpu'])],
   defaultViewport: { width: 1000, height: 1000 },
 });
 browser.on('targetcreated', async (t) => {
@@ -311,7 +317,7 @@ try {
     await studio.goto(`chrome-extension://${extId}/studio.html?view=settings`);
     // Japanese: Manga OCR comes by itself as well.
     const got = await studio.waitForSelector('[data-testid="manga-ocr-ready"]', { timeout: 90000 }).catch(() => null);
-    check('for Japanese Manga OCR is downloaded by itself (checked)', !!got && fetched.has('manga-ocr-encoder-int8.onnx') && fetched.has('manga-ocr-vocab.txt'), [...fetched].join(', '));
+    check('for Japanese Manga OCR is downloaded by itself (checked)', !!got && fetched.has('manga-ocr-encoder-int8.onnx') && fetched.has('manga-ocr-vocab.txt') && fetched.has('manga-ocr-step-int8.onnx') && fetched.has('manga-ocr-cross-int8.onnx') && !fetched.has('manga-ocr-decoder-int8.onnx'), [...fetched].join(', '));
     {
       await studio.evaluate(() => chrome.runtime.sendMessage({ type: 'settings-changed' })).catch(() => undefined);
       asked.length = 0;

@@ -44,6 +44,7 @@ export * from './pipeline/run';
 export * from './pipeline/debug';
 export * from './pipeline/selfcheck';
 export * from './pipeline/fallback';
+export { forgetRemembered } from './pipeline/memo';
 export * from './project/format';
 export * from './storage/idb';
 export * from './storage/secrets';

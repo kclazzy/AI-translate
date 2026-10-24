@@ -1,7 +1,7 @@
 import { deleteLama, downloadLama, lamaDownloaded, lamaInpainter, lamaKind, upgradeLama } from '../offscreen/lama';
 import { deleteDetector, detectorDownloaded, downloadDetector, textDetector } from '../offscreen/detector';
 import { deleteUpscaler, downloadUpscaler, upscaleNet, upscalerDownloaded } from '../offscreen/upscale';
-import { deleteMangaOcr, deleteOcr, downloadMangaOcr, downloadOcr, mangaOcrDownloaded, ocrDownloaded, readText } from '../offscreen/ocr';
+import { deleteMangaOcr, deleteOcr, downloadMangaOcr, downloadOcr, mangaOcrDownloaded, mangaOcrMb, ocrDeviceFor, ocrDownloaded, readText, setOcrDevice } from '../offscreen/ocr';
 import { browserBackend, TranslateService } from '@ait/core';
 import { downloadFile, type StudioPlatform } from '@ait/studio';
 import { db, loadSettings, saveSettings, secrets } from '../shared/store';
@@ -18,6 +18,7 @@ export function extensionPlatform(): StudioPlatform {
     // like the pages of a site do: the recognition and the detector of this browser, when downloaded
     // (the pipeline uses them only when the settings say so; a missing model shows what to download).
     service.reader = readText;
+    void loadSettings().then((s) => setOcrDevice(ocrDeviceFor(s)), () => undefined);
     service.detector = async (img, signal) => {
       if (!(await detectorDownloaded())) throw new Error('The text detector is not downloaded');
       return textDetector(img, signal);
@@ -55,7 +56,7 @@ export function extensionPlatform(): StudioPlatform {
         }
       : {}),
     // Text recognition (AI mode «Распознавание») on the same runtime.
-    ...(lamaHere ? { ocr: { downloaded: (korean?: boolean) => ocrDownloaded(korean), download: (p: (share: number) => void, korean?: boolean) => downloadOcr(p, undefined, korean), remove: deleteOcr, manga: { downloaded: mangaOcrDownloaded, download: (p: (share: number) => void) => downloadMangaOcr(p), remove: deleteMangaOcr } } } : {}),
+    ...(lamaHere ? { ocr: { downloaded: (korean?: boolean) => ocrDownloaded(korean), download: (p: (share: number) => void, korean?: boolean) => downloadOcr(p, undefined, korean), remove: deleteOcr, manga: { downloaded: mangaOcrDownloaded, download: (p: (share: number) => void) => downloadMangaOcr(p), remove: deleteMangaOcr, mb: mangaOcrMb } } } : {}),
     ...(browserTranslatorHere() ? { browserTranslator: { status: translatorStatus, prepare: prepareTranslator } } : {}),
     notifyResultChanged: (key) => void chrome.runtime.sendMessage({ type: 'result-changed', key }).catch(() => undefined),
     version: chrome.runtime.getManifest().version,

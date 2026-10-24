@@ -1,4 +1,4 @@
-import { AppError, encodeAtOnce, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
+import { AppError, encodeAtOnce, forgetRemembered, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
 import { loadBundledFonts, loadUserFonts } from '@ait/studio/fonts';
 import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
 import { buildAnalysisPack, buildProblemReport, type AnalysisPage } from '@ait/studio/problem-report';
@@ -10,7 +10,7 @@ import { lamaDownloaded, lamaInpainter, releaseLama } from './lama';
 import { detectorDownloaded, releaseDetector, textDetector } from './detector';
 import { releaseUpscaler, upscaleNet, upscalerDownloaded } from './upscale';
 import { gpuFetch, setWorkWaiting } from './gpuLane';
-import { ocrDownloaded, readText } from './ocr';
+import { ocrDeviceFor, ocrDownloaded, readText, setOcrDevice } from './ocr';
 import '../shared/browserTranslate';
 import { setUiLang, tr } from '@ait/core/i18n';
 
@@ -303,6 +303,7 @@ async function prepare() {
   // translates what recognition reads (see fallbackConfig).
   service.detector = (await detectorDownloaded()) ? textDetector : undefined;
   service.reader = (await ocrDownloaded(settings.sourceLang.split('-')[0] === 'ko')) ? readText : undefined;
+  setOcrDevice(ocrDeviceFor(settings));
   // Small scans twice as big, when switched on and downloaded.
   service.upscaler = settings.upscaleMode === 'browser' && (await upscalerDownloaded()) ? upscaleNet : undefined;
   // This document can live for days: follow a language changed since it opened.
@@ -549,6 +550,8 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       await releaseDetector();
       await releaseLama();
       await releaseUpscaler();
+      // The boxes and texts kept for the last pages go too.
+      forgetRemembered();
       return { ok: true };
     case 'status':
       return Object.fromEntries(msg.jobIds.map((id) => [id, jobStatus(id)]));

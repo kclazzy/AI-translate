@@ -41,7 +41,7 @@ export interface StudioPlatform {
     download(progress: (share: number) => void, korean?: boolean): Promise<void>;
     remove(): Promise<void>;
     /** Optional: Manga OCR, the reader for Japanese manga (a whole bubble at once). */
-    manga?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void> };
+    manga?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void>; /** Megabytes still to download. */ mb?(): Promise<number> };
   };
   /** Optional: the browser's own translator (Chrome's Translator API) — state of a language pair, and its download (from a click). */
   browserTranslator?: {
