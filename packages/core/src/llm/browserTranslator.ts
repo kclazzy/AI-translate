@@ -79,3 +79,16 @@ export async function translateWithBrowser(texts: string[], from: string, to: st
   const out = await impl(texts, src, dst, signal);
   return texts.map((t, i) => out[i]?.trim() || t);
 }
+
+/**
+ * The source languages whose packs the browser's translator gets right away (manga, manhwa,
+ * manhua, comics and the big European languages), so «авто» and a change of language just work.
+ */
+export const TRANSLATOR_MAIN_LANGS = ['en', 'ja', 'ko', 'zh', 'zh-Hant', 'es', 'fr', 'de', 'pt', 'it'];
+
+/** Language pairs to prepare for these languages: the chosen source first, then the main ones (into the target). */
+export function translatorPairs(sourceLang: string, targetLang: string): [string, string][] {
+  const to = translatorLang(targetLang);
+  const first = sourceLang === 'auto' ? [] : [translatorLang(sourceLang)];
+  return [...new Set([...first, ...TRANSLATOR_MAIN_LANGS])].filter((l) => l !== to).map((l) => [l, to]);
+}

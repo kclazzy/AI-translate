@@ -1,5 +1,5 @@
-import { mangaOcrRead, readPiece, recDictionary, type MangaOcrRun, type OcrResult, type OcrRun, type PixelData } from '@ait/core';
-import { GPU_NETS, GpuTimeout, NETS_LIMIT_MS, NETS_LOAD_LIMIT_MS, onGpu, releaseWhenIdle, withLimit } from './gpuLane';
+import { mangaOcrRead, readPiece, readPieces, recDictionary, type MangaOcrRun, type OcrResult, type OcrRun, type PixelData } from '@ait/core';
+import { releaseWhenIdle, withLimit } from './gpuLane';
 import { cached, downloadChecked, loadOrt, MANGA_OCR, MANGA_OCR_URLS, MODELS_CACHE, OCR_DET_URL, OCR_REC_KO_URL, OCR_REC_URL, ORT_WASM_URL, removeModel, type ModelFile } from './ortRuntime';
 
 /**
@@ -45,7 +45,6 @@ interface Loaded {
   korean: boolean;
 }
 let session: Promise<Loaded> | null = null;
-let gpuBroken = false;
 
 function load(korean: boolean): Promise<Loaded> {
   if (session) {
@@ -67,14 +66,10 @@ async function open(korean: boolean): Promise<Loaded> {
   let dict = recDictionary(recBytes);
   if (!dict && korean) dict = (await (await fetch(KO_DICT_URL)).text()).split(/\r?\n/).filter((l, i, a) => l || i < a.length - 1);
   if (!dict) throw new Error('The recogniser has no alphabet');
-  const gpu = !gpuBroken && typeof navigator !== 'undefined' && 'gpu' in navigator;
-  const make = async (bytes: Uint8Array) => {
-    try {
-      return await ort.InferenceSession.create(bytes, { executionProviders: gpu ? ['webgpu', 'wasm'] : ['wasm'] });
-    } catch {
-      return ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] });
-    }
-  };
+  // On the processor: the pieces of a page all have other sizes, and on the video card every new size
+  // compiles the network's shaders again (seconds per piece); these small networks are fast here, and
+  // the card stays free for the detector, LaMa and the model.
+  const make = (bytes: Uint8Array) => ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] });
   return { ort, det: await make(new Uint8Array(await detHit.arrayBuffer())), rec: await make(recBytes), dict, korean };
 }
 
@@ -93,38 +88,42 @@ export async function releaseOcr(): Promise<void> {
 let chain: Promise<unknown> = Promise.resolve();
 let cancelIdle: (() => void) | undefined;
 
+/** Time for one piece (and a little more for loading the networks the first time). */
+const PIECE_MS = 8_000;
+const LOAD_MS = 30_000;
+
 /** Read one piece of a page (a bubble or caption): its text in reading order. */
 export async function readText(px: PixelData, lang: string): Promise<OcrResult> {
   // Japanese: Manga OCR reads the whole bubble (vertical columns, furigana), when it is downloaded.
   if (lang.split('-')[0] === 'ja' && (await mangaOcrDownloaded())) return readManga(px);
-  return readLines(px, lang);
+  return (await readLines([px], lang, false))[0];
 }
 
-function readLines(px: PixelData, lang: string): Promise<OcrResult> {
+/** Every piece of a page at once: the lines of all of them read together (see readPieces). */
+readText.all = async (pieces: PixelData[], lang: string): Promise<OcrResult[]> => {
+  if (lang.split('-')[0] === 'ja' && (await mangaOcrDownloaded())) {
+    const out: OcrResult[] = [];
+    for (const px of pieces) out.push(await readManga(px));
+    return out;
+  }
+  return readLines(pieces, lang, true);
+};
+
+function readLines(pieces: PixelData[], lang: string, batch: boolean): Promise<OcrResult[]> {
   cancelIdle?.();
   const korean = lang.split('-')[0] === 'ko';
-  const limitMs = session ? NETS_LIMIT_MS : NETS_LOAD_LIMIT_MS;
+  const limitMs = (session ? 0 : LOAD_MS) + PIECE_MS * Math.max(1, pieces.length);
   const job = chain.then(() =>
-    onGpu(
-      GPU_NETS,
-      async () => {
-        const L = await load(korean);
-        const run: OcrRun = async (net, t) => {
-          const s = net === 'det' ? L.det : L.rec;
-          const out = await s.run({ [s.inputNames[0]]: new L.ort.Tensor('float32', t.data, t.dims) });
-          const o = out[s.outputNames[0]];
-          return { data: o.data as Float32Array, dims: [...o.dims] };
-        };
-        return readPiece(px, run, L.dict);
-      },
-      { limitMs },
-    ).catch((e: unknown) => {
-      if (e instanceof GpuTimeout) {
-        gpuBroken = true;
-        void releaseOcr();
-      }
-      throw e;
-    }),
+    withLimit(async () => {
+      const L = await load(korean);
+      const run: OcrRun = async (net, t) => {
+        const s = net === 'det' ? L.det : L.rec;
+        const out = await s.run({ [s.inputNames[0]]: new L.ort.Tensor('float32', t.data, t.dims) });
+        const o = out[s.outputNames[0]];
+        return { data: o.data as Float32Array, dims: [...o.dims] };
+      };
+      return batch ? readPieces(pieces, run, L.dict) : [await readPiece(pieces[0], run, L.dict)];
+    }, limitMs),
   );
   chain = job.catch(() => undefined);
   void job.finally(() => {

@@ -1,13 +1,13 @@
 import '@ait/core/i18n/all';
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { aiModesAvailable, applyAiMode, applyOcrTranslator, translatorLang, BROWSER_TRANSLATOR_ID, browserTranslateSupported, applyPreset, checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, modelTiers, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, profilesForLanguage, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
+import { aiModesAvailable, applyAiMode, applyOcrTranslator, translatorLang, translatorPairs, BROWSER_TRANSLATOR_ID, browserTranslateSupported, applyPreset, checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, modelTiers, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, profilesForLanguage, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
 import { AiModeSwitch } from '@ait/studio/ai-mode';
 import { ocrDownloaded } from '../offscreen/ocr';
-import { translatorStatus } from '../shared/browserTranslate';
+import { prepareTranslator, translatorStatus } from '../shared/browserTranslate';
 import { detectorDownloaded } from '../offscreen/detector';
 import './popup.css';
 import type { PageLangs, SpeedStats } from '../shared/messages';
@@ -219,7 +219,23 @@ function Popup() {
       {/* The AI mode first: seen as soon as the window opens. */}
       <div className="ait-field pp-mode">
         <span>{tr('Режим работы ИИ')}</span>
-        <AiModeSwitch settings={s} update={update} compact />
+        <AiModeSwitch
+          settings={s}
+          update={update}
+          compact
+          onPick={(m, next) => {
+            if (m !== 'ocr') return;
+            // From this click: the browser's translator gets its language packs (the main languages)…
+            if (next.visionProviderId === BROWSER_TRANSLATOR_ID) for (const [a, b] of translatorPairs(next.sourceLang, next.targetLang)) void prepareTranslator(a, b).catch(() => undefined);
+            // …and the models, when missing, download on the settings page (its card shows the progress).
+            void (async () => {
+              const ko = next.sourceLang.split('-')[0] === 'ko';
+              const ready = (await detectorDownloaded().catch(() => false)) && (await ocrDownloaded(ko).catch(() => false));
+              setOcrReady(ready);
+              if (!ready) open('studio.html?view=settings&setup=ocr');
+            })();
+          }}
+        />
       </div>
 
       {s.readMode === 'ocr' && ocrReady === false ? (

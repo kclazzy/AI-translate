@@ -1,6 +1,9 @@
 import { aiModeOf, aiModesAvailable, applyAiMode, applyOcrTranslator, BROWSER_TRANSLATOR_ID, ocrTranslators, type AiMode, type AppSettings } from '@ait/core';
 import { tr } from '@ait/core/i18n';
+import { useContext } from 'react';
 import { OcrModelsCard } from './ocr';
+import { startOcrSetup } from './ocrSetup';
+import { PlatformContext } from './platform';
 
 const MODES: AiMode[] = ['ollama', 'cloud', 'ocr'];
 
@@ -23,7 +26,8 @@ export function aiModeHint(m: AiMode): string {
  * shown greyed out with what it needs. The settings page (`force`) also offers the separate Python
  * engine, as an option for advanced users.
  */
-export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = true }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; compact?: boolean; force?: boolean; ocrHere?: boolean }) {
+export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = true, onPick }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; compact?: boolean; force?: boolean; ocrHere?: boolean; onPick?: (m: AiMode, next: AppSettings) => void }) {
+  const platform = useContext(PlatformContext);
   const now = aiModeOf(s);
   const can = { ...aiModesAvailable(s), ...(ocrHere ? {} : { ocr: false }) };
   const need = (m: AiMode) => (m === 'engine' ? tr('Укажите адрес движка в настройках') : m === 'cloud' ? tr('Добавьте онлайн-сервер с моделью, читающей картинки') : m === 'ocr' ? (ocrHere ? tr('Нужен Chrome 138 или новее (встроенный переводчик) либо сервер с моделью для перевода') : tr('Распознавание в браузере доступно в расширении для ПК')) : tr('Добавьте Ollama или LM Studio'));
@@ -42,7 +46,12 @@ export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = tr
               title={enabled ? aiModeHint(m) : need(m)}
               onClick={() => {
                 const patch = applyAiMode(s, m) ?? (m === 'engine' ? { pipeline: 'engine' as const } : null);
-                if (patch) update(patch);
+                if (!patch) return;
+                update(patch);
+                const next = { ...s, ...patch };
+                // «Распознавание»: everything it needs is downloaded right away (from this click).
+                if (m === 'ocr' && platform) void startOcrSetup(platform, next);
+                onPick?.(m, next);
               }}
             >
               {label(m)}
@@ -65,13 +74,23 @@ export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = tr
 
 /** What translates the recognised text: the browser's own translator or one of the model servers. */
 function OcrTranslatorPick({ settings: s, update }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void }) {
+  const platform = useContext(PlatformContext);
   const list = ocrTranslators(s);
   if (!list.length) return null;
   const now = s.visionProviderId ?? '';
   return (
     <label className="ait-field" data-testid="ocr-translator">
       <span>{tr('Чем переводить')}</span>
-      <select className="ait-select" value={now} onChange={(e) => update(applyOcrTranslator(s, e.target.value))}>
+      <select
+        className="ait-select"
+        value={now}
+        onChange={(e) => {
+          const patch = applyOcrTranslator(s, e.target.value);
+          update(patch);
+          // The browser's translator: its language pack right away (a choice made by the user counts as a click).
+          if (e.target.value === BROWSER_TRANSLATOR_ID && platform) void startOcrSetup(platform, { ...s, ...patch });
+        }}
+      >
         {list.map((p) => (
           <option key={p.id} value={p.id}>
             {p.id === BROWSER_TRANSLATOR_ID ? tr('Встроенный переводчик браузера — без Ollama и интернета') : `${p.label} — ${p.model}`}

@@ -162,6 +162,10 @@ try {
   });
   const afterOcr = await readModeOf();
   const notice = await popup.$('[data-testid="ocr-missing"]');
+  // Missing models: the settings page opened to download them (the popup is then behind it).
+  const setupTab = await browser.waitForTarget((t) => t.url().includes('setup=ocr'), { timeout: 5000 }).catch(() => null);
+  check('choosing it with the models missing opens their download', !!setupTab);
+  await popup.bringToFront();
   await popup.click('[data-mode="ollama"]');
   await new Promise((r) => setTimeout(r, 600));
   check('one click switches to recognition (models offered) and back', afterOcr === 'ocr' && !!notice && (await readModeOf()) === 'vision', `${afterOcr} → ${await readModeOf()}, notice=${!!notice}`);

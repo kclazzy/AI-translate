@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createCanvas } from '@napi-rs/canvas';
 import { describe, expect, it } from 'vitest';
-import { ctcDecode, detBoxes, readPiece, recDictionary } from '../src/ocr/paddle';
+import { ctcDecode, detBoxes, readPiece, readPieces, recDictionary } from '../src/ocr/paddle';
 
 // The real networks (PP-OCRv6 small): only where they are at hand (OCR_MODELS=folder with the .onnx files).
 const DIR = process.env.OCR_MODELS ?? '';
@@ -59,5 +59,18 @@ describe.skipIf(!have)('PaddleOCR networks (local check)', () => {
     };
     const r = await readPiece({ width: 420, height: 200, data: px.data }, run, dict);
     expect(r.text).toBe('WHAT ARE YOU DOING HERE?');
+    // All the pieces of a page at once: the same texts, fewer runs of the reader.
+    const c2 = createCanvas(300, 120);
+    const g2 = c2.getContext('2d') as any;
+    g2.fillStyle = '#fff';
+    g2.fillRect(0, 0, 300, 120);
+    g2.fillStyle = '#000';
+    g2.font = 'bold 30px sans-serif';
+    g2.fillText('RUN AWAY', 40, 70);
+    let recRuns = 0;
+    const counted = async (net: 'det' | 'rec', t: { data: Float32Array; dims: number[] }) => (net === 'rec' && recRuns++, run(net, t));
+    const both = await readPieces([{ width: 420, height: 200, data: px.data }, { width: 300, height: 120, data: g2.getImageData(0, 0, 300, 120).data }], counted, dict);
+    expect(both.map((x) => x.text)).toEqual(['WHAT ARE YOU DOING HERE?', 'RUN AWAY']);
+    expect(recRuns).toBe(1);
   }, 60000);
 });

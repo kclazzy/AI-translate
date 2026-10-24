@@ -130,7 +130,9 @@ function usesDetector(req: Pick<PipelineRequest, 'config' | 'generic'>, deps: St
 }
 
 /** Text recognition in this browser (PaddleOCR, see ocr/paddle.ts): the text of one piece of a page. */
-export type TextReader = (px: PixelData, lang: string) => Promise<{ text: string; lines: { box: Box; text: string; score: number; vertical: boolean }[] }>;
+type ReadResult = { text: string; lines: { box: Box; text: string; score: number; vertical: boolean }[] };
+/** Reads one piece of a page; `all` (when there) reads every piece of a page in one go (faster). */
+export type TextReader = ((px: PixelData, lang: string) => Promise<ReadResult>) & { all?: (pieces: PixelData[], lang: string) => Promise<ReadResult[]> };
 
 export interface StandaloneDeps {
   backend: ImageBackend;
@@ -807,10 +809,21 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     const pieces = pieceBoxes(found.map((d) => d.box), original.width, original.height).map((b) => clampBox(expandBox(b, Math.max(10, Math.round(Math.min(b[2], b[3]) * 0.25))), original.width, original.height));
     const blocks: VisionAnswer['blocks'] = [];
     const t0 = performance.now();
+    const reader = deps.ocr!;
+    const reads = reader.all
+      ? await reader.all(pieces.map((b) => original.getRegion(b[0], b[1], b[2], b[3])), config.sourceLang)
+      : await (async () => {
+          const out: ReadResult[] = [];
+          for (const [i, b] of pieces.entries()) {
+            out.push(await reader(original.getRegion(b[0], b[1], b[2], b[3]), config.sourceLang));
+            stage('ocr', (i + 1) / pieces.length);
+          }
+          return out;
+        })();
+    stage('ocr', 1);
     for (const [i, b] of pieces.entries()) {
-      const r = await deps.ocr!(original.getRegion(b[0], b[1], b[2], b[3]), config.sourceLang);
-      stage('ocr', (i + 1) / pieces.length);
-      if (!r.text) continue;
+      const r = reads[i];
+      if (!r?.text) continue;
       const inside = found.filter((d) => overlapRatio(d.box, b) > 0.5);
       const free = inside.length > 0 && inside.every((d) => d.kind === 'text_free');
       blocks.push({

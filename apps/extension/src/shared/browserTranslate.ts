@@ -70,10 +70,28 @@ async function translateAll(texts: string[], from: string, to: string, signal?: 
   let out = texts;
   for (const [a, b] of steps) {
     const t = await open(a, b);
-    const next: string[] = [];
-    for (const line of out) next.push(line.trim() ? await t.translate(line, { signal }) : line);
-    out = next;
+    out = await translateLines(t, out, signal);
   }
+  return out;
+}
+
+/**
+ * All the lines of a page in one request, one per line (much faster than a request each); when the
+ * answer does not come back with as many lines, line by line.
+ */
+async function translateLines(t: TranslatorLike, lines: string[], signal?: AbortSignal): Promise<string[]> {
+  const idx = lines.map((l, i) => (l.trim() ? i : -1)).filter((i) => i >= 0);
+  const out = [...lines];
+  if (!idx.length) return out;
+  const flat = idx.map((i) => lines[i].replace(/\s*\n\s*/g, ' ').trim());
+  if (flat.length > 1) {
+    const joined = (await t.translate(flat.join('\n'), { signal })).split(/\r?\n/).map((x) => x.trim());
+    if (joined.length === flat.length && joined.every(Boolean)) {
+      idx.forEach((i, k) => (out[i] = joined[k]));
+      return out;
+    }
+  }
+  for (const [k, i] of idx.entries()) out[i] = await t.translate(flat[k], { signal });
   return out;
 }
 

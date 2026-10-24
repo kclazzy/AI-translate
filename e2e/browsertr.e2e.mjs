@@ -3,7 +3,8 @@
 // The browser's Translator API is stood in for on the page (test browsers have none).
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
 import puppeteer from 'puppeteer-core';
 
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -24,6 +25,8 @@ const manifest = JSON.parse(readFileSync(join(ext, 'manifest.json'), 'utf8'));
 delete manifest.minimum_chrome_version;
 writeFileSync(join(ext, 'manifest.json'), JSON.stringify(manifest));
 
+const ortDir = dirname(createRequire(join(ROOT, 'apps/extension/package.json')).resolve('onnxruntime-web'));
+const ORT_VERSION = JSON.parse(readFileSync(join(ortDir, '../package.json'), 'utf8')).version;
 const cdp = !!process.env.E2E_CDP_EXTENSIONS;
 const browser = await puppeteer.launch({
   env: { ...process.env, LANG: 'ru_RU.UTF-8', LANGUAGE: 'ru' },
@@ -96,6 +99,20 @@ try {
     });
   // No model server at all: neither Ollama nor an online one.
   await setSettings({ providers: [], visionProviderId: null, translationProviderId: null, pipeline: 'standalone', readMode: 'vision', sourceLang: 'ja', targetLang: 'ru', onboarded: true, privacy: 'local' });
+  // The recognition models as if downloaded (only their presence is checked before a translation).
+  await studio.evaluate(async (ver) => {
+    const c = await caches.open('ait-models');
+    const urls = [
+      `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ver}/dist/ort-wasm-simd-threaded.jsep.wasm`,
+      'https://huggingface.co/ogkalu/comic-text-and-bubble-detector/resolve/main/detector_int8.onnx',
+      'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx',
+      'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx',
+      'https://github.com/kclazzy/AI-translate/releases/download/models-1/manga-ocr-encoder-int8.onnx',
+      'https://github.com/kclazzy/AI-translate/releases/download/models-1/manga-ocr-decoder-int8.onnx',
+      'https://github.com/kclazzy/AI-translate/releases/download/models-1/manga-ocr-vocab.txt',
+    ];
+    for (const u of urls) await c.put(u, new Response(new Uint8Array(4)));
+  }, ORT_VERSION);
   await studio.reload();
   const btn = await studio.waitForSelector('[data-testid="ai-mode"] [data-mode="ocr"]', { timeout: 15000 });
   const enabled = await btn.evaluate((b) => !b.disabled);
@@ -107,14 +124,11 @@ try {
   check('the browser\'s own translator translates in it', s1.readMode === 'ocr' && s1.visionProviderId === 'browser-translator', `${s1.readMode} ${s1.visionProviderId}`);
   const label = await studio.$eval('[data-testid="ocr-translator"] select', (el) => el.selectedOptions[0]?.textContent ?? '');
   check('the choice is shown as the browser translator', /браузер/i.test(label), label);
-  // The pack card: only after the recognition models (stand-in: the cache entries the card checks).
-  const hasPackCard = await studio.waitForSelector('[data-testid="translator-pack"] button', { timeout: 15000 }).catch(() => null);
-  check('the card offers the language pack ja → ru', !!hasPackCard);
-  if (hasPackCard) {
-    await hasPackCard.click();
-    const ok = await studio.waitForSelector('[data-testid="translator-pack-ready"]', { timeout: 15000 }).catch(() => null);
-    check('«Скачать языковой пакет» downloads it', !!ok);
-  }
+  // The models count as downloaded here (cache entries); choosing the mode gets the language packs
+  // of the main languages at once, from the click.
+  const ready = await studio.waitForSelector('[data-testid="ocr-ready"]', { timeout: 20000 }).catch(() => null);
+  const packs = await studio.evaluate(() => JSON.parse(localStorage.getItem('fake-tr') ?? '[]'));
+  check('choosing the mode downloads the language packs of the main languages', !!ready && packs.length >= 9 && packs.includes('ja>ru') && packs.includes('en>ru') && packs.includes('ko>ru'), JSON.stringify(packs));
   await studio.screenshot({ path: join(OUT, 'browsertr.png') });
 } catch (e) {
   check('no crash', false, String(e?.stack ?? e));

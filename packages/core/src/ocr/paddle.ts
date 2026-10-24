@@ -191,11 +191,8 @@ export function ctcDecode(out: OcrTensor, dict: string[]): { text: string; score
   return res;
 }
 
-/**
- * Read the text of one piece of a page (a bubble, a caption): its lines found, read and put in
- * reading order — top to bottom for lines, right to left for vertical columns.
- */
-export async function readPiece(px: PixelData, run: OcrRun, dict: string[], opts: { minScore?: number } = {}): Promise<OcrResult> {
+/** The lines the detector finds in a piece: boxes in its pixels, crops (vertical ones turned to lie flat). */
+async function findLines(px: PixelData, run: OcrRun): Promise<{ boxes: Box[]; vertical: boolean[]; crops: PixelData[] }> {
   const det = detInput(px);
   const prob = await run('det', det.input);
   const [, , ph, pw] = prob.dims.length === 4 ? prob.dims : [1, 1, det.h, det.w];
@@ -206,10 +203,12 @@ export async function readPiece(px: PixelData, run: OcrRun, dict: string[], opts
       return [x, y, Math.max(1, Math.min(px.width - x, Math.ceil(b[2]))), Math.max(1, Math.min(px.height - y, Math.ceil(b[3])))] as Box;
     })
     .filter((b) => b[2] >= 4 && b[3] >= 4);
-  if (!boxes.length) return { text: '', lines: [] };
   const vertical = boxes.map((b) => b[3] >= b[2] * 1.5);
-  const crops = boxes.map((b, i) => (vertical[i] ? rotateLeft(crop(px, b)) : crop(px, b)));
-  // Lines of a similar length go together (less padding), at most 16 at a time.
+  return { boxes, vertical, crops: boxes.map((b, i) => (vertical[i] ? rotateLeft(crop(px, b)) : crop(px, b))) };
+}
+
+/** Read line crops in batches of lines of a similar length (less padding), at most 16 at a time. */
+async function readLines(crops: PixelData[], run: OcrRun, dict: string[]): Promise<{ text: string; score: number }[]> {
   const order = crops.map((_, i) => i).sort((a, b) => crops[a].width / crops[a].height - crops[b].width / crops[b].height);
   const read: { text: string; score: number }[] = new Array(crops.length);
   for (let i = 0; i < order.length; i += 16) {
@@ -218,7 +217,11 @@ export async function readPiece(px: PixelData, run: OcrRun, dict: string[], opts
     const dims = out.dims.length === 3 ? out.dims : [group.length, out.data.length / group.length / dict.length, dict.length];
     for (const [k, r] of ctcDecode({ data: out.data, dims }, dict).entries()) read[group[k]] = r;
   }
-  const minScore = opts.minScore ?? 0.5;
+  return read;
+}
+
+/** The lines read in a piece put together in reading order. */
+function assemble(boxes: Box[], vertical: boolean[], read: { text: string; score: number }[], minScore: number): OcrResult {
   const lines: OcrLine[] = boxes
     .map((box, i) => ({ box, text: read[i].text, score: read[i].score, vertical: vertical[i] }))
     .filter((l) => l.text && l.score >= minScore);
@@ -233,6 +236,33 @@ export async function readPiece(px: PixelData, run: OcrRun, dict: string[], opts
   // CJK lines join without spaces; others with one.
   const cjk = /[぀-ヿ㐀-鿿]/.test(lines.map((l) => l.text).join(''));
   return { text: lines.map((l) => l.text).join(cjk ? '' : ' ').replace(/\s+/g, ' ').trim(), lines };
+}
+
+/**
+ * Read one piece of a page (a bubble, a caption): the lines the detector finds, each read, put in
+ * reading order — top to bottom for lines, right to left for vertical columns.
+ */
+export async function readPiece(px: PixelData, run: OcrRun, dict: string[], opts: { minScore?: number } = {}): Promise<OcrResult> {
+  const f = await findLines(px, run);
+  if (!f.boxes.length) return { text: '', lines: [] };
+  return assemble(f.boxes, f.vertical, await readLines(f.crops, run, dict), opts.minScore ?? 0.5);
+}
+
+/**
+ * All the pieces of a page at once: the lines of every piece found first, then read together in
+ * batches across the pieces (a page of short bubbles needs a few runs of the reader, not one each).
+ */
+export async function readPieces(pieces: PixelData[], run: OcrRun, dict: string[], opts: { minScore?: number } = {}): Promise<OcrResult[]> {
+  const found = [];
+  for (const px of pieces) found.push(await findLines(px, run));
+  const all = found.flatMap((f) => f.crops);
+  const read = all.length ? await readLines(all, run, dict) : [];
+  let at = 0;
+  return found.map((f) => {
+    const mine = read.slice(at, at + f.crops.length);
+    at += f.crops.length;
+    return f.boxes.length ? assemble(f.boxes, f.vertical, mine, opts.minScore ?? 0.5) : { text: '', lines: [] };
+  });
 }
 
 /**

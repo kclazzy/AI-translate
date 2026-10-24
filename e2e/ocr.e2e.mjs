@@ -174,10 +174,9 @@ try {
   await studio.reload();
   await studio.waitForSelector('[data-testid="ai-mode"] [data-mode="ocr"]', { timeout: 15000 });
   await studio.click('[data-testid="ai-mode"] [data-mode="ocr"]');
-  await studio.waitForSelector('[data-testid="ocr-models"] button', { timeout: 15000 });
-  await studio.click('[data-testid="ocr-models"] button');
+  // Nothing to press: choosing the mode downloads what it needs.
   const ready = await studio.waitForSelector('[data-testid="ocr-ready"]', { timeout: 90000 }).catch(() => null);
-  check('«Скачать» brings the detector and the recognition models', !!ready && fetched.has('PP-OCRv6_rec_small.onnx') && fetched.has('detector_int8.onnx'), [...fetched].join(', '));
+  check('choosing «Распознавание» brings the detector and the recognition models by itself', !!ready && fetched.has('PP-OCRv6_rec_small.onnx') && fetched.has('detector_int8.onnx'), [...fetched].join(', '));
   await studio.evaluate(() => chrome.runtime.sendMessage({ type: 'settings-changed' })).catch(() => undefined);
 
   const tab = await browser.newPage();
@@ -214,6 +213,20 @@ try {
   });
   check('the page gets the translation', stored.includes('Где ты?'), `${JSON.stringify(stored)} errors=${JSON.stringify(errors).slice(0, 400)}`);
   await tab.screenshot({ path: join(OUT, 'ocr.png') });
+
+  // «Замерить скорость» in this mode: the sample page is read in the settings page itself.
+  {
+    await studio.bringToFront();
+    const before = asked.length;
+    const clicked = await studio.evaluate(() => {
+      const b = [...document.querySelectorAll('[data-testid=speed-benchmark] button')].find((x) => x.textContent.includes('Замерить скорость'));
+      b?.click();
+      return !!b;
+    });
+    const table = clicked ? await studio.waitForSelector('[data-testid=speed-result] table', { timeout: 60000 }).catch(() => null) : null;
+    const text = await studio.$eval('[data-testid=speed-benchmark]', (e) => e.innerText).catch(() => '');
+    check('«Замерить скорость» works in «Распознавание»', !!table && /Всего/.test(text), `asked ${asked.length - before}× ` + text.replace(/\s+/g, ' ').slice(120, 700));
+  }
 
   // Without Ollama: the browser's own translator (a stand-in for Chrome's Translator API, put into
   // the extension's offscreen document where the pages are translated).
@@ -289,12 +302,10 @@ try {
       await new Promise((r) => (tx.oncomplete = r));
     });
     await studio.reload();
-    const offer = await studio.waitForSelector('[data-testid="manga-ocr"] button', { timeout: 15000 }).catch(() => null);
-    check('for Japanese the card offers Manga OCR', !!offer);
-    if (offer) {
-      await offer.click();
-      const got = await studio.waitForSelector('[data-testid="manga-ocr-ready"]', { timeout: 90000 }).catch(() => null);
-      check('«Скачать Manga OCR» brings its files (checked)', !!got && fetched.has('manga-ocr-encoder-int8.onnx') && fetched.has('manga-ocr-vocab.txt'), [...fetched].join(', '));
+    // Japanese: Manga OCR comes by itself as well.
+    const got = await studio.waitForSelector('[data-testid="manga-ocr-ready"]', { timeout: 90000 }).catch(() => null);
+    check('for Japanese Manga OCR is downloaded by itself (checked)', !!got && fetched.has('manga-ocr-encoder-int8.onnx') && fetched.has('manga-ocr-vocab.txt'), [...fetched].join(', '));
+    {
       await studio.evaluate(() => chrome.runtime.sendMessage({ type: 'settings-changed' })).catch(() => undefined);
       asked.length = 0;
       const tabJa = await browser.newPage();

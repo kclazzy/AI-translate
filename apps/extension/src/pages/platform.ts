@@ -1,6 +1,6 @@
 import { deleteLama, downloadLama, lamaDownloaded, lamaInpainter, lamaKind, upgradeLama } from '../offscreen/lama';
 import { deleteDetector, detectorDownloaded, downloadDetector, textDetector } from '../offscreen/detector';
-import { deleteMangaOcr, deleteOcr, downloadMangaOcr, downloadOcr, mangaOcrDownloaded, ocrDownloaded } from '../offscreen/ocr';
+import { deleteMangaOcr, deleteOcr, downloadMangaOcr, downloadOcr, mangaOcrDownloaded, ocrDownloaded, readText } from '../offscreen/ocr';
 import { browserBackend, TranslateService } from '@ait/core';
 import { downloadFile, type StudioPlatform } from '@ait/studio';
 import { db, loadSettings, saveSettings, secrets } from '../shared/store';
@@ -11,12 +11,23 @@ import { browserTranslatorHere, prepareTranslator, translatorStatus } from '../s
 const lamaHere = typeof caches !== 'undefined' && typeof WebAssembly !== 'undefined';
 
 export function extensionPlatform(): StudioPlatform {
+  const service = new TranslateService(db, secrets, browserBackend, loadSettings);
+  if (lamaHere) {
+    // Translations made on these pages (the speed test, pictures opened in the studio) read text
+    // like the pages of a site do: the recognition and the detector of this browser, when downloaded
+    // (the pipeline uses them only when the settings say so; a missing model shows what to download).
+    service.reader = readText;
+    service.detector = async (img, signal) => {
+      if (!(await detectorDownloaded())) throw new Error('The text detector is not downloaded');
+      return textDetector(img, signal);
+    };
+  }
   return {
     kind: 'extension',
     db,
     secrets,
     backend: browserBackend,
-    service: new TranslateService(db, secrets, browserBackend, loadSettings),
+    service,
     loadSettings,
     saveSettings,
     saveFile: downloadFile,
