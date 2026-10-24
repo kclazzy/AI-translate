@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@napi-rs/canvas": "^0.1.80",
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.6.5",
     "fake-indexeddb": "^6.2.6",
     "typescript": "^5.9.0",
     "vitest": "^4.0.0"
