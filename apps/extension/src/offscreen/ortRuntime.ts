@@ -137,7 +137,13 @@ export const MANGA_OCR: Record<'encoder' | 'decoder' | 'vocab', ModelFile> = {
   vocab: { url: `${MODELS_RELEASE}/manga-ocr-vocab.txt`, sha256: '5cb5c5586d98a2f331d9f8828e4586479b0611bfba5d8c3b6dadffc84d6a36a3', size: 30_216 },
 };
 export const MANGA_OCR_URLS = [MANGA_OCR.encoder.url, MANGA_OCR.decoder.url, MANGA_OCR.vocab.url];
-const RUNTIME_USERS = [LAMA_URL, LAMA_MANGA.url, ...MANGA_OCR_URLS, DETECTOR_URL, DETECTOR_FP32_URL, OCR_DET_URL, OCR_REC_URL, OCR_REC_KO_URL];
+/** The upscaler for small scans: waifu2x CUNet, art, denoise 1, 2× (nagadomi/nunif, MIT), in this repository's «models-2». */
+export const UPSCALER: ModelFile = {
+  url: 'https://github.com/kclazzy/AI-translate/releases/download/models-2/upscale-art-2x.onnx',
+  sha256: '5d3288a2847e51d8944002dc81aea76ef1a2879db33b8fb86d5953b4b1c442bf',
+  size: 5_178_788,
+};
+const RUNTIME_USERS = [LAMA_URL, LAMA_MANGA.url, ...MANGA_OCR_URLS, UPSCALER.url, DETECTOR_URL, DETECTOR_FP32_URL, OCR_DET_URL, OCR_REC_URL, OCR_REC_KO_URL];
 
 /** Remove a model; the runtime goes too when no other model needs it. */
 export async function removeModel(modelUrls: string[]): Promise<void> {

@@ -18,9 +18,9 @@
     "action": "./share-target",
     "method": "POST",
     "enctype": "multipart/form-data",
-    "params": { "files": [{ "name": "files", "accept": ["image/*", "application/pdf", "application/zip", ".cbz"] }] }
+    "params": { "files": [{ "name": "files", "accept": ["image/*", "application/pdf", "application/zip", ".cbz", "application/vnd.rar", "application/x-7z-compressed", ".cbr", ".rar", ".cb7", ".7z"] }] }
   },
   "file_handlers": [
-    { "action": "./", "accept": { "image/*": [".png", ".jpg", ".jpeg", ".webp"], "application/zip": [".zip", ".cbz"], "application/pdf": [".pdf"] } }
+    { "action": "./", "accept": { "image/*": [".png", ".jpg", ".jpeg", ".webp"], "application/zip": [".zip", ".cbz"], "application/vnd.rar": [".rar", ".cbr"], "application/x-7z-compressed": [".7z", ".cb7"], "application/pdf": [".pdf"] } }
   ]
 }

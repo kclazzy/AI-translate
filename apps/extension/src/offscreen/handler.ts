@@ -8,6 +8,7 @@ import { deleteJobBytes, getJobBytes, pruneJobBytes } from '../shared/jobstore';
 import { db, loadSettings, secrets } from '../shared/store';
 import { lamaDownloaded, lamaInpainter, releaseLama } from './lama';
 import { detectorDownloaded, releaseDetector, textDetector } from './detector';
+import { releaseUpscaler, upscaleNet, upscalerDownloaded } from './upscale';
 import { gpuFetch, setWorkWaiting } from './gpuLane';
 import { ocrDownloaded, readText } from './ocr';
 import '../shared/browserTranslate';
@@ -26,6 +27,7 @@ export const service = new TranslateService(db, secrets, browserBackend, loadSet
 service.releaseGpu = async () => {
   await releaseDetector();
   await releaseLama();
+  await releaseUpscaler();
 };
 const queue = new TaskQueue(2);
 // The detector and LaMa keep their sessions while pictures still wait (see releaseWhenIdle).
@@ -240,7 +242,7 @@ export function toRendered(r: StoredResult, cached: boolean): RenderedTiles {
     height: r.page.height,
     tiles: omit ? [] : r.rendered.map((_, i) => tileOf(r, i)),
     tilesOmitted: omit ? r.rendered.length : undefined,
-    page: { blocks: r.page.blocks, timings: r.page.timings, usage: r.page.usage, pipeline: r.page.pipeline, stripLang: r.page.stripLang, artText: r.page.artText, artRedrawn: r.page.artRedrawn, lama: r.page.lama, skippedNoText: r.page.skippedNoText, selfCheck: r.page.selfCheck },
+    page: { blocks: r.page.blocks, timings: r.page.timings, usage: r.page.usage, pipeline: r.page.pipeline, stripLang: r.page.stripLang, artText: r.page.artText, artRedrawn: r.page.artRedrawn, lama: r.page.lama, skippedNoText: r.page.skippedNoText, selfCheck: r.page.selfCheck, fallback: r.page.fallback },
     cached,
   };
 }
@@ -296,9 +298,13 @@ function watchdogError(limitMin: number) {
 async function prepare() {
   const settings = await loadSettings();
   service.inpainter = await browserLama(settings.lamaMode);
-  service.detector = (settings.detectorMode === 'browser' || settings.readMode === 'ocr') && (await detectorDownloaded()) ? textDetector : undefined;
-  // Recognition in the browser (AI mode «Распознавание»): when its models are here.
-  service.reader = settings.readMode === 'ocr' && (await ocrDownloaded(settings.sourceLang.split('-')[0] === 'ko')) ? readText : undefined;
+  // The detector and recognition in the browser whenever their models are here: the pipeline uses
+  // them only when the settings say so — or when the usual model does not answer and the stand-in
+  // translates what recognition reads (see fallbackConfig).
+  service.detector = (await detectorDownloaded()) ? textDetector : undefined;
+  service.reader = (await ocrDownloaded(settings.sourceLang.split('-')[0] === 'ko')) ? readText : undefined;
+  // Small scans twice as big, when switched on and downloaded.
+  service.upscaler = settings.upscaleMode === 'browser' && (await upscalerDownloaded()) ? upscaleNet : undefined;
   // This document can live for days: follow a language changed since it opened.
   setUiLang(settings.interfaceLang, false);
   const vision = settings.providers.find((p) => p.id === settings.visionProviderId);
@@ -542,6 +548,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       // «Освободить и повторить»: the detector's and LaMa's sessions (video memory) are made again when needed.
       await releaseDetector();
       await releaseLama();
+      await releaseUpscaler();
       return { ok: true };
     case 'status':
       return Object.fromEntries(msg.jobIds.map((id) => [id, jobStatus(id)]));

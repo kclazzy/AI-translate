@@ -236,6 +236,17 @@ export class Overlay {
     this.bar.prepend(p);
   }
 
+  /** The usual model did not answer and a stand-in translated the picture: a note next to ⟳, which asks the usual one again. */
+  setFallback(text: string, title: string): void {
+    this.bar.querySelector('[data-fallback]')?.remove();
+    const p = document.createElement('span');
+    p.className = 'pill note';
+    p.dataset.fallback = '1';
+    p.textContent = text;
+    p.title = title;
+    this.bar.prepend(p);
+  }
+
   /**
    * «ⓘ»: how this page was translated (time, tokens, cost, model). A click opens the details with
    * «Сообщить о проблеме»: a zip for the developer (`onReport` builds and downloads it, returns a note).

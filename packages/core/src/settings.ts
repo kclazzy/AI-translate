@@ -151,6 +151,8 @@ export interface AppSettings {
   modeProviders?: { ollama?: string; cloud?: string; ocr?: string };
   /** The user said «Не предлагать» to the LaMa offer shown after a page with text over artwork. */
   lamaOfferDismissed?: boolean;
+  /** Small scans made twice as big in the browser before reading (model downloaded once): 'browser' after the download. */
+  upscaleMode?: 'off' | 'browser';
   /** Neural text/bubble detector running in the browser (model downloaded once): 'browser' after the download. */
   detectorMode?: 'off' | 'browser';
   /** models.json fetched from the repository (recommended local models, family settings). */
@@ -179,6 +181,11 @@ export interface AppSettings {
   selfCheck?: boolean;
   /** A switch of model (mode, server, model) brings the settings that suit it (default on; see optimal.ts). */
   autoOptimal?: boolean;
+  /**
+   * What translates a page when the usual model does not answer (not running, no network, the limit
+   * of the service): a model server's id, 'off', or unset — the browser's own translator.
+   */
+  fallbackProviderId?: string;
   /** Most space the translation cache may take, MB (default 2048); the least recently used pages go first. */
   cacheMaxMb?: number;
 }
@@ -409,6 +416,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     modeProviders: 'object',
     lamaOfferDismissed: 'boolean',
     detectorMode: 'string',
+    upscaleMode: 'string',
     modelCatalog: 'object',
     modelCatalogCheckedAt: 'string',
     interfaceLang: 'string',
@@ -416,6 +424,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     qaBatch: 'boolean',
     selfCheck: 'boolean',
     autoOptimal: 'boolean',
+    fallbackProviderId: 'string',
     cacheMaxMb: 'number',
   });
   // At least 50 MB (a few chapters), at most 100 GB.
@@ -425,6 +434,7 @@ export function migrateSettings(raw: unknown): AppSettings {
   if (out.editorPageList !== undefined && !['bottom', 'right'].includes(out.editorPageList as string)) delete out.editorPageList;
   if (out.lamaMode !== undefined && !['off', 'engine', 'browser'].includes(out.lamaMode as string)) delete out.lamaMode;
   if (out.detectorMode !== undefined && !['off', 'browser'].includes(out.detectorMode as string)) delete out.detectorMode;
+  if (out.upscaleMode !== undefined && !['off', 'browser'].includes(out.upscaleMode as string)) delete out.upscaleMode;
   if (Array.isArray(r.presets)) out.presets = r.presets.map(cleanPreset).filter((p): p is ModelPreset => !!p);
   return out as unknown as AppSettings;
 }

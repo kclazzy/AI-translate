@@ -31,6 +31,8 @@ export interface StudioPlatform {
     /** Replace the general model with the one for manga. */
     upgrade?(progress: (share: number) => void): Promise<void>;
   };
+  /** Optional: the upscaler for small scans in this browser (model downloaded once). */
+  upscaler?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void> };
   /** Optional: the neural text / bubble detector in this browser (model downloaded once). */
   detector?: { downloaded(): Promise<boolean>; download(progress: (share: number) => void): Promise<void>; remove(): Promise<void>; detect?: TextDetector };
   /** Optional: text recognition in this browser (PaddleOCR), for the AI mode «Распознавание». */

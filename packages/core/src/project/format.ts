@@ -20,6 +20,8 @@ export interface ProjectPage {
   status: PageStatus;
   error?: SerializedError;
   result?: PageResult;
+  /** The picture was made twice as big when first translated (it is not made bigger again). */
+  upscaled?: boolean;
 }
 
 export interface Project {

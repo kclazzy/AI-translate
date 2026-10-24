@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
+import { libarchiveAssets } from '../../packages/studio/vite-libarchive';
 
 const root = resolve(__dirname);
 
@@ -26,7 +27,7 @@ function noOrtWasm(): Plugin {
       return { code: code.replace(/new URL\("(ort-wasm[\w.-]*\.wasm)",import\.meta\.url\)\.href/g, '"$1"'), map: null };
     },
     generateBundle(_, bundle) {
-      const wasm = Object.keys(bundle).filter((f) => f.endsWith('.wasm'));
+      const wasm = Object.keys(bundle).filter((f) => f.endsWith('.wasm') && !f.startsWith('libarchive/'));
       if (wasm.length) throw new Error(`.wasm must not be in the extension: ${wasm.join(', ')}`);
     },
   };
@@ -36,7 +37,7 @@ function noOrtWasm(): Plugin {
 export default defineConfig({
   root,
   base: './',
-  plugins: [noOrtWasm(), react()],
+  plugins: [noOrtWasm(), libarchiveAssets(), react()],
   define: {
     __ORT_VERSION__: JSON.stringify(ortPkg.version),
     __ORT_WASM_SHA256__: JSON.stringify(ortWasmSha256),

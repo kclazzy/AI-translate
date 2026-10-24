@@ -74,7 +74,7 @@ jobs:
           mkdir -p out
           w2x=https://huggingface.co/deepghs/waifu2x_onnx/resolve/a83a21fb2ffafb19c57010bb7d74b2a288871da0/20230407/onnx_models/cunet/art
           curl -fsSL --retry 3 -o out/upscale-art-2x.onnx "$w2x/noise1_scale2x.onnx"
-          sha256sum out/upscale-art-2x.onnx | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '5d3288a2847e51d8944002dc81aea76ef1a2879db33b8fb86d5953b4b1c442bf  out/upscale-art-2x.onnx' | sha256sum -c
       - name: Inspect
         if: steps.have.outputs.skip != '1'
         run: |

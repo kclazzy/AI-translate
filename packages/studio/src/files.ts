@@ -2,6 +2,7 @@ import { AppError, naturalCompare, planSlices, readArchiveImages, releaseCanvas,
 import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
 import { tr } from '@ait/core/i18n';
+import { otherArchiveImages } from './archives';
 
 export interface ImportedImage {
   name: string;
@@ -42,7 +43,7 @@ export async function pdfToImages(bytes: Uint8Array, name: string, onProgress?: 
   return out;
 }
 
-/** Turn dropped/picked files (images, ZIP/CBZ, PDF) into an ordered list of page images. */
+/** Turn dropped/picked files (images, ZIP/CBZ, RAR/CBR, 7z, PDF, EPUB) into an ordered list of page images. */
 export async function importFiles(files: File[], onProgress?: (msg: string) => void): Promise<ImportedImage[]> {
   const sorted = [...files].sort((a, b) => naturalCompare(a.name, b.name));
   const out: ImportedImage[] = [];
@@ -54,15 +55,20 @@ export async function importFiles(files: File[], onProgress?: (msg: string) => v
       const images = await readArchiveImages(bytes);
       if (!images.length) throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: tr('В {0} нет картинок', f.name) });
       out.push(...images);
-    } else if (/\.(cbr|rar|cb7|7z)$/.test(lower)) {
-      throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: tr('{0}: архивы RAR/7z не открываются в браузере. Распакуйте его или переконвертируйте в CBZ (например, в Calibre или 7-Zip) и добавьте снова.', f.name) });
+    } else if (/\.(cbr|rar|cb7|7z|cbt|tar)$/.test(lower)) {
+      onProgress?.(tr('Распаковка {0}…', f.name));
+      // A .cbr is often a ZIP under another name.
+      const zip = bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
+      const images = zip ? await readArchiveImages(bytes) : await otherArchiveImages(bytes, f.name);
+      if (!images.length) throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: tr('В {0} нет картинок', f.name) });
+      out.push(...images);
     } else if (lower.endsWith('.pdf') || f.type === 'application/pdf') {
       onProgress?.(tr('Чтение PDF {0}…', f.name));
       out.push(...(await pdfToImages(bytes, f.name, (d, t) => onProgress?.(`PDF ${f.name}: ${d}/${t}`))));
     } else {
       const mime = sniffImageMime(bytes);
       if (mime === 'image/tiff') throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: tr('{0}: TIFF браузер не открывает — сохраните картинку как PNG или JPG.', f.name) });
-      if (!mime) throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: tr('{0}: поддерживаются PNG, JPG, WEBP, AVIF, GIF, BMP, а также PDF, ZIP, CBZ и EPUB.', f.name) });
+      if (!mime) throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: tr('{0}: поддерживаются PNG, JPG, WEBP, AVIF, GIF, BMP, а также PDF, ZIP, CBZ, CBR, RAR, 7z и EPUB.', f.name) });
       out.push({ name: f.name, bytes, mime });
     }
   }

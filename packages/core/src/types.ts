@@ -205,6 +205,11 @@ export interface PageResult {
   debug?: PageDebug;
   /** The self-check after typesetting: blocks it fixed by itself and blocks left for the user to look at. */
   selfCheck?: { fixed: number; flagged: number };
+  /**
+   * The usual model did not answer (why: its error code), and the stand-in translated the page (see
+   * fallbackConfig): shown on the picture; ⟳ tries the usual model again.
+   */
+  fallback?: { by: string; reason: string };
   createdAt: string;
 }
 

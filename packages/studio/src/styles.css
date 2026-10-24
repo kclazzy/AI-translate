@@ -446,3 +446,10 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ait-optimal { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; margin: -4px 0 14px; }
 .ait-optimal-list { flex: 1 1 100%; border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; background: var(--paper); }
 .ait-optimal-list ul { margin: 0 0 6px; padding-left: 18px; }
+
+/* «Вычитка»: the chapter's texts side by side */
+.ait-proof td { vertical-align: top; }
+.ait-proof .ait-proof-orig { width: 42%; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ait-proof textarea { width: 100%; min-width: 180px; resize: vertical; font: inherit; }
+.ait-proof tr.dirty td { background: var(--magenta-soft); }
+.ait-proof-notes { margin-top: 4px; font-size: 12px; color: var(--err); }

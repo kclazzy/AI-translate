@@ -12,6 +12,7 @@ import {
   listOpenAiModels,
   maskKey,
   optimalSettings,
+  browserTranslateSupported,
   providerById,
   PROVIDER_PRESETS,
   qaModeOf,
@@ -29,6 +30,7 @@ import { LocalModels, LocalSetup, ModelCheckCard, ModelPicker, UpdateCheck } fro
 import { usePlatform } from '../platform';
 import { LamaGetButton, lamaModeOf, useLamaDownloaded } from '../lama';
 import { DetectorChoice } from '../detector';
+import { UpscaleChoice } from '../upscale';
 import { SpeedBenchmark } from './SpeedBenchmark';
 import { clearAutoTuned, useAutoTuned } from '../autoOptimal';
 import { LanguagePair } from '../LanguagePair';
@@ -623,6 +625,13 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
                   <option value="off">{tr('Выключена (быстрее)')}</option>
                 </select>
               </Field>
+              <Field label={tr('Запасной переводчик')} hint={tr('Переводит страницу, если обычная модель не ответила (не запущена, нет сети, кончился лимит). Такая картинка помечена, ⟳ попробует обычную модель снова.')}>
+                <select className="ait-select" data-testid="fallback" value={s.fallbackProviderId ?? ''} onChange={(e) => update({ fallbackProviderId: e.target.value || undefined })}>
+                  <option value="">{browserTranslateSupported() ? tr('Переводчик браузера (по умолчанию)') : tr('Нет (этот браузер не переводит сам)')}</option>
+                  {s.providers.filter((p) => p.id !== s.visionProviderId).map((p) => <option key={p.id} value={p.id}>{`${tr(p.label)} · ${p.model}`}</option>)}
+                  <option value="off">{tr('Не использовать')}</option>
+                </select>
+              </Field>
               <SetSwitch testId="translate-logo" checked={!!s.translateLogo} onChange={(translateLogo) => update({ translateLogo })} label={tr('Переводить логотип названия')} hint={tr('Выключено: логотип, титры авторов и названия магазинов остаются как нарисованы.')} />
               <SetSwitch testId="qa-batch" checked={!!s.qaBatch} onChange={(qaBatch) => update({ qaBatch })} label={tr('Проверять несколько коротких страниц за раз')} hint={tr('Быстрее в режимах „Быстро“ и „Баланс“; в „Максимум“ каждая страница проверяется отдельно.')} />
               <SetSwitch
@@ -700,6 +709,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               </label>
               <LamaChoice settings={s} update={update} offer={params.get('offer') === 'lama'} />
               <DetectorChoice settings={s} update={update} />
+              <UpscaleChoice settings={s} update={update} />
               <SetSwitch testId="self-check" checked={s.selfCheck !== false} onChange={(selfCheck) => update({ selfCheck })} label={tr('Самопроверка после вёрстки')} hint={tr('Ищет недостёртый оригинал, текст за краем бабла, слишком мелкий текст, задетый рисунок и неподходящий цвет. Очевидное исправляет сам, остальное показывает в редакторе («Следующее замечание»).')} />
             </SetGroup>
           </div>

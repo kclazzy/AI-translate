@@ -49,6 +49,8 @@ export interface PipelineConfig {
   collage?: boolean;
   /** Read the text with recognition in this browser (PaddleOCR) instead of a vision model; a text model translates. */
   ocr?: boolean;
+  /** Small scans are made twice as big before reading (see image/upscale.ts; needs the service's upscaler). */
+  upscale?: boolean;
   /** Разговорник: hints for recurring expressions (see translate/phrasebook). */
   phrasebook?: PhrasebookSettings;
   /** Pictures without lettering (local check) are not sent to the model; default on. */
@@ -143,6 +145,7 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     // Recognition needs the detector to find the text.
     detector: s.detectorMode === 'browser' || s.readMode === 'ocr' || undefined,
     ocr: s.readMode === 'ocr' || undefined,
+    upscale: (s.pipeline !== 'engine' && s.upscaleMode === 'browser') || undefined,
     skipEmptyPages: s.skipEmptyPages ?? true,
     qaBatch: s.qaBatch || undefined,
     selfCheck: s.selfCheck ?? true,
@@ -189,6 +192,7 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     tl: c.translateLogo ? 1 : undefined,
     col: c.collage && c.detector ? 1 : undefined,
     ocr: c.ocr ? 1 : undefined,
+    up: c.upscale ? 1 : undefined,
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);
 }

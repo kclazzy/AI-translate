@@ -5,6 +5,8 @@ import { TiledImage } from './image/tiled';
 import type { FetchLike } from './llm/types';
 import { pipelineConfigFromSettings, pipelineHash, type PipelineConfig } from './pipeline/config';
 import { renderOutput, runPipeline, styleDefaultsFor, type RenderedPage } from './pipeline/run';
+import { FALLBACK_ON, fallbackConfig } from './pipeline/fallback';
+import { upscaleBytes, type UpscaleNet } from './image/upscale';
 import { DEFAULT_CACHE_MAX_MB, type AppSettings } from './settings';
 import type { IdbStore } from './storage/idb';
 import type { SecretStore } from './storage/secrets';
@@ -12,7 +14,7 @@ import { emptyContext, mergeContext, withoutPage, type TranslationContext } from
 import type { PageResult, StageEvent, TextBlock, Usage } from './types';
 import { sha256Hex, sniffImageMime } from './util/bytes';
 import { tr } from './i18n';
-import { preparePage, type Inpainter, type PreparedPage } from './pipeline/standalone';
+import { preparePage, type Inpainter, type PipelineOutput, type PreparedPage } from './pipeline/standalone';
 import type { TextDetector } from './pipeline/detect';
 import type { TextReader } from './pipeline/standalone';
 import { QA_BATCH, qaPages } from './translate/qa';
@@ -141,6 +143,10 @@ export function seriesKeyFromUrl(url: string | undefined): string | undefined {
 export class TranslateService {
   /** LaMa in this browser (set by the extension when the model is downloaded). */
   inpainter?: Inpainter;
+  /** The upscaler for small scans in this browser (set by the extension when the model is downloaded; see image/upscale.ts). */
+  upscaler?: UpscaleNet;
+  /** Pictures made bigger lately, by the hash of their bytes (the page prepared ahead and its translation share one). */
+  private enlarged = new Map<string, Promise<Uint8Array | null>>();
   /** The neural text / bubble detector in this browser (set by the extension when the model is downloaded). */
   detector?: TextDetector;
   /** Text recognition in this browser (set by the extension when the models are downloaded). */
@@ -279,14 +285,18 @@ export class TranslateService {
       return this.getContext(seriesKey);
     } : undefined;
     try {
-      const { value: out, lighter } = await this.runFitting(config, opts, (cfg) =>
+      // A small scan twice as big (the cache key stays the one of the bytes as they came).
+      const pic = await this.enlarge(bytes, realMime, config, opts.signal);
+      const run = (cfg: PipelineConfig, ahead = prepared) =>
         runPipeline(
-          { bytes, mime: realMime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic, noSkip, prepared, batchReview: !!config.qaBatch && !opts.generic, freshContext },
+          { bytes: pic.bytes, mime: pic.mime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic, noSkip, prepared: ahead, batchReview: !!cfg.qaBatch && !opts.generic, freshContext },
           { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector, ocr: this.reader },
-        ),
-      );
-      // A result made with lighter settings must not answer for the full-quality key.
+        );
+      const { value: out, lighter, fallback } = await this.runWithStandIn(config, settings, opts, run);
+      // A result made with lighter settings or by the stand-in must not answer for the full-quality
+      // key: the next time the usual model is asked again.
       if (lighter) key = `${baseKey}:lite`;
+      if (fallback) key = `${baseKey}:fb`;
       if (seriesKey && !opts.generic) await this.joinWithPrevious(seriesKey, out.page, config, context, opts.signal).catch((e) => {
         if ((e as { code?: string }).code === 'CANCELLED') throw e;
       });
@@ -316,7 +326,8 @@ export class TranslateService {
         page,
         rendered: rendered.tiles,
         mime: rendered.mime,
-        original: { bytes, mime: realMime },
+        // The picture the texts' places belong to: the enlarged one when the scan was made bigger.
+        original: { bytes: pic.bytes, mime: pic.mime },
         cleaned: cleanedTiles,
         sourceUrl: opts.sourceUrl,
         title: opts.title,
@@ -562,13 +573,35 @@ export class TranslateService {
       if (known) return void (await known);
       // Already translated: nothing to prepare (reopening a chapter must not run the detector again).
       if (!opts.force && ((await this.db.get('kv', `${META}${key}`)) || (await this.db.get('results', key)))) return;
-      const promise = preparePage({ bytes, mime: realMime, config, generic: opts.generic, noSkip }, { backend: this.backend, fetchImpl: this.fetchImpl, detect: this.detector, ocr: this.reader }).catch(() => undefined);
+      const promise = this.enlarge(bytes, realMime, config)
+        .then((pic) => preparePage({ bytes: pic.bytes, mime: pic.mime, config, generic: opts.generic, noSkip }, { backend: this.backend, fetchImpl: this.fetchImpl, detect: this.detector, ocr: this.reader }))
+        .catch(() => undefined);
       this.ahead.set(id, promise);
       while (this.ahead.size > 2) this.ahead.delete(this.ahead.keys().next().value!);
       await promise;
     } catch {
       /* best effort */
     }
+  }
+
+  /**
+   * A small scan twice as big when the settings ask for it (the bytes as they are otherwise). Done
+   * once for a picture: preparing it ahead and translating it take the same result. A failed
+   * upscaler only means the picture goes as it is.
+   */
+  private async enlarge(bytes: Uint8Array, mime: string, config: PipelineConfig, signal?: AbortSignal): Promise<{ bytes: Uint8Array; mime: string }> {
+    const net = this.upscaler;
+    if (!config.upscale || !net || config.mode !== 'standalone') return { bytes, mime };
+    const id = (await sha256Hex(bytes)).slice(0, 40);
+    let p = this.enlarged.get(id);
+    if (!p) {
+      p = upscaleBytes(this.backend, bytes, mime, net, signal).catch(() => null);
+      this.enlarged.set(id, p);
+      while (this.enlarged.size > 3) this.enlarged.delete(this.enlarged.keys().next().value!);
+    }
+    const big = await p;
+    if (!big) this.enlarged.delete(id);
+    return big ? { bytes: big, mime: 'image/png' } : { bytes, mime };
   }
 
   /** The prepared picture for this key, if it is the one prepared ahead (it is handed out once). */
@@ -740,6 +773,52 @@ export class TranslateService {
    * A local model that ran out of video memory gets three more tries, each lighter than the last:
    * other models unloaded, then a smaller context, then a smaller context and picture.
    */
+  /**
+   * Run the page with the usual model (lighter retries after «out of memory», see runFitting); when
+   * that model does not answer, a stand-in translates it (marked on the page), so a chapter goes on.
+   * When the stand-in fails too, the usual model's error is the one shown.
+   */
+  private async runWithStandIn<T extends PipelineOutput>(
+    config: PipelineConfig,
+    settings: AppSettings,
+    opts: Pick<TranslateOptions, 'signal' | 'onStage'>,
+    run: (cfg: PipelineConfig, ahead?: PreparedPage) => Promise<T>,
+  ): Promise<{ value: T; lighter: boolean; fallback?: { by: string; reason: string } }> {
+    try {
+      return await this.runFitting(config, opts, (cfg) => run(cfg));
+    } catch (e) {
+      const err = toAppError(e);
+      const alt = !opts.signal?.aborted && FALLBACK_ON.has(err.code) ? fallbackConfig(config, settings, !!(this.detector && this.reader)) : null;
+      if (!alt) throw err;
+      opts.onStage?.({ stage: 'translating', message: tr('Модель не ответила — переводит запасной: {0}', alt.by) });
+      let out: T;
+      try {
+        // Not the page prepared ahead: it was prepared for the usual way of reading.
+        out = await run(alt.cfg, undefined);
+      } catch (e2) {
+        if (toAppError(e2).code === 'CANCELLED') throw e2;
+        throw err;
+      }
+      const fallback = { by: alt.by, reason: err.code };
+      out.page.fallback = fallback;
+      return { value: out, lighter: false, fallback };
+    }
+  }
+
+  /**
+   * A page of a studio project (no cache, no series turn): the same way as a page of a site —
+   * recognition and the detector of this browser, LaMa, a small scan made bigger, the stand-in when
+   * the model does not answer. `picture` is what the texts' places belong to (enlarged or not).
+   */
+  async runProjectPage(bytes: Uint8Array, mime: string, config: PipelineConfig, opts: { context?: TranslationContext; signal?: AbortSignal; onStage?: (e: StageEvent) => void } = {}): Promise<{ out: PipelineOutput; picture: { bytes: Uint8Array; mime: string } }> {
+    const settings = await this.settingsWithKeys();
+    const picture = await this.enlarge(bytes, mime, config, opts.signal);
+    const run = (cfg: PipelineConfig) =>
+      runPipeline({ bytes: picture.bytes, mime: picture.mime, config: cfg, context: opts.context, signal: opts.signal, onStage: opts.onStage }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector, ocr: this.reader });
+    const { value } = await this.runWithStandIn(config, settings, opts, run);
+    return { out: value, picture };
+  }
+
   private async runFitting<T>(config: PipelineConfig, opts: TranslateOptions, run: (cfg: PipelineConfig) => Promise<T>): Promise<{ value: T; lighter: boolean }> {
     let cfg = config;
     for (let attempt = 0; ; attempt++) {

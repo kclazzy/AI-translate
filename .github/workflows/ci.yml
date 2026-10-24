@@ -76,6 +76,9 @@ jobs:
           xvfb-run -a node e2e/seam.e2e.mjs 2>&1 | tee .test-output/e2e-seam.log
           xvfb-run -a node e2e/far.e2e.mjs 2>&1 | tee .test-output/e2e-far.log
           xvfb-run -a node e2e/browsertr.e2e.mjs 2>&1 | tee .test-output/e2e-browsertr.log
+          # Chapter tools: 7z/TAR chapters, «Вычитка»; the upscaler from this repository's models-2 release.
+          curl -fsSL --retry 2 -o .test-output/upscale-art-2x.onnx "https://github.com/$GITHUB_REPOSITORY/releases/download/models-2/upscale-art-2x.onnx" || rm -f .test-output/upscale-art-2x.onnx
+          UPSCALE_MODEL=$([ -f .test-output/upscale-art-2x.onnx ] && echo "$PWD/.test-output/upscale-art-2x.onnx") xvfb-run -a node e2e/tools.e2e.mjs 2>&1 | tee .test-output/e2e-tools.log
           # Recognition in the browser with the real PaddleOCR networks (skipped when they cannot be fetched).
           mkdir -p .test-output/ocr-models
           base=https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6

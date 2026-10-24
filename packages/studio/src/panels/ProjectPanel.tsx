@@ -8,6 +8,7 @@ import { rerenderProjectPage, translateProjectPage, ProjectStore } from '../proj
 import { textsTable } from '../problemReport';
 import { ErrorBox, Field, Progress, Switch, toast, useAction, useObjectUrl } from '../ui';
 import { ContextEditor, GlossaryEditor } from './GlossaryPanel';
+import { ProofreadPanel, proofreadDraftCount } from './ProofreadPanel';
 import { tr, uiLocale } from '@ait/core/i18n';
 
 function Thumb({ store, project, page }: { store: ProjectStore; project: Project; page: ProjectPage }) {
@@ -59,8 +60,8 @@ function DropZone({ onFiles, label }: { onFiles: (f: File[]) => void; label: str
     >
       <p style={{ margin: '0 0 10px' }}>{label}</p>
       <button className="ait-btn" onClick={() => input.current?.click()}>{tr('Выбрать файлы')}</button>
-      <input ref={input} type="file" multiple hidden accept="image/*,.zip,.cbz,.epub,.pdf,.cbr,.rar" onChange={(e) => e.target.files && onFiles([...e.target.files])} />
-      <p className="ait-hint">{tr('PNG, JPG, WEBP, AVIF, GIF, BMP; глава целиком — PDF, ZIP, CBZ, EPUB')}</p>
+      <input ref={input} type="file" multiple hidden accept="image/*,.zip,.cbz,.epub,.pdf,.cbr,.rar,.cb7,.7z,.cbt,.tar" onChange={(e) => e.target.files && onFiles([...e.target.files])} />
+      <p className="ait-hint">{tr('PNG, JPG, WEBP, AVIF, GIF, BMP; глава целиком — PDF, ZIP, CBZ, CBR, RAR, 7z, EPUB')}</p>
     </div>
   );
 }
@@ -73,7 +74,7 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
   const [editing, setEditing] = useState<ProjectPage | null>(null);
   /** The page open in the editor has unsaved edits (marked in the page list). */
   const [editorDirty, setEditorDirty] = useState(false);
-  const [tab, setTab] = useState<'pages' | 'glossary' | 'context' | 'replace'>('pages');
+  const [tab, setTab] = useState<'pages' | 'proof' | 'glossary' | 'context' | 'replace'>('pages');
   const [progress, setProgress] = useState<{ done: number; total: number; label: string } | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   // Ticks belong to one chapter: start clean when another one opens.
@@ -303,7 +304,7 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
     <div>
       <div className="ait-panel">
         <div className="ait-row" style={{ alignItems: 'center' }}>
-          <button className="ait-btn small ghost" style={{ flex: '0 0 auto' }} onClick={() => { setProject(null); reload(); }}>{tr('← Проекты')}</button>
+          <button className="ait-btn small ghost" style={{ flex: '0 0 auto' }} onClick={() => { if (proofreadDraftCount(project.id) && !confirm(tr('В вычитке есть несохранённые правки. Они останутся до закрытия вкладки — вернуться к ним можно, открыв главу снова. Выйти?'))) return; setProject(null); reload(); }}>{tr('← Проекты')}</button>
           <input className="ait-input" style={{ flex: '1 1 240px', fontWeight: 600 }} value={project.title} onChange={(e) => setProject({ ...project, title: e.target.value })} onBlur={() => void store.update(project.id, (f) => ({ ...f, title: project.title }))} aria-label={tr('Название проекта')} />
           <span className="ait-muted" style={{ flex: '0 0 auto' }}>{tr('{0} из {1} готово', done, project.pages.length)}</span>
         </div>
@@ -335,6 +336,7 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
 
       <div className="ait-seg" role="tablist" style={{ margin: '4px 0 12px' }}>
         <button aria-pressed={tab === 'pages'} onClick={() => setTab('pages')}>{tr('Страницы')}</button>
+        <button aria-pressed={tab === 'proof'} data-testid="tab-proofread" onClick={() => setTab('proof')}>{tr('Вычитка')}</button>
         <button aria-pressed={tab === 'glossary'} onClick={() => setTab('glossary')}>{tr('Глоссарий')}</button>
         <button aria-pressed={tab === 'context'} onClick={() => setTab('context')}>{tr('Контекст')}</button>
         {scanlator ? <button aria-pressed={tab === 'replace'} onClick={() => setTab('replace')}>{tr('Замена и стиль')}</button> : null}
@@ -365,6 +367,7 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
                 <div className="meta">
                   <span>{p.index + 1}. {p.name}</span>
                   <span className={`ait-badge ${p.status === 'done' ? 'ok' : p.status === 'error' ? 'err' : ''}`}>{STATUS[p.status]}</span>
+                  {p.result?.fallback ? <span className="ait-badge" data-testid="fallback-badge" title={tr('Обычная модель не ответила ({0}), перевёл запасной: {1}. ⟳ попробует обычную модель снова.', p.result.fallback.reason, p.result.fallback.by)}>{tr('Запасной перевод')}</span> : null}
                 </div>
               </div>
             ))}
@@ -374,6 +377,7 @@ export function ProjectPanel({ settings, initialFiles, onInitialUsed }: { settin
           </div>
         </>
       ) : null}
+      {tab === 'proof' ? <ProofreadPanel store={store} project={project} settings={settings} onChange={setProject} onOpenPage={(p) => setEditing(p)} /> : null}
       {tab === 'glossary' ? <GlossaryEditor title={tr('Глоссарий проекта')} entries={project.glossary} onChange={(glossary) => { setProject({ ...project, glossary }); void store.update(project.id, (f) => ({ ...f, glossary })); }} /> : null}
       {tab === 'context' ? <ContextEditor context={project.context} onChange={(context) => { setProject({ ...project, context }); void store.update(project.id, (f) => ({ ...f, context })); }} /> : null}
       {tab === 'replace' ? <ReplaceAndStyle store={store} project={project} settings={settings} selection={selection} onChange={setProject} /> : null}

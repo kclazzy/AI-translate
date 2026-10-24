@@ -191,15 +191,18 @@ export async function translateProjectPage(
   if (!assets) throw toAppError(new Error('Page image is missing'));
   const { settings } = await service.config();
   const config = pipelineConfigFromSettings({ ...settings, sourceLang: project.settings.sourceLang, targetLang: project.settings.targetLang, activeProfileId: project.settings.profileId, glossary: [...settings.glossary, ...project.glossary] });
-  const out = await runPipeline({ bytes: assets.original.bytes, mime: assets.original.mime, config, context: project.context, signal: opts.signal, onStage: opts.onStage }, { backend });
+  // Like a page of a site: recognition, the detector and LaMa of this browser, a small scan made
+  // bigger, the stand-in when the model does not answer.
+  const { out, picture } = await service.runProjectPage(assets.original.bytes, assets.original.mime, page.upscaled ? { ...config, upscale: undefined } : config, { context: project.context, signal: opts.signal, onStage: opts.onStage });
   const rendered = await renderOutput(backend, out, styleDefaultsFor(config, settings.fonts));
   const cleaned = await Promise.all(out.cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await backend.encode(t.canvas, 'image/png') })));
-  await store.putAssets(project.id, page.id, { ...assets, cleaned, rendered: rendered.tiles });
+  // An enlarged scan becomes the page's picture: the texts' places belong to it.
+  await store.putAssets(project.id, page.id, { ...assets, ...(picture.bytes !== assets.original.bytes ? { original: picture } : {}), cleaned, rendered: rendered.tiles });
   await service.recordUsage(rendered.page.usage);
   // Into the latest copy of the project: this page's result, its contribution to the context.
   const next = await store.update(project.id, (fresh) => ({
     ...fresh,
-    pages: fresh.pages.map((p) => (p.id === page.id ? { ...p, status: 'done' as const, error: undefined, result: rendered.page, width: rendered.page.width, height: rendered.page.height } : p)),
+    pages: fresh.pages.map((p) => (p.id === page.id ? { ...p, status: 'done' as const, error: undefined, result: rendered.page, width: rendered.page.width, height: rendered.page.height, ...(picture.bytes !== assets.original.bytes ? { upscaled: true } : {}) } : p)),
     context: out.contextUpdate && fresh.context ? mergeContext(fresh.context, out.contextUpdate) : out.context ?? fresh.context,
   }));
   return { project: next, result: rendered.page };

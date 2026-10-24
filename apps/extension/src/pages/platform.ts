@@ -1,5 +1,6 @@
 import { deleteLama, downloadLama, lamaDownloaded, lamaInpainter, lamaKind, upgradeLama } from '../offscreen/lama';
 import { deleteDetector, detectorDownloaded, downloadDetector, textDetector } from '../offscreen/detector';
+import { deleteUpscaler, downloadUpscaler, upscaleNet, upscalerDownloaded } from '../offscreen/upscale';
 import { deleteMangaOcr, deleteOcr, downloadMangaOcr, downloadOcr, mangaOcrDownloaded, ocrDownloaded, readText } from '../offscreen/ocr';
 import { browserBackend, TranslateService } from '@ait/core';
 import { downloadFile, type StudioPlatform } from '@ait/studio';
@@ -21,6 +22,10 @@ export function extensionPlatform(): StudioPlatform {
       if (!(await detectorDownloaded())) throw new Error('The text detector is not downloaded');
       return textDetector(img, signal);
     };
+    // Small scans twice as big here too (the settings switch it on); a missing model: as they are.
+    void upscalerDownloaded().then((have) => {
+      if (have) service.upscaler = upscaleNet;
+    });
   }
   return {
     kind: 'extension',
@@ -34,6 +39,21 @@ export function extensionPlatform(): StudioPlatform {
     ...(lamaHere ? { lama: { downloaded: lamaDownloaded, download: (p: (share: number) => void) => downloadLama(p), remove: deleteLama, kind: lamaKind, upgrade: (p: (share: number) => void) => upgradeLama(p) }, inpaint: lamaInpainter } : {}),
     // The text detector runs on the same runtime as LaMa: wherever LaMa can.
     ...(lamaHere ? { detector: { downloaded: detectorDownloaded, download: (p: (share: number) => void) => downloadDetector(p), remove: deleteDetector, detect: textDetector } } : {}),
+    ...(lamaHere
+      ? {
+          upscaler: {
+            downloaded: upscalerDownloaded,
+            download: async (p: (share: number) => void) => {
+              await downloadUpscaler(p);
+              service.upscaler = upscaleNet;
+            },
+            remove: async () => {
+              await deleteUpscaler();
+              service.upscaler = undefined;
+            },
+          },
+        }
+      : {}),
     // Text recognition (AI mode «Распознавание») on the same runtime.
     ...(lamaHere ? { ocr: { downloaded: (korean?: boolean) => ocrDownloaded(korean), download: (p: (share: number) => void, korean?: boolean) => downloadOcr(p, undefined, korean), remove: deleteOcr, manga: { downloaded: mangaOcrDownloaded, download: (p: (share: number) => void) => downloadMangaOcr(p), remove: deleteMangaOcr } } } : {}),
     ...(browserTranslatorHere() ? { browserTranslator: { status: translatorStatus, prepare: prepareTranslator } } : {}),

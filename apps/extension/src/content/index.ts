@@ -159,6 +159,7 @@ function main() {
     it.overlay.setInfo(pageInfo(result), (o) => reportProblem(result.key, o), () => downloadChapter('analysis'));
     // No lettering found, the model was not asked: say so (⟳ translates it anyway).
     if (result.page.skippedNoText) it.overlay.setSkipped(tr('Текста не найдено'));
+    if (result.page.fallback) it.overlay.setFallback(tr('Запасной перевод'), fallbackNote(result.page.fallback));
     it.overlay.position();
     checkSeams(it);
     if (result.page.lama === 'engine-down' || result.page.lama === 'not-downloaded') void offerLama(result.page.lama);
@@ -322,6 +323,11 @@ function main() {
     return parts.join(' · ');
   }
 
+  /** Why a stand-in translated the picture and what ⟳ does. */
+  function fallbackNote(f: { by: string; reason: string }): string {
+    return tr('Обычная модель не ответила ({0}), перевёл запасной: {1}. ⟳ попробует обычную модель снова.', f.reason, f.by);
+  }
+
   /** Time, tokens and cost of one page, for the «ⓘ» button. */
   function pageInfo(r: RenderedTiles): string {
     const u = r.page.usage;
@@ -369,6 +375,7 @@ function main() {
               : artPlain(r) ? tr('Текст поверх рисунка: {0} — фон без LaMa', r.page.artText) : '',
       r.page.skippedNoText ? tr('Пропущена: текста не найдено') : '',
       r.page.selfCheck && r.page.selfCheck.fixed + r.page.selfCheck.flagged > 0 ? tr('Самопроверка: исправлено {0}, требуют внимания {1}', r.page.selfCheck.fixed, r.page.selfCheck.flagged) : '',
+      r.page.fallback ? fallbackNote(r.page.fallback) : '',
       r.cached ? tr('Взято из кэша') : '',
     ];
     return lines.filter(Boolean).join('\n');

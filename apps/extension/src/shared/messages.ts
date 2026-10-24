@@ -19,7 +19,7 @@ export interface RenderedTiles {
   width: number;
   height: number;
   tiles: { y: number; h: number; dataUrl: string }[];
-  page: Pick<PageResult, 'blocks' | 'timings' | 'usage' | 'pipeline' | 'stripLang' | 'artText' | 'artRedrawn' | 'lama' | 'skippedNoText' | 'selfCheck'>;
+  page: Pick<PageResult, 'blocks' | 'timings' | 'usage' | 'pipeline' | 'stripLang' | 'artText' | 'artRedrawn' | 'lama' | 'skippedNoText' | 'selfCheck' | 'fallback'>;
   cached: boolean;
   /**
    * The tiles were too big for one message (browsers refuse messages over 64 MiB): `tiles` is

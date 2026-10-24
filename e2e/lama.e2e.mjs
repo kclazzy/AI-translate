@@ -18,13 +18,14 @@ const check = (name, ok, detail = '') => {
   if (!ok && process.env.GITHUB_ACTIONS) console.log(`::error title=e2e lama: ${name}::${String(detail).slice(0, 500)}`);
 };
 
-// The ONNX Runtime .wasm is downloaded on demand, not shipped: no big .wasm in the build.
+// The ONNX Runtime .wasm is downloaded on demand, not shipped: no big .wasm in the build (the
+// 1 MB unpacker for RAR/7z chapters in libarchive/ is shipped on purpose, loaded only when used).
 const bigWasm = (dir) => {
   const out = [];
   const walk = (d) => {
     for (const f of readdirSync(d, { withFileTypes: true })) {
       const p = join(d, f.name);
-      if (f.isDirectory()) walk(p);
+      if (f.isDirectory()) f.name !== 'libarchive' && walk(p);
       else if (f.name.endsWith('.wasm') && statSync(p).size > 1_000_000) out.push(p);
     }
   };
