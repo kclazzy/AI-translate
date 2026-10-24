@@ -99,6 +99,20 @@ export function StudioApp({ platform: hostPlatform, initialView, resultKey, chap
     });
   }, [platform]);
 
+  // Back to this tab: take the settings changed elsewhere meanwhile (the popup, another tab).
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      void saveChain.current.then(() => platform.loadSettings()).then((s) => setSettings((prev) => (prev ? s : prev)));
+    };
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [platform]);
+
   const update = useCallback(
     (patch: Partial<AppSettings>) => {
       setSettings((prev) => {
@@ -106,7 +120,11 @@ export function StudioApp({ platform: hostPlatform, initialView, resultKey, chap
         const next = { ...prev, ...patch };
         if (patch.theme) applyTheme(patch.theme);
         // Save at once: the translation service reads settings from storage, not from React state.
-        saveChain.current = saveChain.current.then(() => platform.saveSettings(next)).catch(() => undefined);
+        // Only what changed here goes onto the stored settings: another window (the popup, another
+        // tab of the studio) may have changed something meanwhile, and that must not be undone.
+        saveChain.current = saveChain.current
+          .then(async () => platform.saveSettings({ ...(await platform.loadSettings()), ...patch }))
+          .catch(() => undefined);
         if ('interfaceLang' in patch) {
           // Every text on the page follows the new language after a reload (once the setting is saved).
           void saveChain.current.then(() => {

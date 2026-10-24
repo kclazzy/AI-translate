@@ -147,6 +147,22 @@ try {
   }
   check('back on screen they are read again from the store', back === shown, `images=${back} (was ${shown})`);
   await tab.screenshot({ path: join(OUT, 'far-back.png') });
+  // A reader that puts a placeholder into a far picture and the real one back on return: the
+  // translation comes back from the cache (it used to be lost until translated again).
+  await tab.evaluate(() => (document.images[0].src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw='));
+  let dropped = 1;
+  for (let i = 0; i < 20 && dropped; i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    dropped = await overlayImages(tab);
+  }
+  await tab.evaluate(() => (document.images[0].src = '/a.png'));
+  let again = 0;
+  for (let i = 0; i < 40 && !again; i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    again = await overlayImages(tab);
+  }
+  check('a picture swapped for a placeholder and back gets its translation again', dropped === 0 && again > 0, `placeholder → ${dropped}, back → ${again}`);
+
 
   // The AI mode switch in the popup: one click between the model on this computer and the engine.
   const popup = await browser.newPage();

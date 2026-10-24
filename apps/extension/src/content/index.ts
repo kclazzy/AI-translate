@@ -1175,7 +1175,13 @@ ${chapterStats(list)}`;
 
   /** Remove a picture's overlay; a job still in work for it is stopped (nobody will see it). */
   function dropItem(it: Item) {
-    if (!it.docRect) far.unobserve(it.cand.el);
+    if (!it.docRect) {
+      far.unobserve(it.cand.el);
+      // Readers put a placeholder into pictures far from the screen and the real one back when
+      // the reader returns: the element is looked up in the cache again then (its translation
+      // comes back from the store, not lost).
+      looked.delete(it.cand.el);
+    }
     if (it.status === 'queued' || it.status === 'working') void send({ type: 'cancel', id: it.req ?? it.id }).catch(() => undefined);
     it.overlay.destroy();
     items.delete(it.id);

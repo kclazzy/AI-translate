@@ -1,4 +1,6 @@
 import '@ait/core/i18n/all';
+/** Settings saves of the popup, in order. */
+let saving: Promise<unknown> = Promise.resolve();
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { aiModesAvailable, applyAiMode, applyOcrTranslator, translatorLang, translatorPairs, BROWSER_TRANSLATOR_ID, browserTranslateSupported, applyPreset, checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, modelTiers, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, profilesForLanguage, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
@@ -137,7 +139,8 @@ function Popup() {
   const update = (patch: Partial<AppSettings>) => {
     const next = { ...s, ...patch };
     setS(next);
-    void saveSettings(next);
+    // Only what changed here (a settings tab may have saved something meanwhile), one after another.
+    saving = saving.then(async () => saveSettings({ ...(await loadSettings()), ...patch })).catch(() => undefined);
   };
   const command = async (command: 'translate-page' | 'select-area' | 'repeat-area' | 'toggle-original' | 'download-chapter' | 'clear-page' | 'refresh-look') => {
     if (!tab?.id) return;
