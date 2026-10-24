@@ -131,10 +131,10 @@ try {
   picture = await drawBubble('HELLO THERE', 'bold 22px sans-serif');
   pictureTwo = await drawBubble('HELLO THERE', 'bold 23px sans-serif');
   pictureJa = await drawBubble('なにしてるの', '24px "Noto Sans CJK JP", sans-serif');
-  const studio = await browser.newPage();
   const fetched = new Set();
-  await studio.setRequestInterception(true);
-  studio.on('request', (r) => {
+  const serve = async (p) => {
+  await p.setRequestInterception(true);
+  p.on('request', (r) => {
     const body = files[r.url()];
     if (body) {
       const name = r.url().split('/').pop();
@@ -144,6 +144,9 @@ try {
       else void r.respond({ status: 200, headers: { 'access-control-allow-origin': '*', 'content-length': String(body.length) }, contentType: 'application/octet-stream', body });
     } else void r.continue();
   });
+  };
+  let studio = await browser.newPage();
+  await serve(studio);
   await studio.goto(`chrome-extension://${extId}/studio.html?view=settings`);
   await studio.waitForSelector('.ait-panel', { timeout: 15000 });
   await studio.evaluate(async () => {
@@ -301,7 +304,11 @@ try {
       store.put(s, 'settings');
       await new Promise((r) => (tx.oncomplete = r));
     });
-    await studio.reload();
+    // A fresh settings page (a reload of a page with intercepted requests can stall the test browser).
+    await studio.close();
+    studio = await browser.newPage();
+    await serve(studio);
+    await studio.goto(`chrome-extension://${extId}/studio.html?view=settings`);
     // Japanese: Manga OCR comes by itself as well.
     const got = await studio.waitForSelector('[data-testid="manga-ocr-ready"]', { timeout: 90000 }).catch(() => null);
     check('for Japanese Manga OCR is downloaded by itself (checked)', !!got && fetched.has('manga-ocr-encoder-int8.onnx') && fetched.has('manga-ocr-vocab.txt'), [...fetched].join(', '));
