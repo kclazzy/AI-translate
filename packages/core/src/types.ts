@@ -138,6 +138,8 @@ export interface PageTimings {
   ocrMs?: number;
   /** The cleaning and the translation ran at once for this long (time saved). */
   overlapMs?: number;
+  /** The page's pixel work ran in a background thread (see pipeline/remote.ts). */
+  inWorker?: boolean;
   /** Where the recognition in the browser read the text («Распознавание»). */
   ocrEp?: 'webgpu' | 'wasm';
   /** Separate text translation request(s). */

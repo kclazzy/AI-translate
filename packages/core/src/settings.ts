@@ -179,6 +179,11 @@ export interface AppSettings {
    */
   qaAfterShow?: boolean;
   /**
+   * The pages' pixel work (decoding, cleaning, the pictures for the model) in background threads,
+   * several pages at once on several processor cores (default on, where the app has them).
+   */
+  pageWorkers?: boolean;
+  /**
    * Self-check after typesetting (default on): leftover lettering, text outside the bubble, too
    * small text, art changed around the bubble, text colour; fixed locally where it is obvious,
    * otherwise shown among the editor's remarks.
@@ -428,6 +433,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     skipEmptyPages: 'boolean',
     qaBatch: 'boolean',
     qaAfterShow: 'boolean',
+    pageWorkers: 'boolean',
     selfCheck: 'boolean',
     autoOptimal: 'boolean',
     fallbackProviderId: 'string',

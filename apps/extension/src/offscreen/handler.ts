@@ -1,4 +1,4 @@
-import { AppError, encodeAtOnce, forgetRemembered, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
+import { AppError, encodeAtOnce, forgetRemembered, PageWorkers, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
 import { loadBundledFonts, loadUserFonts } from '@ait/studio/fonts';
 import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
 import { buildAnalysisPack, buildProblemReport, type AnalysisPage } from '@ait/studio/problem-report';
@@ -31,6 +31,13 @@ service.releaseGpu = async () => {
   await releaseLama();
   await releaseUpscaler();
 };
+// The pages' pixel work in background threads, one processor core each (see core pipeline/remote.ts);
+// the page runs here when they cannot start.
+service.pageWorkers = new PageWorkers(
+  () => new Worker(new URL('./pageWorker.ts', import.meta.url), { type: 'module', name: 'ait-page' }),
+  Math.min(3, Math.max(1, (navigator.hardwareConcurrency || 2) - 1)),
+  browserBackend,
+);
 const queue = new TaskQueue(2);
 // The detector and LaMa keep their sessions while pictures still wait (see releaseWhenIdle).
 setWorkWaiting(() => queue.size > 0);
@@ -554,6 +561,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       await releaseUpscaler();
       // The boxes and texts kept for the last pages go too.
       forgetRemembered();
+      service.pageWorkers?.forget();
       return { ok: true };
     case 'status':
       return Object.fromEntries(msg.jobIds.map((id) => [id, jobStatus(id)]));

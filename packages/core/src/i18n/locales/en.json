@@ -1320,5 +1320,8 @@
  "Распознавание текста: {0} с на {1}": "Text recognition: {0} s on the {1}",
  "Показывать перевод до проверки": "Show the translation before the check",
  "Страница появляется сразу после вёрстки, проверка моделью идёт следом и перерисовывает то, что исправила.": "The page appears as soon as it is typeset; the model checks it right after and redraws what it fixed.",
- "Очистка шла во время перевода: быстрее на {0} с": "Cleaning ran during the translation: {0} s faster"
+ "Очистка шла во время перевода: быстрее на {0} с": "Cleaning ran during the translation: {0} s faster",
+ "Обрабатывать страницы в фоновых потоках": "Process pages in background threads",
+ "Очистка и подготовка картинок идут на нескольких ядрах процессора, по странице на ядро. Выключите, если перевод ведёт себя странно.": "Cleaning and preparing the pictures run on several processor cores, one page per core. Turn it off if translation behaves oddly.",
+ "Подготовка и очистка шли в фоновом потоке": "Preparation and cleaning ran in a background thread"
 }

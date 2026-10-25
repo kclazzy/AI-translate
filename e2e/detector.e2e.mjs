@@ -220,6 +220,7 @@ try {
   await tab.screenshot({ path: join(OUT, 'detector.png') });
   check('the page is translated with the detector on', !!done && done.page.blocks[0].translatedText === 'ПРИВЕТ', done ? JSON.stringify(done.page.blocks.map((b) => b.translatedText)) : 'no result');
   check('the detector ran (its time is in the page timings)', typeof done?.page?.timings?.detectorMs === 'number', JSON.stringify(done?.page?.timings ?? {}));
+  check('the page was worked in a background thread, the detector asked across', done?.page?.timings?.inWorker === true, JSON.stringify(done?.page?.timings ?? {}));
   // The stand-in's text box: x 210–390, y 322–378 of the 600×700 picture; the model said 150–450 × 280–440.
   const bb = done?.page?.blocks?.[0]?.bbox ?? [0, 0, 0, 0];
   check("the model's loose box snapped onto the detector's text box", bb[0] >= 200 && bb[1] >= 312 && bb[0] + bb[2] <= 400 && bb[1] + bb[3] <= 388, JSON.stringify(bb));

@@ -1320,5 +1320,8 @@
  "Распознавание текста: {0} с на {1}": "Texterkennung: {0} s auf {1}",
  "Показывать перевод до проверки": "Übersetzung vor der Prüfung zeigen",
  "Страница появляется сразу после вёрстки, проверка моделью идёт следом и перерисовывает то, что исправила.": "Die Seite erscheint sofort nach dem Setzen; das Modell prüft sie gleich danach und zeichnet Korrekturen neu.",
- "Очистка шла во время перевода: быстрее на {0} с": "Bereinigung lief während der Übersetzung: {0} s schneller"
+ "Очистка шла во время перевода: быстрее на {0} с": "Bereinigung lief während der Übersetzung: {0} s schneller",
+ "Обрабатывать страницы в фоновых потоках": "Seiten in Hintergrund-Threads verarbeiten",
+ "Очистка и подготовка картинок идут на нескольких ядрах процессора, по странице на ядро. Выключите, если перевод ведёт себя странно.": "Bereinigen und Vorbereiten der Bilder laufen auf mehreren Prozessorkernen, eine Seite pro Kern. Ausschalten, wenn sich die Übersetzung seltsam verhält.",
+ "Подготовка и очистка шли в фоновом потоке": "Vorbereitung und Bereinigung liefen in einem Hintergrund-Thread"
 }

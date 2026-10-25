@@ -41,6 +41,7 @@ export * from './pipeline/standalone';
 export * from './pipeline/detect';
 export * from './pipeline/engine';
 export * from './pipeline/run';
+export * from './pipeline/remote';
 export * from './pipeline/debug';
 export * from './pipeline/selfcheck';
 export * from './pipeline/fallback';

@@ -686,6 +686,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               <SetSwitch checked={!!s.bubblesOnly} onChange={(bubblesOnly) => update({ bubblesOnly })} label={tr('Только баблы: звуки и надписи на фоне оставлять как в оригинале')} />
               <SetSwitch checked={!!s.onlySourceLang} onChange={(onlySourceLang) => update({ onlySourceLang })} label={tr('Переводить только текст на исходном языке (нужен выбранный исходный язык)')} />
               <SetSwitch testId="skip-empty" checked={s.skipEmptyPages !== false} onChange={(skipEmptyPages) => update({ skipEmptyPages })} label={tr('Пропускать картинки без текста')} hint={tr('Пейзажи и фоны без букв не отправляются модели — быстрее для вебтунов. На пропущенной картинке ⟳ переведёт её всё равно.')} />
+              <SetSwitch testId="page-workers" checked={s.pageWorkers !== false} onChange={(pageWorkers) => update({ pageWorkers })} label={tr('Обрабатывать страницы в фоновых потоках')} hint={tr('Очистка и подготовка картинок идут на нескольких ядрах процессора, по странице на ядро. Выключите, если перевод ведёт себя странно.')} />
               <SetSwitch checked={s.autoApplyCached !== false} onChange={(autoApplyCached) => update({ autoApplyCached })} label={tr('Сразу показывать уже переведённые картинки, когда страница открывается снова')} />
               <div className="ait-field">
                 <span>{tr('Страницы главы в редакторе')}</span>

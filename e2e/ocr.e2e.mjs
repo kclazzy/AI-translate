@@ -210,6 +210,16 @@ try {
       g.onsuccess = () => res(g.result.flatMap((x) => x.page.blocks.map((b) => b.translatedText)));
     });
   });
+  const threads = await studio.evaluate(async () => {
+    const db = await new Promise((res) => {
+      const r = indexedDB.open('ai-translate', 1);
+      r.onsuccess = () => res(r.result);
+    });
+    return new Promise((res) => {
+      const g = db.transaction('results').objectStore('results').getAll();
+      g.onsuccess = () => res(g.result.map((x) => !!x.page.timings?.inWorker));
+    });
+  });
   const errors = await studio.evaluate(async () => {
     const db = await new Promise((res) => {
       const r = indexedDB.open('ai-translate', 1);
@@ -221,6 +231,7 @@ try {
     });
   });
   check('the page gets the translation', stored.includes('Где ты?'), `${JSON.stringify(stored)} errors=${JSON.stringify(errors).slice(0, 400)}`);
+  check('the page was worked in a background thread (recognition asked across)', threads.length > 0 && threads.every(Boolean), JSON.stringify(threads));
   await tab.screenshot({ path: join(OUT, 'ocr.png') });
 
   // «Замерить скорость» in this mode: the sample page is read in the settings page itself.

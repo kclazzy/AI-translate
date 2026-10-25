@@ -5,6 +5,7 @@ import { TiledImage } from './image/tiled';
 import type { FetchLike } from './llm/types';
 import { pipelineConfigFromSettings, pipelineHash, type PipelineConfig } from './pipeline/config';
 import { renderOutput, runPipeline, styleDefaultsFor, type RenderedPage } from './pipeline/run';
+import type { PageWorkers } from './pipeline/remote';
 import { FALLBACK_ON, fallbackConfig } from './pipeline/fallback';
 import { upscaleBytes, type UpscaleNet } from './image/upscale';
 import { CpuLane } from './util/cpuLane';
@@ -156,6 +157,8 @@ export class TranslateService {
   detector?: TextDetector;
   /** Text recognition in this browser (set by the extension when the models are downloaded). */
   reader?: TextReader;
+  /** Background threads for the pages' pixel work (set by the extension; see pipeline/remote.ts). */
+  pageWorkers?: PageWorkers;
   /**
    * A stored result changed after it was delivered (the batched translation check fixed it):
    * the app redraws the picture like after an edit (extension: 'result-changed').
@@ -302,7 +305,8 @@ export class TranslateService {
       // A small scan twice as big (the cache key stays the one of the bytes as they came).
       const pic = await this.enlarge(bytes, realMime, config, opts.signal);
       const run = (cfg: PipelineConfig, ahead = prepared) =>
-        runPipeline(
+        this.pipeline(
+          settings,
           { bytes: pic.bytes, mime: pic.mime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic, noSkip, prepared: ahead, batchReview: !opts.generic, freshContext },
           { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector, ocr: this.reader, cpu: this.cpuFor(opts.order) },
         );
@@ -835,6 +839,11 @@ export class TranslateService {
     }
   }
 
+  /** The page pipeline: in a background thread when there are some and the settings allow it, here otherwise. */
+  private pipeline(settings: AppSettings, req: Parameters<typeof runPipeline>[0], deps: Parameters<typeof runPipeline>[1]): ReturnType<typeof runPipeline> {
+    return this.pageWorkers && settings.pageWorkers !== false ? this.pageWorkers.run(req, deps) : runPipeline(req, deps);
+  }
+
   /**
    * A page of a studio project (no cache, no series turn): the same way as a page of a site —
    * recognition and the detector of this browser, LaMa, a small scan made bigger, the stand-in when
@@ -844,7 +853,7 @@ export class TranslateService {
     const settings = await this.settingsWithKeys();
     const picture = await this.enlarge(bytes, mime, config, opts.signal);
     const run = (cfg: PipelineConfig) =>
-      runPipeline({ bytes: picture.bytes, mime: picture.mime, config: cfg, context: opts.context, signal: opts.signal, onStage: opts.onStage }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector, ocr: this.reader });
+      this.pipeline(settings, { bytes: picture.bytes, mime: picture.mime, config: cfg, context: opts.context, signal: opts.signal, onStage: opts.onStage }, { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector, ocr: this.reader });
     const { value } = await this.runWithStandIn(config, settings, opts, run);
     return { out: value, picture };
   }
