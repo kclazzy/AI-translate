@@ -161,6 +161,49 @@ try {
   const fallbackOptions = await studio.$$eval('[data-testid="fallback"] option', (o) => o.map((x) => x.value));
   check('the settings offer a stand-in translator', fallbackOptions.includes('off') && fallbackOptions.includes(''), JSON.stringify(fallbackOptions));
 
+  // «Облако» with no online model yet: the click offers to connect one right there.
+  {
+    const cloudBtn = await studio.$('[data-testid="ai-mode"] button[data-mode="cloud"]');
+    const enabledBefore = cloudBtn ? await cloudBtn.evaluate((b) => !b.disabled) : false;
+    await cloudBtn?.click();
+    const form = await studio.waitForSelector('[data-testid="cloud-connect"]', { timeout: 5000 }).catch(() => null);
+    if (form) {
+      await studio.type('[data-testid="cloud-connect"] input', 'test-key-123');
+      await studio.evaluate(() => [...document.querySelectorAll('[data-testid="cloud-connect"] button')].find((b) => b.textContent.includes('Подключить'))?.click());
+      await new Promise((r) => setTimeout(r, 1200));
+    }
+    const s = await studio.evaluate(async () => {
+      const db = await new Promise((res) => {
+        const r = indexedDB.open('ai-translate', 1);
+        r.onsuccess = () => res(r.result);
+      });
+      return new Promise((res) => {
+        const g = db.transaction('kv').objectStore('kv').get('settings');
+        g.onsuccess = () => res(g.result);
+      });
+    });
+    const v = s?.providers?.find((p) => p.id === s.visionProviderId);
+    check('«Облако» without an online model: connect one in place, the mode switches and pictures may go out', enabledBefore && !!form && v && !/localhost|127\.0\.0\.1/.test(v.baseUrl) && s.privacy === 'cloud' && !JSON.stringify(s).includes('test-key-123'), JSON.stringify({ form: !!form, vision: v?.preset, privacy: s?.privacy }));
+    // Back as it was for the rest of the test.
+    await studio.evaluate(async () => {
+      const db = await new Promise((res) => {
+        const r = indexedDB.open('ai-translate', 1);
+        r.onsuccess = () => res(r.result);
+      });
+      const tx = db.transaction('kv', 'readwrite');
+      const st = tx.objectStore('kv');
+      const cur = await new Promise((res) => {
+        const g = st.get('settings');
+        g.onsuccess = () => res(g.result);
+      });
+      cur.providers = cur.providers.filter((p) => /localhost|127\.0\.0\.1/.test(p.baseUrl) || p.preset === 'browser');
+      cur.visionProviderId = cur.providers.find((p) => p.vision)?.id ?? null;
+      cur.privacy = 'local';
+      st.put(cur, 'settings');
+      await new Promise((r) => (tx.oncomplete = r));
+    });
+  }
+
   // ---- archives → projects ----
   const open = async (file) => {
     await studio.goto(`chrome-extension://${extId}/studio.html?view=projects`);

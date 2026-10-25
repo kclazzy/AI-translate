@@ -222,6 +222,31 @@ export class TranslateService {
     return `${(await sha256Hex(bytes)).slice(0, 40)}:${await pipelineHash(config)}${look}`;
   }
 
+  /**
+   * The stored result of this picture with the current settings, if there is one (no model, no
+   * queue): a page opened again shows what was translated at once, without waiting behind the
+   * pages that are really being translated. Null when it would need drawing again (text size).
+   */
+  async cachedResult(bytes: Uint8Array, opts: { sourceUrl?: string; seriesKey?: string; generic?: boolean } = {}): Promise<StoredResult | undefined> {
+    const { settings, config } = await this.config(opts.seriesKey ?? seriesKeyFromUrl(opts.sourceUrl));
+    const hit = await this.db.get<StoredResult>('results', await this.cacheKey(bytes, config, { generic: opts.generic, fonts: lookOf(settings.fonts) }));
+    if (!hit || (hit.fontScale ?? 1) !== (settings.fonts.scale ?? 1)) return undefined;
+    return hit;
+  }
+
+  /** The stored pieces of a strip, every one of them, or undefined when any is missing (see translateStrip). */
+  async cachedStrip(parts: { bytes: Uint8Array }[], opts: { sourceUrl?: string; seriesKey?: string; generic?: boolean } = {}): Promise<StoredResult[] | undefined> {
+    const { settings, config } = await this.config(opts.seriesKey ?? seriesKeyFromUrl(opts.sourceUrl));
+    const out: StoredResult[] = [];
+    for (const p of parts) {
+      const ref = await this.db.get<string>('kv', `strip:${await this.cacheKey(p.bytes, config, { generic: opts.generic, fonts: lookOf(settings.fonts) })}`);
+      const r = ref ? await this.getResult(ref) : undefined;
+      if (!r || (r.fontScale ?? 1) !== (settings.fonts.scale ?? 1)) return undefined;
+      out.push(r);
+    }
+    return out;
+  }
+
   async getContext(seriesKey: string | undefined): Promise<TranslationContext | undefined> {
     if (!seriesKey) return undefined;
     return (await this.db.get<TranslationContext>('contexts', seriesKey)) ?? emptyContext(seriesKey, seriesKey);

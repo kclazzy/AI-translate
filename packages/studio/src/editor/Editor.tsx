@@ -1136,6 +1136,8 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
             style={{ left: cursorAt[0], top: cursorAt[1], width: Math.max(4, brush * zoom), height: Math.max(4, brush * zoom), borderColor: tool === 'brush' ? brushColor : undefined }}
           />
         ) : null}
+        {/* The eyedropper: a yellow ring, seen on white bubbles and dark art alike. */}
+        {tool === 'picker' && cursorAt ? <div className="ait-brush-cursor picker" data-testid="picker-ring" aria-hidden style={{ left: cursorAt[0], top: cursorAt[1], width: 22, height: 22 }} /> : null}
         <div
           ref={stageRef}
           className={`ait-stage ${tool === 'select' ? '' : 'drawing'}`}
@@ -1143,13 +1145,13 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           onScroll={onStageScroll}
           onPointerMove={(e) => {
             const r = wrapRef.current?.getBoundingClientRect();
-            if (r && painting && !resizing.current) setCursorAt([e.clientX - r.left, e.clientY - r.top]);
+            if (r && (painting || tool === 'picker') && !resizing.current) setCursorAt([e.clientX - r.left, e.clientY - r.top]);
           }}
           onContextMenu={(e) => {
             if (painting) e.preventDefault();
           }}
           onPointerLeave={() => setCursorAt(null)}
-          style={{ cursor: tool === 'select' ? 'default' : tool === 'picker' ? 'copy' : painting ? 'none' : 'crosshair' }}
+          style={{ cursor: tool === 'select' ? 'default' : tool === 'picker' ? 'crosshair' : painting ? 'none' : 'crosshair' }}
         >
           <div ref={innerRef} className="ait-stage-inner" style={{ width: page.width * zoom, height: page.height * zoom }}>
             {marks?.map((y) => <div key={`m${y}`} className="ait-page-mark" style={{ top: y * zoom }} aria-hidden />)}

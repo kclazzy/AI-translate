@@ -27,7 +27,7 @@ describe('three AI modes', () => {
     expect(aiModeOf(s)).toBe('cloud');
     expect(s.visionProviderId).toBe('gm');
     // Pictures may leave the computer now (they could not with «only this computer»).
-    expect(s.privacy).toBe('hybrid');
+    expect(s.privacy).toBe('cloud');
     s = apply(s, 'engine');
     expect(aiModeOf(s)).toBe('engine');
     s = apply(s, 'ollama');

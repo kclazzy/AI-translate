@@ -44,7 +44,9 @@ await new Promise((r) => site.listen(18091, '127.0.0.1', r));
 const { server: llm } = await startMockLlm(18090);
 // A slow "local model": forwards to the mock after a delay.
 const DELAY = 6000;
+let posts = 0;
 const slow = createServer((req, res) => {
+  if (req.method === 'POST') posts++;
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
   req.on('end', () =>
@@ -198,6 +200,74 @@ try {
   await page.screenshot({ path: join(OUT, 'queue-lost.png') });
   const done = await doneCount();
   check('after the worker restarts, lost pictures are re-sent and the chapter finishes by itself', done >= 3 && !t2.some((t) => /потерялась|В очереди/.test(t)), `done=${done} in ${Math.round((Date.now() - t0) / 1000)} s ${JSON.stringify(t2)}`);
+
+  // ---- The page opened again: what was translated is shown, the model is not asked again --------
+  {
+    const asked = posts;
+    await page.reload();
+    await page.waitForFunction(() => [...document.images].every((i) => i.complete));
+    await new Promise((r) => setTimeout(r, 800));
+    await studio.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ url: 'http://127.0.0.1:18091/*' });
+      await chrome.runtime.sendMessage({ type: 'popup-command', command: 'translate-page', tabId: tab.id });
+    });
+    await page.bringToFront();
+    await new Promise((r) => setTimeout(r, DELAY + 3000));
+    const t = await overlayTexts(page);
+    check('after a reload the translated pictures come from the store: the model is not asked again', posts === asked && !t.some((x) => /перед ней|следующая|\d:\d\d/.test(x)), `asked ${posts - asked}× ${JSON.stringify(t)}`);
+  }
+
+  // ---- «Остановить» stops the page: nothing is sent again by itself -----------------------------
+  {
+    await studio.evaluate(async () => {
+      const db = await new Promise((res) => {
+        const r = indexedDB.open('ai-translate', 1);
+        r.onsuccess = () => res(r.result);
+      });
+      const tx = db.transaction(['results', 'kv'], 'readwrite');
+      tx.objectStore('results').clear();
+      const kv = tx.objectStore('kv');
+      const keys = await new Promise((res) => {
+        const g = kv.getAllKeys();
+        g.onsuccess = () => res(g.result);
+      });
+      for (const k of keys) if (String(k).startsWith('src:') || String(k).startsWith('strip:')) kv.delete(k);
+      await new Promise((r) => (tx.oncomplete = r));
+    });
+    await page.reload();
+    await page.waitForFunction(() => [...document.images].every((i) => i.complete));
+    await new Promise((r) => setTimeout(r, 800));
+    await studio.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ url: 'http://127.0.0.1:18091/*' });
+      await chrome.runtime.sendMessage({ type: 'popup-command', command: 'translate-page', tabId: tab.id });
+    });
+    await page.bringToFront();
+    await new Promise((r) => setTimeout(r, 2500));
+    // The panel's button sits in a closed shadow root: found and clicked through CDP.
+    const c = await page.target().createCDPSession();
+    const { root } = await c.send('DOM.getDocument', { depth: -1, pierce: true });
+    let stopId = null;
+    const walk = (n) => {
+      if (n.nodeName === 'BUTTON' && (n.children ?? []).some((x) => x.nodeType === 3 && x.nodeValue === 'Остановить')) stopId = n.backendNodeId;
+      (n.children ?? []).forEach(walk);
+      (n.shadowRoots ?? []).forEach(walk);
+    };
+    walk(root);
+    let clicked = false;
+    if (stopId) {
+      const { model } = await c.send('DOM.getBoxModel', { backendNodeId: stopId });
+      const q = model.content;
+      await page.mouse.click((q[0] + q[4]) / 2, (q[1] + q[5]) / 2);
+      clicked = true;
+    }
+    await c.detach();
+    // A request already on its way may still reach the model; nothing after it.
+    await new Promise((r) => setTimeout(r, 2000));
+    const atStop = posts;
+    await new Promise((r) => setTimeout(r, DELAY * 2 + 6000));
+    const t = await overlayTexts(page);
+    check('«Остановить» stops the page: no picture is sent to the model again by itself', clicked && posts === atStop && !t.some((x) => /перед ней|следующая|\d:\d\d|В очереди/.test(x)), `clicked=${clicked} asked after stop ${posts - atStop}× ${JSON.stringify(t)}`);
+  }
 } catch (e) {
   check('unexpected failure', false, String(e?.stack ?? e));
 } finally {

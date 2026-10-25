@@ -91,7 +91,8 @@ export function applyAiMode(s: AppSettings, mode: AiMode): Partial<AppSettings> 
     visionProviderId: p.id,
     // A separate translator of the other kind (a cloud one in the local mode) is not carried over.
     ...(translator && isLocalProvider(translator) !== (mode === 'ollama') ? { translationProviderId: null } : {}),
-    ...(mode === 'cloud' && s.privacy === 'local' ? { privacy: 'hybrid' as const } : {}),
+    // An online model reads the pictures: they have to be let out (any stricter setting would refuse every page).
+    ...(mode === 'cloud' && s.privacy !== 'cloud' ? { privacy: 'cloud' as const } : {}),
     modeProviders: remember,
   };
 }

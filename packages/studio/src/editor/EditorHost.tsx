@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { cropRows, pageForSpan, shiftBlock, tilesToImage, TiledImage, type AppSettings, type PageResult, type TextBlock, type Project, type ProjectPage } from '@ait/core';
+import { cropRows, readHardware, pageForSpan, shiftBlock, tilesToImage, TiledImage, type AppSettings, type PageResult, type TextBlock, type Project, type ProjectPage } from '@ait/core';
 import { usePlatform } from '../platform';
 import { cropProjectPage, loadOriginalImage, rerenderProjectPage, type ProjectStore } from '../projects';
 import { ErrorBox } from '../ui';
@@ -40,6 +40,12 @@ export interface Skipped {
  */
 export const STACK_MAX_PIXELS = 40_000_000;
 
+/** The strip's pixels for this computer: more with more memory (8 GB: a webtoon chapter of ~110 000 px at 800 wide). */
+export function stackMaxPixels(): number {
+  const gb = readHardware().memoryGb;
+  return gb === undefined ? 60_000_000 : gb >= 8 ? 90_000_000 : gb >= 4 ? 60_000_000 : STACK_MAX_PIXELS;
+}
+
 /**
  * Stack several cached pages of one width into one tall page (whole-chapter editing). The width is
  * the one of `mainKey` (the page the user opened), so that page is always in the strip. The sizes
@@ -63,11 +69,12 @@ async function loadStack(platform: ReturnType<typeof usePlatform>, keys: string[
   let lo = same.findIndex((x) => x.key === metas[mainAt].key);
   let hi = lo;
   let px = width * same[lo].height;
+  const limit = stackMaxPixels();
   for (let grew = true; grew; ) {
     grew = false;
     for (const side of [1, -1]) {
       const j = side > 0 ? hi + 1 : lo - 1;
-      if (j < 0 || j >= same.length || px + width * same[j].height > STACK_MAX_PIXELS) continue;
+      if (j < 0 || j >= same.length || px + width * same[j].height > limit) continue;
       px += width * same[j].height;
       if (side > 0) hi = j;
       else lo = j;

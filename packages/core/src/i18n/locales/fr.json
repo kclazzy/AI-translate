@@ -1380,5 +1380,9 @@
  "подготовка на процессоре (декодирование, поиск текста, распознавание)": "préparation sur le processeur (décodage, détection du texte, reconnaissance)",
  "прочее": "autre",
  "следующая страница ждёт памяти": "la page suivante attend de la mémoire",
- "стирание и вёрстка (модели нечего делать)": "effacement et mise en page (rien à faire pour le modèle)"
+ "стирание и вёрстка (модели нечего делать)": "effacement et mise en page (rien à faire pour le modèle)",
+ "Вставьте ключ": "Collez la clé",
+ "Ключ хранится только на этом компьютере. Картинки будут уходить выбранному сервису.": "La clé reste uniquement sur cet ordinateur. Les images iront au service choisi.",
+ "Подключить и переключиться": "Connecter et basculer",
+ "Подключить онлайн-модель": "Connecter un modèle en ligne"
 }

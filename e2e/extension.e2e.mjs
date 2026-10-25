@@ -378,6 +378,10 @@ try {
     // Pipette: the brush takes the colour of the picture where it is clicked (grey screentone here).
     await new Promise((r) => setTimeout(r, 500));
     await ed.click('[aria-label^="Пипетка"]');
+    await ed.mouse.move(sb.x + 24, sb.y + sb.height - 24);
+    await ed.mouse.move(sb.x + 20, sb.y + sb.height - 20);
+    const ring = await ed.$eval('[data-testid="picker-ring"]', (el) => getComputedStyle(el).borderTopColor).catch(() => '');
+    check('the pipette shows a yellow ring where it will take the colour', ring === 'rgb(255, 212, 0)', ring);
     await ed.mouse.click(sb.x + 20, sb.y + sb.height - 20);
     const picked = await ed.$eval('[data-testid="brush-color"]', (el) => el.value);
     const [pr, pg, pb] = [1, 3, 5].map((i) => parseInt(picked.slice(i, i + 2), 16));

@@ -1380,5 +1380,9 @@
  "подготовка на процессоре (декодирование, поиск текста, распознавание)": "preparation on the processor (decoding, text detection, recognition)",
  "прочее": "other",
  "следующая страница ждёт памяти": "the next page waits for memory",
- "стирание и вёрстка (модели нечего делать)": "erasing and typesetting (nothing for the model to do)"
+ "стирание и вёрстка (модели нечего делать)": "erasing and typesetting (nothing for the model to do)",
+ "Вставьте ключ": "Paste the key",
+ "Ключ хранится только на этом компьютере. Картинки будут уходить выбранному сервису.": "The key is kept on this computer only. Pictures will go to the chosen service.",
+ "Подключить и переключиться": "Connect and switch",
+ "Подключить онлайн-модель": "Connect an online model"
 }

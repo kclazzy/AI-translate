@@ -217,6 +217,38 @@ try {
   }
   check('the pack says where the chapter time went: the model, its idle time and why', /Модель занята: \d+%/.test(activity) && /Простой модели: \d+%/.test(activity) && /страниц: [1-9]/.test(activity), activity.slice(0, 600));
   check('«Для анализа» downloads originals, the current translation and all texts in one table', packNames.includes('texts.tsv') && packNames.some((n) => /^001\/original\./.test(n)) && packNames.includes('001/result.jpg') && packNames.includes('001/page.json') && packNames.includes('journal.json') && tsv.includes('page\tblock\ttype'), `${pack} ${packNames.filter((n) => !n.startsWith("0")).join(', ')} rows=${tsv.split('\n').length}`);
+
+  // ---- The editor gets the whole chapter, also the pages the reader took out of the page -----------
+  {
+    const editKeys = async () => {
+      const c = await tab.target().createCDPSession();
+      const { root } = await c.send('DOM.getDocument', { depth: -1, pierce: true });
+      const btns = [];
+      const walk = (n) => {
+        if (n.nodeName === 'BUTTON' && (n.attributes ?? []).join(' ').includes('Править в редакторе')) btns.push(n.backendNodeId);
+        (n.children ?? []).forEach(walk);
+        (n.shadowRoots ?? []).forEach(walk);
+      };
+      walk(root);
+      if (!btns.length) return null;
+      const opened = browser.waitForTarget((t) => t.url().includes('studio.html?key='), { timeout: 10000 }).catch(() => null);
+      const { object } = await c.send('DOM.resolveNode', { backendNodeId: btns.at(-1) });
+      await c.send('Runtime.callFunctionOn', { objectId: object.objectId, functionDeclaration: 'function () { this.click(); }' });
+      await c.detach();
+      const t = await opened;
+      if (!t) return null;
+      const keys = new URL(t.url()).searchParams.get('chapter')?.split(',').filter(Boolean) ?? [];
+      await (await t.page())?.close().catch(() => {});
+      return keys;
+    };
+    await tab.bringToFront();
+    const before = await editKeys();
+    // A reader takes the first page out of the page when it is far from the screen.
+    await tab.evaluate(() => document.querySelector('img[src="/p1.png"]')?.remove());
+    await new Promise((r) => setTimeout(r, 1500));
+    const after = await editKeys();
+    check('the editor gets every translated page of the chapter, also one the reader took out', !!before && before.length >= 3 && !!after && after.length === before.length && after.join() === before.join(), `before=${before?.length} after=${after?.length}`);
+  }
 } catch (e) {
   check('unexpected failure', false, String(e?.stack ?? e));
 } finally {

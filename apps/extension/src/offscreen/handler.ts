@@ -437,6 +437,18 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       const task: Task = { key, subs: new Map(), delivered: new Set(), blobs: msg.type === 'run' ? [msg.blobId] : [] };
       tasks.set(key, task);
       subscribe(task, jobId, sub);
+      // Translated before with these settings: shown at once, not after the pages in the queue.
+      if (msg.type === 'run' && !force) {
+        const hit = await readBytes(msg.blobId).then(({ bytes }) => service.cachedResult(bytes, { sourceUrl: msg.pageUrl, generic })).catch(() => undefined);
+        if (hit && tasks.get(key) === task) {
+          task.delivered.add(0);
+          const rendered = toRendered(hit, true);
+          emitTo(task, null, emit, (id, s) => ({ source: 'offscreen', type: 'done', jobId: id, tabId: s.tabId, result: rendered }));
+          void rememberSrc(msg.imageSrc, hit.key);
+          forget(task);
+          return { queued: false, cached: true };
+        }
+      }
       /** The picture's bytes: the ones read ahead when there are any, else from the job store. */
       const bytesOf = async (blobId: string) => {
         const ahead = task.read;
@@ -526,6 +538,21 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       const task: Task = { key, subs: new Map(), delivered: new Set(), blobs: msg.parts.map((p) => p.blobId) };
       tasks.set(key, task);
       jobIds.forEach((id, part) => subscribe(task, id, { tabId, doc, part }));
+      // Every piece translated before (in any grouping): shown at once, without a place in the queue.
+      if (!msg.force) {
+        const parts = await Promise.all(msg.parts.map((p) => readBytes(p.blobId).catch(() => null)));
+        const hits = parts.every(Boolean) ? await service.cachedStrip(parts as { bytes: Uint8Array }[], { sourceUrl: msg.pageUrl }).catch(() => undefined) : undefined;
+        if (hits && tasks.get(key) === task) {
+          hits.forEach((r, i) => {
+            task.delivered.add(i);
+            const rendered = toRendered(r, true);
+            emitTo(task, i, emit, (id, s) => ({ source: 'offscreen', type: 'done', jobId: id, tabId: s.tabId, result: rendered }));
+            void rememberSrc(msg.parts[i].src, r.key);
+          });
+          forget(task);
+          return { queued: false, cached: true };
+        }
+      }
       void queue
         .add({
           key,

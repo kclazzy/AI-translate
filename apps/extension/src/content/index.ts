@@ -129,6 +129,25 @@ function main() {
     return out;
   }
 
+  /** Results shown in this chapter → where their picture was (document y), for the editor's page list. */
+  const chapterSeen = new Map<string, number>();
+  /** Every translated picture of the chapter in reading order: on the page now, and taken out by the reader. */
+  function chapterKeysInOrder(): string[] {
+    const now = pageItemsInOrder().flatMap((x) => (x.result ? [x.result.key] : []));
+    // Where each picture was when first shown (pictures taken out later move the rest up, so the
+    // first place is the one that keeps the reading order).
+    for (const x of pageItemsInOrder()) if (x.result && !chapterSeen.has(x.result.key)) chapterSeen.set(x.result.key, x.cand.el.getBoundingClientRect().top + scrollY);
+    const gone = [...chapterSeen.keys()].filter((k) => !now.includes(k));
+    const out = [...now];
+    // A picture no longer on the page goes back where it stood among the ones that are.
+    for (const k of gone.sort((a, b) => chapterSeen.get(a)! - chapterSeen.get(b)!)) {
+      const y = chapterSeen.get(k)!;
+      const at = out.findIndex((x) => (chapterSeen.get(x) ?? Infinity) > y);
+      out.splice(at < 0 ? out.length : at, 0, k);
+    }
+    return out;
+  }
+
   function showResult(it: Item, result: RenderedTiles) {
     if (result.tilesOmitted) {
       it.status = 'working';
@@ -149,6 +168,9 @@ function main() {
     // The overlay keeps its own copies of the pictures; holding the base64 tiles too would
     // double the memory on long webtoon pages.
     it.result = { ...result, tiles: [] };
+    // The chapter as translated so far, in reading order: readers take far pages out of the page,
+    // and the editor still gets the whole chapter (see onEdit).
+    if (!it.docRect && !chapterSeen.has(result.key) && it.cand.el.isConnected) chapterSeen.set(result.key, it.cand.el.getBoundingClientRect().top + scrollY);
     it.overlay.setOriginal(originalsShown);
     const qa = result.page.blocks.flatMap((b) => [
       ...(b.qa?.issues ?? []).map((q) => `• ${q.code ? tr(q.code, ...(q.args ?? [])) : q.note}${b.qa?.before !== undefined ? tr(' (исправлено)') : ''}`),
@@ -436,7 +458,7 @@ function main() {
         const it = items.get(id);
         if (!it?.result) return;
         // The other translated pictures of this column: the editor can show them as one strip.
-        const chapterKeys = pageItemsInOrder().flatMap((x) => (x.result ? [x.result.key] : []));
+        const chapterKeys = chapterKeysInOrder();
         void send({ type: 'open-editor', key: it.result.key, chapter: chapterKeys.length > 1 ? chapterKeys : undefined });
       },
       onRetry: () => {
@@ -1126,12 +1148,18 @@ ${chapterStats(list)}`;
     const button = root.querySelector('button') as HTMLButtonElement;
     button.addEventListener('click', () => {
       if (progress?.finished) return hidePageProgress();
-      for (const it of items.values()) {
-        if (it.status !== 'queued' && it.status !== 'working') continue;
-        dismissed.add(it.cand.el);
-        void send({ type: 'cancel', id: it.req ?? it.id }).catch(() => undefined);
-      }
+      // Everything of this page stops: the pictures in work and waiting go (their overlays too —
+      // left as «waiting», the status check would take them for lost and send them again), and the
+      // pictures gathered for the next strip are not sent.
       pageMode = false;
+      strip = [];
+      if (stripTimer) clearTimeout(stripTimer);
+      stripTimer = null;
+      for (const it of [...items.values()]) {
+        if (it.status !== 'queued' && it.status !== 'working') continue;
+        if (!it.docRect) dismissed.add(it.cand.el);
+        dropItem(it);
+      }
       hidePageProgress();
     });
     document.documentElement.appendChild(host);
@@ -1484,6 +1512,7 @@ ${chapterStats(list)}`;
 
   function onNewChapter() {
     pageMode = false;
+    chapterSeen.clear();
     dismissed = new WeakSet();
     strip = [];
     if (stripTimer) clearTimeout(stripTimer);

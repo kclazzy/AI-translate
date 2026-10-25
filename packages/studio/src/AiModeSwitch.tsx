@@ -1,6 +1,6 @@
-import { aiModeOf, aiModesAvailable, applyAiMode, applyOcrTranslator, BROWSER_TRANSLATOR_ID, ocrTranslators, type AiMode, type AppSettings } from '@ait/core';
+import { aiModeOf, aiModesAvailable, applyAiMode, applyOcrTranslator, BROWSER_TRANSLATOR_ID, configFromPreset, ocrTranslators, PROVIDER_PRESETS, shortId, type AiMode, type AppSettings } from '@ait/core';
 import { tr } from '@ait/core/i18n';
-import { useContext } from 'react';
+import { useContext, useState } from 'react';
 import { OcrModelsCard } from './ocr';
 import { startOcrSetup } from './ocrSetup';
 import { PlatformContext } from './platform';
@@ -28,6 +28,7 @@ export function aiModeHint(m: AiMode): string {
  */
 export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = true, onPick }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; compact?: boolean; force?: boolean; ocrHere?: boolean; onPick?: (m: AiMode, next: AppSettings) => void }) {
   const platform = useContext(PlatformContext);
+  const [connect, setConnect] = useState(false);
   const now = aiModeOf(s);
   const can = { ...aiModesAvailable(s), ...(ocrHere ? {} : { ocr: false }) };
   const need = (m: AiMode) => (m === 'engine' ? tr('Укажите адрес движка в настройках') : m === 'cloud' ? tr('Добавьте онлайн-сервер с моделью, читающей картинки') : m === 'ocr' ? (ocrHere ? tr('Нужен Chrome 138 или новее (встроенный переводчик) либо сервер с моделью для перевода') : tr('Распознавание в браузере доступно в расширении для ПК')) : tr('Добавьте Ollama или LM Studio'));
@@ -36,15 +37,18 @@ export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = tr
       <div className="ait-seg" role="group" aria-label={tr('Режим работы ИИ')}>
         {MODES.map((m) => {
           const enabled = can[m];
+          // «Облако» with no online model yet: the click offers to connect one right here.
+          const offer = m === 'cloud' && !enabled && !compact && !!platform?.secrets;
           return (
             <button
               key={m}
               type="button"
               data-mode={m}
               aria-pressed={now === m}
-              disabled={!enabled}
+              disabled={!enabled && !offer}
               title={enabled ? aiModeHint(m) : need(m)}
               onClick={() => {
+                if (offer) return setConnect(!connect);
                 const patch = applyAiMode(s, m) ?? (m === 'engine' ? { pipeline: 'engine' as const } : null);
                 if (!patch) return;
                 update(patch);
@@ -59,6 +63,7 @@ export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = tr
           );
         })}
       </div>
+      {connect && !can.cloud ? <CloudConnect settings={s} update={update} onDone={() => setConnect(false)} /> : null}
       {compact ? null : <small className="ait-muted ait-set-hint">{aiModeHint(now)}</small>}
       {now === 'ocr' ? <OcrTranslatorPick settings={s} update={update} /> : null}
       {now === 'ocr' && !compact ? <OcrModelsCard settings={s} /> : null}
@@ -98,5 +103,51 @@ function OcrTranslatorPick({ settings: s, update }: { settings: AppSettings; upd
         ))}
       </select>
     </label>
+  );
+}
+
+/** Connect an online model that reads pictures in one step: the service, its key, «Подключить» — and the mode is «Облако». */
+function CloudConnect({ settings: s, update, onDone }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; onDone: () => void }) {
+  const platform = useContext(PlatformContext);
+  const presets = PROVIDER_PRESETS.filter((p) => !p.local && p.vision);
+  const [preset, setPreset] = useState(presets.find((p) => p.preset === 'gemini')?.preset ?? presets[0]?.preset ?? '');
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const p = presets.find((x) => x.preset === preset);
+  const go = async () => {
+    if (!p || !platform) return;
+    setBusy(true);
+    try {
+      const cfg = configFromPreset(p.preset, shortId(p.preset + '-'));
+      if (key.trim()) await platform.secrets.set(`provider:${cfg.id}`, key.trim());
+      const next = { ...s, providers: [...s.providers, cfg] };
+      update({ providers: next.providers, ...(applyAiMode(next, 'cloud') ?? {}) });
+      onDone();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="ait-notice" data-testid="cloud-connect" style={{ display: 'grid', gap: 8 }}>
+      <b>{tr('Подключить онлайн-модель')}</b>
+      <label className="ait-field">
+        <span>{tr('Сервис')}</span>
+        <select className="ait-select" value={preset} onChange={(e) => setPreset(e.target.value)}>
+          {presets.map((x) => <option key={x.preset} value={x.preset}>{tr(x.label)}</option>)}
+        </select>
+      </label>
+      {p?.needsKey !== false ? (
+        <label className="ait-field">
+          <span>{tr('Ключ API')}</span>
+          <input className="ait-input" type="password" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="off" placeholder={tr('Вставьте ключ')} />
+          {p?.hint ? <small className="ait-muted">{tr(p.hint)}</small> : null}
+        </label>
+      ) : null}
+      <span style={{ display: 'flex', gap: 8 }}>
+        <button type="button" className="ait-btn" disabled={busy || (p?.needsKey !== false && !key.trim())} onClick={() => void go()}>{tr('Подключить и переключиться')}</button>
+        <button type="button" className="ait-btn ghost" onClick={onDone}>{tr('Отмена')}</button>
+      </span>
+      <small className="ait-muted">{tr('Ключ хранится только на этом компьютере. Картинки будут уходить выбранному сервису.')}</small>
+    </div>
   );
 }
