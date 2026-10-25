@@ -633,6 +633,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
                 </select>
               </Field>
               <SetSwitch testId="translate-logo" checked={!!s.translateLogo} onChange={(translateLogo) => update({ translateLogo })} label={tr('Переводить логотип названия')} hint={tr('Выключено: логотип, титры авторов и названия магазинов остаются как нарисованы.')} />
+              <SetSwitch testId="qa-after-show" checked={s.qaAfterShow !== false} onChange={(qaAfterShow) => update({ qaAfterShow })} label={tr('Показывать перевод до проверки')} hint={tr('Страница появляется сразу после вёрстки, проверка моделью идёт следом и перерисовывает то, что исправила.')} />
               <SetSwitch testId="qa-batch" checked={!!s.qaBatch} onChange={(qaBatch) => update({ qaBatch })} label={tr('Проверять несколько коротких страниц за раз')} hint={tr('Быстрее в режимах „Быстро“ и „Баланс“; в „Максимум“ каждая страница проверяется отдельно.')} />
               <SetSwitch
                 checked={s.twoStepTranslation ?? (s.quality !== 'fast' && !s.fastLocal)}

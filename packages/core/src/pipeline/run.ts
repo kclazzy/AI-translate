@@ -14,8 +14,8 @@ import { qaBatchPlan, qaPage } from '../translate/qa';
 import { addStep, recording } from './debug';
 import { selfCheckPageAsync } from './selfcheck';
 
-export async function runPipeline(req: PipelineRequest & { batchReview?: boolean }, deps: StandaloneDeps): Promise<PipelineOutput & { reviewLater?: boolean }> {
-  const out: PipelineOutput & { reviewLater?: boolean } = req.config.mode === 'engine' ? await runEnginePipeline(req, deps) : await runStandalonePipeline(req, deps);
+export async function runPipeline(req: PipelineRequest & { batchReview?: boolean }, deps: StandaloneDeps): Promise<PipelineOutput & { reviewLater?: boolean | 'now' }> {
+  const out: PipelineOutput & { reviewLater?: boolean | 'now' } = req.config.mode === 'engine' ? await runEnginePipeline(req, deps) : await runStandalonePipeline(req, deps);
   const mode = req.config.qa ?? 'off';
   if (mode !== 'off' && !req.generic && out.page.blocks.length) {
     const t0 = performance.now();
@@ -41,6 +41,11 @@ export async function runPipeline(req: PipelineRequest & { batchReview?: boolean
     else if (plan === 'batch' && req.batchReview && provider && mode !== 'rules') {
       provider = null;
       out.reviewLater = true;
+    } else if (req.batchReview && req.config.qaAfterShow && provider && mode !== 'rules') {
+      // Shown first, checked after: the rule checks now, the model's review right after the page
+      // is stored (it redraws what it fixed), not waited for by the reader.
+      provider = null;
+      out.reviewLater = 'now';
     }
     const usage = await qaPage(out.page.blocks, { provider, mode, targetLang: req.config.targetLang, glossary: req.config.glossary, context: out.context ?? req.context, signal: req.signal });
     out.page.usage = [...out.page.usage, ...usage];

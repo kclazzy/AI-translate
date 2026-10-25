@@ -174,6 +174,11 @@ export interface AppSettings {
    */
   qaBatch?: boolean;
   /**
+   * The page is shown as soon as it is typeset; the model's translation check runs after it and
+   * redraws what it fixed (default on). Off: the page waits for the check.
+   */
+  qaAfterShow?: boolean;
+  /**
    * Self-check after typesetting (default on): leftover lettering, text outside the bubble, too
    * small text, art changed around the bubble, text colour; fixed locally where it is obvious,
    * otherwise shown among the editor's remarks.
@@ -422,6 +427,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     interfaceLang: 'string',
     skipEmptyPages: 'boolean',
     qaBatch: 'boolean',
+    qaAfterShow: 'boolean',
     selfCheck: 'boolean',
     autoOptimal: 'boolean',
     fallbackProviderId: 'string',

@@ -1317,5 +1317,8 @@
  "Только с замечаниями": "Só com observações",
  "Увеличивать маленькие сканы (нейросеть ~5 МБ)": "Ampliar digitalizações pequenas (rede ~5 MB)",
  "переводчик браузера": "tradutor do navegador",
- "Распознавание текста: {0} с на {1}": "Reconhecimento de texto: {0} s em {1}"
+ "Распознавание текста: {0} с на {1}": "Reconhecimento de texto: {0} s em {1}",
+ "Показывать перевод до проверки": "Mostrar a tradução antes da revisão",
+ "Страница появляется сразу после вёрстки, проверка моделью идёт следом и перерисовывает то, что исправила.": "A página aparece assim que é diagramada; o modelo a revisa logo depois e redesenha o que corrigiu.",
+ "Очистка шла во время перевода: быстрее на {0} с": "A limpeza ocorreu durante a tradução: {0} s mais rápido"
 }

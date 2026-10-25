@@ -1317,5 +1317,8 @@
  "Только с замечаниями": "Nur mit Hinweisen",
  "Увеличивать маленькие сканы (нейросеть ~5 МБ)": "Kleine Scans vergrößern (Netz ~5 MB)",
  "переводчик браузера": "Übersetzer des Browsers",
- "Распознавание текста: {0} с на {1}": "Texterkennung: {0} s auf {1}"
+ "Распознавание текста: {0} с на {1}": "Texterkennung: {0} s auf {1}",
+ "Показывать перевод до проверки": "Übersetzung vor der Prüfung zeigen",
+ "Страница появляется сразу после вёрстки, проверка моделью идёт следом и перерисовывает то, что исправила.": "Die Seite erscheint sofort nach dem Setzen; das Modell prüft sie gleich danach und zeichnet Korrekturen neu.",
+ "Очистка шла во время перевода: быстрее на {0} с": "Bereinigung lief während der Übersetzung: {0} s schneller"
 }

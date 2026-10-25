@@ -289,7 +289,7 @@ export class TranslateService {
       const pic = await this.enlarge(bytes, realMime, config, opts.signal);
       const run = (cfg: PipelineConfig, ahead = prepared) =>
         runPipeline(
-          { bytes: pic.bytes, mime: pic.mime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic, noSkip, prepared: ahead, batchReview: !!cfg.qaBatch && !opts.generic, freshContext },
+          { bytes: pic.bytes, mime: pic.mime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic, noSkip, prepared: ahead, batchReview: !opts.generic, freshContext },
           { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector, ocr: this.reader },
         );
       const { value: out, lighter, fallback } = await this.runWithStandIn(config, settings, opts, run);
@@ -343,7 +343,7 @@ export class TranslateService {
       // Context merged and the sentence tail known: the next page of the series may go on.
       releaseTurn();
       void this.journal({ key, page, storeMs: Math.round(performance.now() - tStore), vision: config.vision, force: opts.force }).catch(() => undefined);
-      if (out.reviewLater) this.queueReview({ key, seriesKey, config, context: out.context ?? context, blocks: structuredClone(page.blocks) });
+      if (out.reviewLater) this.queueReview({ key, seriesKey, config, context: out.context ?? context, blocks: structuredClone(page.blocks) }, out.reviewLater === 'now');
       await this.recordUsage(rendered.page.usage);
       if (settings.saveHistory) await this.addHistory({ key, url: opts.sourceUrl, title: opts.title, date: now, pages: 1, targetLang: config.targetLang, model: (config.translator ?? config.vision)?.model ?? 'engine', status: 'done' });
       this.scheduleCompact(key);
@@ -1223,12 +1223,13 @@ export class TranslateService {
   // ---- batched translation check ------------------------------------------------------------
 
   /** A short page waits (up to QA_BATCH.waitMs, or until 4 pages) to be reviewed with its neighbours. */
-  private queueReview(item: PendingReview): void {
+  /** `now`: a long page shown before its check — reviewed at once (with the short pages waiting in its group). */
+  private queueReview(item: PendingReview, now = false): void {
     const group = `${item.seriesKey ?? ''}|${item.config.targetLang}|${(item.config.translator ?? item.config.vision)?.id ?? ''}`;
     let g = this.reviews.get(group);
     if (!g) this.reviews.set(group, (g = { items: [] }));
     g.items.push(item);
-    if (g.items.length >= QA_BATCH.maxPages) this.flushReviewGroup(group);
+    if (now || g.items.length >= QA_BATCH.maxPages) this.flushReviewGroup(group);
     else if (!g.timer) g.timer = setTimeout(() => this.flushReviewGroup(group), QA_BATCH.waitMs);
   }
 

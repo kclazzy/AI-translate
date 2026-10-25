@@ -57,6 +57,8 @@ export interface PipelineConfig {
   skipEmptyPages?: boolean;
   /** Short pages are reviewed in batches, tiny ones by rules only (see settings.qaBatch). */
   qaBatch?: boolean;
+  /** The model's check after the page is shown (see AppSettings.qaAfterShow). */
+  qaAfterShow?: boolean;
   /** Self-check after typesetting (see pipeline/selfcheck.ts); default on. */
   selfCheck?: boolean;
 }
@@ -148,6 +150,7 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     upscale: (s.pipeline !== 'engine' && s.upscaleMode === 'browser') || undefined,
     skipEmptyPages: s.skipEmptyPages ?? true,
     qaBatch: s.qaBatch || undefined,
+    qaAfterShow: s.qaAfterShow !== false || undefined,
     selfCheck: s.selfCheck ?? true,
     translateLogo: s.translateLogo || undefined,
     // Default: on with a local model (the picture is most of its time), off for a cloud one.

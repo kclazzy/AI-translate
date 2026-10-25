@@ -357,6 +357,7 @@ function main() {
       t.detectorWindows && !r.cached
         ? tr('Поиск текста: считал {0} с на {1}, ждал видеокарту {2} с', s1(t.detectorRunMs), t.detectorEp === 'webgpu' ? tr('видеокарте') : tr('процессоре'), s1(t.detectorWaitMs))
         : '',
+      t.overlapMs && t.overlapMs >= 300 && !r.cached ? tr('Очистка шла во время перевода: быстрее на {0} с', s1(t.overlapMs)) : '',
       t.ocrMs && !r.cached ? tr('Распознавание текста: {0} с на {1}', s1(t.ocrMs), t.ocrEp === 'webgpu' ? tr('видеокарте') : tr('процессоре')) : '',
       t.llmCalls && !r.cached ? tr('Запросов к модели: {0}, модель отвечала {1} с', t.llmCalls, s1(t.llmMs)) + (t.tokensPerSec ? tr(', {0} токенов/с', fmtNumber(Math.round(t.tokensPerSec))) : '') : '',
       tr('Токены: {0} на входе, {1} на выходе', fmtNumber(tokIn), fmtNumber(tokOut)),

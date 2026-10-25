@@ -811,6 +811,10 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   let cleaned: TiledImage | null = null;
   let tTranslated = 0;
   let tCleaned = 0;
+  // The cleaning: when it began, when it stopped to wait for the translation, when that was in.
+  let tCleanStart = 0;
+  let tCleanPause = 0;
+  let tJoined = 0;
   let inpaintMs = 0;
   const artMasks: { box: Box; mask: Uint8Array }[] = [];
   let artRedrawn = false;
@@ -989,104 +993,131 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     addStep(debug, `${b.id} kept as drawn (${why})`);
   }
 
-  await takeFreshContext();
-
+  // From here two things go at once: the translation (the model, once the previous page has left
+  // its context) and the cleaning (this computer: the letters erased, the bubbles found, LaMa). The
+  // cleaning needs only the boxes and the original, not the translation; the translation is worked
+  // out without touching the blocks and put in when both are done (`apply`), so the cleaning sees
+  // the blocks as they were read. What the translation changes about erasing (a «speech» that is a
+  // sound effect kept as drawn) is put right after (see `erasedAs`).
+  const contextReady = takeFreshContext();
   // Lines of the previous pages the model copied into this page (it got them as context): kept
   // only where lettering really stands under the box (see cleanOne), never drawn over the art.
-  const echoes = new Set(blocks.filter((b) => echoesContext(b.originalText, req.context?.recentLines ?? [])).map((b) => b.id));
-  if (echoes.size) addStep(debug, `text repeating earlier pages: ${[...echoes].join(', ')} (checked for lettering)`);
+  let echoes = new Set<string>();
   const dropped = new Set<string>();
-
   stage('translating');
-  if (separate) {
-    const translator = recording(createProvider(translatorCfg!, deps.fetchImpl), 'translate', debug);
-    // Blocks the reading step already translated (see readTranslated) keep that translation.
-    const pre = new Set(merged.flatMap((l, i) => (l.pre ? [`b${i + 1}`] : [])));
-    // A joined block without a translation for both halves is translated as one.
-    for (const id of rejoined) if (!blocks.find((b) => b.id === id)?.translatedText) pre.delete(id);
-    // Translated on an earlier page of the series (a sign on the wall, a line said again): the same words.
-    for (const b of blocks) {
-      const known = b.translate && !pre.has(b.id) ? rememberedTranslation(req.context, b.originalText, b.textType) : undefined;
-      if (!known) continue;
-      b.translatedText = known;
-      pre.add(b.id);
-      addStep(debug, `${b.id} translated as on an earlier page`);
-    }
-    const toTranslate = blocks.filter((b) => b.translate && !pre.has(b.id)).map((b) => ({ id: b.id, type: b.textType, text: b.originalText, speaker: b.speaker, gender: b.speakerGender }));
-    const res = await translateBlocks(translator, promptInput(config, req.context), toTranslate, { signal });
-    usage.push(...res.usage);
-    entities = entities.concat(res.entities);
-    if (res.summary) summaries.push(res.summary);
-    for (const b of blocks) {
-      if (pre.has(b.id)) continue;
-      const t = res.translations.get(b.id);
-      if (t) {
-        b.translatedText = t.text;
-        if (t.type) b.textType = t.type;
-        if (t.lowConfidence) b.lowConfidence = true;
-        // Re-typed by the translator (a «speech» that is a sound effect): the filters apply to the new type.
-        if (!wanted(config, b.textType, b.originalText) || (b.textType === 'SFX' && !config.translateSfx)) {
-          b.translate = false;
-          b.translatedText = b.originalText;
-        }
-      } else if (b.translate) {
-        b.translatedText = b.originalText;
-        b.lowConfidence = true;
+  let tTranslated2 = 0;
+  const translation = (async (): Promise<() => void> => {
+    await contextReady;
+    const apply: (() => void)[] = [];
+    if (separate) {
+      const translator = recording(createProvider(translatorCfg!, deps.fetchImpl), 'translate', debug);
+      // Blocks the reading step already translated (see readTranslated) keep that translation.
+      const pre = new Set(merged.flatMap((l, i) => (l.pre ? [`b${i + 1}`] : [])));
+      // A joined block without a translation for both halves is translated as one.
+      for (const id of rejoined) if (!blocks.find((b) => b.id === id)?.translatedText) pre.delete(id);
+      // Translated on an earlier page of the series (a sign on the wall, a line said again): the same words.
+      const known = new Map<string, string>();
+      for (const b of blocks) {
+        const k = b.translate && !pre.has(b.id) ? rememberedTranslation(req.context, b.originalText, b.textType) : undefined;
+        if (!k) continue;
+        known.set(b.id, k);
+        pre.add(b.id);
       }
-    }
-  } else {
-    // The model got stuck on a drawn-out word («COOOME…» → «Хххххххх»): ask once more as text only.
-    // …and a block the model left untranslated (no "translation": the original text came back).
-    const untranslated = (b: TextBlock) => /\p{L}{2,}/u.test(b.originalText) && normText(b.translatedText) === normText(b.originalText) && !scriptFits(detectScript(b.originalText), config.targetLang);
-    const stuck = blocks.filter((b) => b.translate && (isDegenerate(b.translatedText, b.originalText) || untranslated(b)));
-    if (stuck.length) {
-      addStep(debug, `stuck or missing translation asked again as text: ${stuck.map((b) => b.id).join(', ')}`);
-      try {
-        const res = await translateBlocks(recording(createProvider(config.vision!, deps.fetchImpl), 'translate', debug), promptInput(config, req.context), stuck.map((b) => ({ id: b.id, type: b.textType, text: b.originalText, speaker: b.speaker, gender: b.speakerGender })), { signal, retries: 1 });
+      const mine = [...blocks];
+      const toTranslate = mine.filter((b) => b.translate && !pre.has(b.id)).map((b) => ({ id: b.id, type: b.textType, text: b.originalText, speaker: b.speaker, gender: b.speakerGender }));
+      const res = await translateBlocks(translator, promptInput(config, req.context), toTranslate, { signal });
+      apply.push(() => {
+        for (const [id, k] of known) {
+          const b = mine.find((x) => x.id === id)!;
+          b.translatedText = k;
+          addStep(debug, `${id} translated as on an earlier page`);
+        }
         usage.push(...res.usage);
-        for (const b of stuck) {
+        entities = entities.concat(res.entities);
+        if (res.summary) summaries.push(res.summary);
+        for (const b of mine) {
+          if (pre.has(b.id)) continue;
           const t = res.translations.get(b.id);
           if (t) {
             b.translatedText = t.text;
+            if (t.type) b.textType = t.type;
             if (t.lowConfidence) b.lowConfidence = true;
+            // Re-typed by the translator (a «speech» that is a sound effect): the filters apply to the new type.
+            if (!wanted(config, b.textType, b.originalText) || (b.textType === 'SFX' && !config.translateSfx)) {
+              b.translate = false;
+              b.translatedText = b.originalText;
+            }
+          } else if (b.translate) {
+            b.translatedText = b.originalText;
+            b.lowConfidence = true;
           }
         }
-      } catch (e) {
-        if ((e as { code?: string }).code === 'CANCELLED') throw e;
+      });
+    } else {
+      // The model got stuck on a drawn-out word («COOOME…» → «Хххххххх»): ask once more as text only.
+      // …and a block the model left untranslated (no "translation": the original text came back).
+      const untranslated = (b: TextBlock) => /\p{L}{2,}/u.test(b.originalText) && normText(b.translatedText) === normText(b.originalText) && !scriptFits(detectScript(b.originalText), config.targetLang);
+      const stuck = blocks.filter((b) => b.translate && (isDegenerate(b.translatedText, b.originalText) || untranslated(b)));
+      if (stuck.length) {
+        addStep(debug, `stuck or missing translation asked again as text: ${stuck.map((b) => b.id).join(', ')}`);
+        try {
+          const res = await translateBlocks(recording(createProvider(config.vision!, deps.fetchImpl), 'translate', debug), promptInput(config, req.context), stuck.map((b) => ({ id: b.id, type: b.textType, text: b.originalText, speaker: b.speaker, gender: b.speakerGender })), { signal, retries: 1 });
+          apply.push(() => {
+            usage.push(...res.usage);
+            for (const b of stuck) {
+              const t = res.translations.get(b.id);
+              if (t) {
+                b.translatedText = t.text;
+                if (t.lowConfidence) b.lowConfidence = true;
+              }
+            }
+          });
+        } catch (e) {
+          if ((e as { code?: string }).code === 'CANCELLED') throw e;
+        }
       }
+      apply.push(() => {
+        for (const b of blocks) {
+          if (b.translate && isDegenerate(b.translatedText, b.originalText)) {
+            b.translatedText = b.originalText;
+            b.lowConfidence = true;
+            continue;
+          }
+          b.translatedText = tameRuns(b.translatedText);
+          const v = findViolations(b.translatedText, findGlossaryHits(b.originalText, config.glossary));
+          if (v.length) b.translatedText = applyForbiddenFixes(b.translatedText, v);
+        }
+      });
     }
-    for (const b of blocks) {
-      if (b.translate && isDegenerate(b.translatedText, b.originalText)) {
-        b.translatedText = b.originalText;
-        b.lowConfidence = true;
-        continue;
+    apply.push(() => {
+      for (const b of blocks) {
+        if (b.textType !== 'SFX' || !b.translate || !b.translatedText) continue;
+        const fixed = fixSfx(b.originalText, b.translatedText, config.targetLang);
+        if (fixed !== b.translatedText) {
+          addStep(debug, `${b.id}: sound «${b.translatedText}» → «${fixed}»`);
+          b.translatedText = fixed;
+        }
       }
-      b.translatedText = tameRuns(b.translatedText);
-      const v = findViolations(b.translatedText, findGlossaryHits(b.originalText, config.glossary));
-      if (v.length) b.translatedText = applyForbiddenFixes(b.translatedText, v);
-    }
-  }
-  for (const b of blocks) {
-    if (b.textType !== 'SFX' || !b.translate || !b.translatedText) continue;
-    const fixed = fixSfx(b.originalText, b.translatedText, config.targetLang);
-    if (fixed !== b.translatedText) {
-      addStep(debug, `${b.id}: sound «${b.translatedText}» → «${fixed}»`);
-      b.translatedText = fixed;
-    }
-  }
-  if (!separate) {
-    // One request read and translated the page: a text the series already has keeps its translation.
-    for (const b of blocks) {
-      const known = b.translate ? rememberedTranslation(req.context, b.originalText, b.textType) : undefined;
-      if (known && known !== b.translatedText) {
-        b.translatedText = known;
-        addStep(debug, `${b.id} translated as on an earlier page`);
+      if (!separate) {
+        // One request read and translated the page: a text the series already has keeps its translation.
+        for (const b of blocks) {
+          const known = b.translate ? rememberedTranslation(req.context, b.originalText, b.textType) : undefined;
+          if (known && known !== b.translatedText) {
+            b.translatedText = known;
+            addStep(debug, `${b.id} translated as on an earlier page`);
+          }
+        }
       }
-    }
-  }
-  tTranslated = performance.now();
+    });
+    tTranslated2 = performance.now();
+    return () => {
+      for (const f of apply) f();
+    };
+  })();
+  // Started at once: a failure waits for the cleaning to stop (below), then is the page's error.
+  translation.catch(() => undefined);
 
-  stage('cleaning');
+  tCleanStart = performance.now();
   cleaned = original.clone();
   await yieldIfBusy();
   // Cleaning reads hundreds of regions of both pictures: keep their pixels at hand meanwhile.
@@ -1103,8 +1134,37 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     }
     const closedBubble = new Map<string, boolean>();
     const letterHeight = new Map<string, number>();
+    /** Whether each block's letters were erased, as decided when it was cleaned (before the translation was in). */
+    const erasedAs = new Map<string, boolean>();
+    const erases = (b: TextBlock) => b.translate && !(b.textType === 'SFX' && config.sfxStyle === 'original');
+    /** LaMa over the art under these letters (in the engine or in this browser), the outcome noted for the page. */
+    const redrawWithLama = async (masks: { box: Box; mask: Uint8Array }[]): Promise<void> => {
+      if (!masks.length || !config.lama) return;
+      // The engine gets the picture only on this computer / network, unless the cloud is allowed.
+      const viaEngine = config.lama === 'engine' && config.engine?.url && (config.privacy === 'cloud' || isLocalUrl(config.engine.url));
+      const tl = performance.now();
+      let why = '';
+      let done = false;
+      if (viaEngine && lama !== 'engine-down') {
+        done = (await redrawArt(original, cleaned!, masks, engineInpainter(config.engine!, deps), signal, (e) => (why = errorText(e)))) > 0;
+        if (why) {
+          lama = 'engine-down';
+          addStep(debug, `LaMa: the engine at ${config.engine!.url} did not answer (${why})${deps.inpaint ? ' → LaMa in the browser' : ''}`);
+        }
+      } else if (config.lama === 'engine' && !viaEngine) lama = 'engine-down';
+      if (!done && deps.inpaint && (config.lama === 'browser' || lama === 'engine-down' || lama === 'browser-instead')) {
+        why = '';
+        done = (await redrawArt(original, cleaned!, masks, deps.inpaint, signal, (e) => (why = errorText(e)))) > 0;
+        if (why) addStep(debug, `LaMa in the browser failed (${why})`);
+        if (done && lama === 'engine-down') lama = 'browser-instead';
+      } else if (!deps.inpaint && config.lama === 'browser') lama = 'not-downloaded';
+      if (done) artRedrawn = true;
+      if (done && !lama) lama = 'ok';
+      inpaintMs += Math.round(performance.now() - tl);
+    };
     const cleanOne = async (b: TextBlock): Promise<void> => {
-      const erase = b.translate && !(b.textType === 'SFX' && config.sfxStyle === 'original');
+      const erase = erases(b);
+      erasedAs.set(b.id, erase);
       if (req.generic) {
         // UI/screen text: no bubbles; paint a plate behind the text instead.
         const r = cleanBlock(cleaned!, b.bbox, { analyzeOnly: !erase, expand: config.inpaintExpand });
@@ -1121,6 +1181,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       const placed = erase && b.textType !== 'SFX' ? placeOnLettering(b) : true;
       await yieldIfBusy();
       if (!placed) {
+        erasedAs.set(b.id, false);
         // The model's box holds no letters and none stand nearby: keep the translation where the
         // model put it, but never erase the art there and never shout over it in big light letters.
         b.lowConfidence = true;
@@ -1253,10 +1314,53 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       blocks.some((o) => (sameText(o.originalText, nb.originalText) && (nearBoxes(o.bbox, nb.bbox) || (!!o.bubble && intersects(o.bubble.box, nb.bbox)))) || sameText(o.originalText, nb.originalText, 0.9) || scrapOf(nb, o)) ||
       echoesContext(nb.originalText, req.context?.recentLines ?? []);
     const groupsOf = new Map<string, { groups: Box[]; lettering?: Lettering }>();
-    for (const b of blocks) {
+    // Blocks that can never be taken for an echo of an earlier page (letters stand under them, or
+    // the detector sees text there) are cleaned at once, while the translation is on its way; the
+    // others once the previous page's context is known.
+    const sure = (b: TextBlock) => req.generic || !!dets?.some((d) => isTextKind(d.kind) && overlapRatio(d.box, b.bbox) > 0.4) || lettersUnder(b);
+    const later: TextBlock[] = [];
+    for (const b of [...blocks]) {
+      if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+      if (!sure(b)) {
+        later.push(b);
+        continue;
+      }
       await cleanOne(b);
       // Other messages (the editor, status polls) get their turn between blocks.
       await yieldIfBusy();
+    }
+    await contextReady.catch(() => undefined);
+    echoes = new Set(blocks.filter((b) => echoesContext(b.originalText, req.context?.recentLines ?? [])).map((b) => b.id));
+    if (echoes.size) addStep(debug, `text repeating earlier pages: ${[...echoes].join(', ')} (checked for lettering)`);
+    for (const b of later) {
+      if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+      await cleanOne(b);
+      await yieldIfBusy();
+    }
+    // LaMa for what is cleaned so far, still while the translation may be on its way.
+    const lamaDone = artMasks.length;
+    if (lamaDone) await redrawWithLama(artMasks.slice(0, lamaDone));
+    // The translation (waited for only now), put into the blocks.
+    tCleanPause = performance.now();
+    const putIn = await translation;
+    tJoined = performance.now();
+    stage('cleaning');
+    putIn();
+    tTranslated = tTranslated2;
+    // What the translation changed about erasing: a «speech» re-typed as a sound effect kept as
+    // drawn gets its letters back; a block to erase now that was not, is cleaned now.
+    for (const b of [...blocks]) {
+      const was = erasedAs.get(b.id);
+      if (was === undefined || dropped.has(b.id)) continue;
+      const now = erases(b);
+      if (was && !now) {
+        const pad = (config.inpaintExpand ?? 3) + 6;
+        for (const box of [b.bbox, ...(b.textBox ? [b.textBox] : [])]) {
+          const [x, y, w, h] = clampBox(expandBox(box, pad), original.width, original.height);
+          cleaned.putRegion(original.getRegion(x, y, w, h), x, y);
+        }
+        addStep(debug, `${b.id} kept as drawn after the translation → its letters put back`);
+      } else if (!was && now) await cleanOne(b);
     }
     if (dropped.size) blocks = blocks.filter((b) => !dropped.has(b.id));
     // One block whose lettering stands in separate groups far apart (two speeches in joined
@@ -1330,27 +1434,8 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     blocks = mergeSharedBubbles(blocks, closedBubble);
     if (blocks.length < before) addStep(debug, `${before - blocks.length} block(s) merged into shared bubbles`);
     separateAreas(blocks);
-    if (artMasks.length && config.lama) {
-      // The engine gets the picture only on this computer / network, unless the cloud is allowed.
-      const viaEngine = config.lama === 'engine' && config.engine?.url && (config.privacy === 'cloud' || isLocalUrl(config.engine.url));
-      const tl = performance.now();
-      let why = '';
-      if (viaEngine) {
-        artRedrawn = (await redrawArt(original, cleaned, artMasks, engineInpainter(config.engine!, deps), signal, (e) => (why = errorText(e)))) > 0;
-        if (why) {
-          lama = 'engine-down';
-          addStep(debug, `LaMa: the engine at ${config.engine!.url} did not answer (${why})${deps.inpaint ? ' → LaMa in the browser' : ''}`);
-        }
-      } else if (config.lama === 'engine') lama = 'engine-down';
-      if (!artRedrawn && deps.inpaint && (config.lama === 'browser' || lama === 'engine-down')) {
-        why = '';
-        artRedrawn = (await redrawArt(original, cleaned, artMasks, deps.inpaint, signal, (e) => (why = errorText(e)))) > 0;
-        if (why) addStep(debug, `LaMa in the browser failed (${why})`);
-        if (artRedrawn && lama === 'engine-down') lama = 'browser-instead';
-      } else if (!deps.inpaint && config.lama === 'browser') lama = 'not-downloaded';
-      if (artRedrawn && !lama) lama = 'ok';
-      inpaintMs = Math.round(performance.now() - tl);
-    }
+    // The rest of the art for LaMa (blocks cleaned after the translation, text read again).
+    if (artMasks.length > lamaDone) await redrawWithLama(artMasks.slice(lamaDone));
   } finally {
     // Also when the page fails half-way (cancelled): the copies are not kept with the pictures.
     for (const release of released) release();
@@ -1378,8 +1463,11 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         ocrMs,
         ...(ocrEp ? { ocrEp } : {}),
         translateMs: blocksOut.length ? Math.round(tTranslated - tDetected) : 0,
-        // Includes inpaintMs (as before LaMa was measured on its own).
-        cleanMs: blocksOut.length ? Math.round(tCleaned - tTranslated) : 0,
+        // Includes inpaintMs (as before LaMa was measured on its own). The cleaning's own work: it
+        // ran while the translation was on its way, then went on once it was in.
+        cleanMs: blocksOut.length && tCleanStart ? Math.round(tCleanPause - tCleanStart + (tCleaned - tJoined)) : 0,
+        // Time the cleaning and the translation ran at once (saved against one after the other).
+        ...(blocksOut.length && tCleanStart && tJoined > tCleanStart ? { overlapMs: Math.max(0, Math.round(Math.min(tTranslated, tCleanPause) - tCleanStart)) } : {}),
         inpaintMs,
         ...(detectorMs ? { detectorMs } : {}),
         ...(prep.detectorStats?.windows ? { detectorRunMs: prep.detectorStats.runMs, detectorWaitMs: prep.detectorStats.waitMs, detectorWindows: prep.detectorStats.windows, ...(prep.detectorStats.ep ? { detectorEp: prep.detectorStats.ep } : {}) } : {}),
