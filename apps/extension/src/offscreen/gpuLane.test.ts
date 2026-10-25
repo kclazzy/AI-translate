@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gpuFetch, GpuTimeout, gpuState, GPU_MODEL, GPU_NETS, onGpu, withLimit } from './gpuLane';
+import { gpuFetch, GpuTimeout, gpuState, GPU_MODEL, GPU_NETS, GPU_REVIEW, onGpu, withLimit } from './gpuLane';
 
 const never = () => new Promise<never>(() => undefined);
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -20,6 +20,16 @@ describe('the video card lane', () => {
     const model = onGpu(GPU_MODEL, async () => order.push('model'));
     await Promise.all([hold, nets, model]);
     expect(order).toEqual(['first', 'model', 'nets']);
+  });
+
+  it('the check of pages already shown goes after the pages the reader waits for and their nets', async () => {
+    const order: string[] = [];
+    const hold = onGpu(GPU_MODEL, () => wait(30).then(() => order.push('first')));
+    const review = onGpu(GPU_REVIEW, async () => order.push('review'));
+    const nets = onGpu(GPU_NETS, async () => order.push('nets'));
+    const model = onGpu(GPU_MODEL, async () => order.push('model'));
+    await Promise.all([hold, review, nets, model]);
+    expect(order).toEqual(['first', 'model', 'nets', 'review']);
   });
 
   it('a cancelled picture stops waiting for its turn', async () => {

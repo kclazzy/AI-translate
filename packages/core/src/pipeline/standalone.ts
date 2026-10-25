@@ -192,6 +192,8 @@ export interface StandaloneDeps {
   inpaint?: Inpainter;
   /** The neural text / bubble detector running in this browser, used when the settings say so. */
   detect?: TextDetector;
+  /** This page's turn on the processor for a stretch of pixel work (see util/cpuLane.ts); at once without it. */
+  cpu?: <T>(fn: () => Promise<T>) => Promise<T>;
 }
 
 export interface View {
@@ -1319,24 +1321,32 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     // others once the previous page's context is known.
     const sure = (b: TextBlock) => req.generic || !!dets?.some((d) => isTextKind(d.kind) && overlapRatio(d.box, b.bbox) > 0.4) || lettersUnder(b);
     const later: TextBlock[] = [];
-    for (const b of [...blocks]) {
-      if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
-      if (!sure(b)) {
-        later.push(b);
-        continue;
+    // The pixel work goes in stretches that never wait for the model or the video card inside: the
+    // processor goes page by page (deps.cpu), the page started first first.
+    const cpu = deps.cpu ?? (<T,>(fn: () => Promise<T>) => fn());
+    await cpu(async () => {
+      for (const b of [...blocks]) {
+        if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+        if (!sure(b)) {
+          later.push(b);
+          continue;
+        }
+        await cleanOne(b);
+        // Other messages (the editor, status polls) get their turn between blocks.
+        await yieldIfBusy();
       }
-      await cleanOne(b);
-      // Other messages (the editor, status polls) get their turn between blocks.
-      await yieldIfBusy();
-    }
+    });
     await contextReady.catch(() => undefined);
     echoes = new Set(blocks.filter((b) => echoesContext(b.originalText, req.context?.recentLines ?? [])).map((b) => b.id));
     if (echoes.size) addStep(debug, `text repeating earlier pages: ${[...echoes].join(', ')} (checked for lettering)`);
-    for (const b of later) {
-      if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
-      await cleanOne(b);
-      await yieldIfBusy();
-    }
+    if (later.length)
+      await cpu(async () => {
+        for (const b of later) {
+          if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+          await cleanOne(b);
+          await yieldIfBusy();
+        }
+      });
     // LaMa for what is cleaned so far, still while the translation may be on its way.
     const lamaDone = artMasks.length;
     if (lamaDone) await redrawWithLama(artMasks.slice(0, lamaDone));
@@ -1347,59 +1357,65 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     stage('cleaning');
     putIn();
     tTranslated = tTranslated2;
-    // What the translation changed about erasing: a «speech» re-typed as a sound effect kept as
-    // drawn gets its letters back; a block to erase now that was not, is cleaned now.
-    for (const b of [...blocks]) {
-      const was = erasedAs.get(b.id);
-      if (was === undefined || dropped.has(b.id)) continue;
-      const now = erases(b);
-      if (was && !now) {
-        const pad = (config.inpaintExpand ?? 3) + 6;
-        for (const box of [b.bbox, ...(b.textBox ? [b.textBox] : [])]) {
-          const [x, y, w, h] = clampBox(expandBox(box, pad), original.width, original.height);
-          cleaned.putRegion(original.getRegion(x, y, w, h), x, y);
-        }
-        addStep(debug, `${b.id} kept as drawn after the translation → its letters put back`);
-      } else if (!was && now) await cleanOne(b);
-    }
-    if (dropped.size) blocks = blocks.filter((b) => !dropped.has(b.id));
-    // One block whose lettering stands in separate groups far apart (two speeches in joined
-    // bubbles, read by the model as one): each group gets its share of the translation in place.
-    // Several blocks in that shape already: each is a speech of its own (see mergeSharedBubbles).
-    const shares = (b: TextBlock) => blocks.some((o) => o !== b && o.bubble && b.bubble && overlapRatio(o.bubble.box, b.bubble.box) > 0.6);
-    const spans = (b: TextBlock, groups: Box[]) => groups.filter((g) => intersects(g, b.bbox)).length;
-    if (groupsOf.size)
-      blocks = blocks.flatMap((b) => {
-        const info = groupsOf.get(b.id);
-        if (!info) return [b];
-        if (spans(b, info.groups) < 2 && shares(b)) return [b];
-        if (info.groups.length > 1) addStep(debug, `block ${b.id} split by ${info.groups.length} lettering groups`);
-        return splitByGroups(b, info.groups, info.lettering, original.width, original.height);
-      });
-    if (!req.generic) {
-      // The model sometimes skips text: a second remark in the same bubble, a line of a long one.
-      // Lettering still standing on a bubble after cleaning is read again from just that part.
-      const probes: LeftoverProbe[] = blocks
-        .filter((b) => b.translate && b.textType !== 'SFX' && b.bubble && (letterHeight.get(b.id) ?? 0) >= 6)
-        .map((b) => ({ area: b.bubble!.box, fill: parseHex(b.bubble!.fill), letterHeight: letterHeight.get(b.id)! }));
-      // …and lettering in light areas nobody reported: a bubble of an unusual shape the model skipped.
-      probes.push(...(await findTextRegions(cleaned)));
-      const known = blocks.flatMap((b) => (b.textBox ? [b.bbox, b.textBox] : [b.bbox]));
-      // What to read again: left-over lettering on bubbles (at most 4) and text the detector is sure
-      // of that no block covers (read as a collage already when the page was: then nothing new).
-      // All of it in one request — a collage of the crops — not one request each; not in «Быстро»,
-      // and not without a model that reads pictures (recognition in the browser).
-      const again: { box: Box; near: number; kind?: Detection['kind']; label: string }[] = [];
-      if (config.quality !== 'fast' && !ocrMode && config.vision.vision) {
-        for (const box of (await findLeftoverText(cleaned, probes, known)).slice(0, 4)) again.push({ box, near: 6, label: 'left-over lettering' });
-        for (const det of dets && !collageUsed ? missedDetections(blocks, dets).slice(0, 6) : []) again.push({ box: det.box.map(Math.round) as Box, near: 4, kind: det.kind, label: 'text found by the detector' });
+    // What to read again (left-over lettering, text the detector saw that no block covers).
+    let again: { box: Box; near: number; kind?: Detection['kind']; label: string }[] = [];
+    await cpu(async () => {
+      // What the translation changed about erasing: a «speech» re-typed as a sound effect kept as
+      // drawn gets its letters back; a block to erase now that was not, is cleaned now.
+      for (const b of [...blocks]) {
+        const was = erasedAs.get(b.id);
+        if (was === undefined || dropped.has(b.id)) continue;
+        const now = erases(b);
+        if (was && !now) {
+          const pad = (config.inpaintExpand ?? 3) + 6;
+          for (const box of [b.bbox, ...(b.textBox ? [b.textBox] : [])]) {
+            const [x, y, w, h] = clampBox(expandBox(box, pad), original.width, original.height);
+            cleaned!.putRegion(original.getRegion(x, y, w, h), x, y);
+          }
+          addStep(debug, `${b.id} kept as drawn after the translation → its letters put back`);
+        } else if (!was && now) await cleanOne(b);
       }
-      if (again.length) {
-        try {
-          for (const a of again) addStep(debug, `${a.label} read again at [${a.box.join(',')}]`);
-          const crops = again.map((a) => clampBox(expandBox(a.box, Math.round(Math.max(a.box[2], a.box[3]) * 0.3) + 12), original.width, original.height));
-          const r = await recognizeRegions(original, crops, config, deps, { context: req.context, signal, idPrefix: 'x', debug });
-          usage.push(...r.usage);
+      if (dropped.size) blocks = blocks.filter((b) => !dropped.has(b.id));
+      // One block whose lettering stands in separate groups far apart (two speeches in joined
+      // bubbles, read by the model as one): each group gets its share of the translation in place.
+      // Several blocks in that shape already: each is a speech of its own (see mergeSharedBubbles).
+      const shares = (b: TextBlock) => blocks.some((o) => o !== b && o.bubble && b.bubble && overlapRatio(o.bubble.box, b.bubble.box) > 0.6);
+      const spans = (b: TextBlock, groups: Box[]) => groups.filter((g) => intersects(g, b.bbox)).length;
+      if (groupsOf.size)
+        blocks = blocks.flatMap((b) => {
+          const info = groupsOf.get(b.id);
+          if (!info) return [b];
+          if (spans(b, info.groups) < 2 && shares(b)) return [b];
+          if (info.groups.length > 1) addStep(debug, `block ${b.id} split by ${info.groups.length} lettering groups`);
+          return splitByGroups(b, info.groups, info.lettering, original.width, original.height);
+        });
+      if (!req.generic) {
+        // The model sometimes skips text: a second remark in the same bubble, a line of a long one.
+        // Lettering still standing on a bubble after cleaning is read again from just that part.
+        const probes: LeftoverProbe[] = blocks
+          .filter((b) => b.translate && b.textType !== 'SFX' && b.bubble && (letterHeight.get(b.id) ?? 0) >= 6)
+          .map((b) => ({ area: b.bubble!.box, fill: parseHex(b.bubble!.fill), letterHeight: letterHeight.get(b.id)! }));
+        // …and lettering in light areas nobody reported: a bubble of an unusual shape the model skipped.
+        probes.push(...(await findTextRegions(cleaned!)));
+        const known = blocks.flatMap((b) => (b.textBox ? [b.bbox, b.textBox] : [b.bbox]));
+        // What to read again: left-over lettering on bubbles (at most 4) and text the detector is sure
+        // of that no block covers (read as a collage already when the page was: then nothing new).
+        // All of it in one request — a collage of the crops — not one request each; not in «Быстро»,
+        // and not without a model that reads pictures (recognition in the browser).
+        if (config.quality !== 'fast' && !ocrMode && config.vision!.vision) {
+          for (const box of (await findLeftoverText(cleaned!, probes, known)).slice(0, 4)) again.push({ box, near: 6, label: 'left-over lettering' });
+          for (const det of dets && !collageUsed ? missedDetections(blocks, dets).slice(0, 6) : []) again.push({ box: det.box.map(Math.round) as Box, near: 4, kind: det.kind, label: 'text found by the detector' });
+        }
+      }
+    });
+    if (again.length) {
+      try {
+        for (const a of again) addStep(debug, `${a.label} read again at [${a.box.join(',')}]`);
+        const crops = again.map((a) => clampBox(expandBox(a.box, Math.round(Math.max(a.box[2], a.box[3]) * 0.3) + 12), original.width, original.height));
+        // The model's request outside the processor's stretch: other pages clean meanwhile.
+        const r = await recognizeRegions(original, crops, config, deps, { context: req.context, signal, idPrefix: 'x', debug });
+        usage.push(...r.usage);
+        await cpu(async () => {
           for (const nb of r.blocks) {
             // The crop it came from: we know where the missed letters are; the model's box is only approximate.
             const from = again[r.from.get(nb.id) ?? 0];
@@ -1424,10 +1440,10 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
             const at = blocks.findIndex((o) => o.bbox[1] > nb.bbox[1]);
             blocks.splice(at < 0 ? blocks.length : at, 0, nb);
           }
-        } catch (e) {
-          if ((e as { code?: string }).code === 'CANCELLED') throw e;
-          // A failed extra read never fails the page.
-        }
+        });
+      } catch (e) {
+        if ((e as { code?: string }).code === 'CANCELLED') throw e;
+        // A failed extra read never fails the page.
       }
     }
     const before = blocks.length;

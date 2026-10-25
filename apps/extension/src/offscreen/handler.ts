@@ -9,7 +9,7 @@ import { db, loadSettings, secrets } from '../shared/store';
 import { lamaDownloaded, lamaInpainter, releaseLama } from './lama';
 import { detectorDownloaded, releaseDetector, textDetector } from './detector';
 import { releaseUpscaler, upscaleNet, upscalerDownloaded } from './upscale';
-import { gpuFetch, setWorkWaiting } from './gpuLane';
+import { GPU_REVIEW, gpuFetch, MODEL_LIMIT_MS, setWorkWaiting } from './gpuLane';
 import { ocrDeviceFor, ocrDownloaded, readText, setOcrDevice } from './ocr';
 import '../shared/browserTranslate';
 import { setUiLang, tr } from '@ait/core/i18n';
@@ -24,6 +24,8 @@ encodeAtOnce(true);
  */
 // The local model, the detector and LaMa take turns on the video card (see gpuLane.ts).
 export const service = new TranslateService(db, secrets, browserBackend, loadSettings, gpuFetch() as FetchLike);
+// The check of pages already shown waits for the pages the reader waits for (and their nets).
+service.reviewFetch = gpuFetch(fetch, MODEL_LIMIT_MS, GPU_REVIEW) as FetchLike;
 service.releaseGpu = async () => {
   await releaseDetector();
   await releaseLama();

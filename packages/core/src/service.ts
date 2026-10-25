@@ -7,6 +7,7 @@ import { pipelineConfigFromSettings, pipelineHash, type PipelineConfig } from '.
 import { renderOutput, runPipeline, styleDefaultsFor, type RenderedPage } from './pipeline/run';
 import { FALLBACK_ON, fallbackConfig } from './pipeline/fallback';
 import { upscaleBytes, type UpscaleNet } from './image/upscale';
+import { CpuLane } from './util/cpuLane';
 import { DEFAULT_CACHE_MAX_MB, type AppSettings } from './settings';
 import type { IdbStore } from './storage/idb';
 import type { SecretStore } from './storage/secrets';
@@ -116,6 +117,8 @@ export interface TranslateOptions {
   onStage?: (e: StageEvent) => void;
   /** Keep the local model loaded at least this long (minutes) — set while a chapter is in the queue. */
   keepAliveMin?: number;
+  /** Its place among the pages in work (the processor goes to the lowest first); given by `translate`. */
+  order?: number;
 }
 
 export const MAX_INPUT_BYTES = 60 * 1024 * 1024;
@@ -143,6 +146,8 @@ export function seriesKeyFromUrl(url: string | undefined): string | undefined {
 export class TranslateService {
   /** LaMa in this browser (set by the extension when the model is downloaded). */
   inpainter?: Inpainter;
+  /** How the model's check of pages already shown talks to the model (a lower priority on the video card); the usual fetch otherwise. */
+  reviewFetch?: FetchLike;
   /** The upscaler for small scans in this browser (set by the extension when the model is downloaded; see image/upscale.ts). */
   upscaler?: UpscaleNet;
   /** Pictures made bigger lately, by the hash of their bytes (the page prepared ahead and its translation share one). */
@@ -177,6 +182,11 @@ export class TranslateService {
   private deriving = new Map<string, Promise<unknown>>();
   /** Per series: done when the latest started page has its context merged (see freshContext). */
   private turns = new Map<string, Promise<void>>();
+  /** The processor's stretches of pixel work, page by page in the order the pages were started. */
+  private cpuLane = new CpuLane();
+  private pageSeq = 0;
+  /** Pages that let the next one of their series go and are still being drawn and stored. */
+  private storing = new Map<string, Promise<void>>();
   /** How long a page waits for the previous one's context (tests make it short). */
   turnWaitMs?: number;
   /** The last speech line at the bottom of the series' latest page (a sentence may go on on the next one). */
@@ -221,6 +231,8 @@ export class TranslateService {
     if (realMime === 'image/tiff') throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: tr('TIFF браузер не открывает — сохраните картинку как PNG или JPG.') });
     if (!realMime) throw new AppError('UNSUPPORTED_FORMAT', { retryable: false, detail: mime });
     const seriesKey = opts.seriesKey ?? seriesKeyFromUrl(opts.sourceUrl);
+    // Its place among the pages in work: the processor goes to the page started first.
+    opts = { ...opts, order: opts.order ?? this.pageSeq++ };
     // Pages of one series in order: this one may read while the previous is still being finished,
     // but translates with the context the previous one leaves. The turn is taken at once (before any
     // await), so pages started one after another keep their order.
@@ -284,13 +296,15 @@ export class TranslateService {
       await waitFor(before, waitMs, opts.signal);
       return this.getContext(seriesKey);
     } : undefined;
+    // Called once the page is stored — or failed (whoever waits for it to be stored goes on).
+    let stored: () => void = () => {};
     try {
       // A small scan twice as big (the cache key stays the one of the bytes as they came).
       const pic = await this.enlarge(bytes, realMime, config, opts.signal);
       const run = (cfg: PipelineConfig, ahead = prepared) =>
         runPipeline(
           { bytes: pic.bytes, mime: pic.mime, config: cfg, context, signal: opts.signal, onStage: opts.onStage, generic: opts.generic, noSkip, prepared: ahead, batchReview: !opts.generic, freshContext },
-          { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector, ocr: this.reader },
+          { backend: this.backend, fetchImpl: this.fetchImpl, inpaint: this.inpainter, detect: this.detector, ocr: this.reader, cpu: this.cpuFor(opts.order) },
         );
       const { value: out, lighter, fallback } = await this.runWithStandIn(config, settings, opts, run);
       // A result made with lighter settings or by the stand-in must not answer for the full-quality
@@ -311,10 +325,20 @@ export class TranslateService {
           });
         } else if (out.context) await this.db.put('contexts', seriesKey, out.context);
       }
+      // Context merged and the sentence tail known: the next page of the series may translate now,
+      // while this one is drawn and stored (it waits for that only to join a sentence across them).
+      if (seriesKey && !opts.generic) this.rememberTail(seriesKey, key, out.page);
+      const storedKey = key;
+      this.storing.set(storedKey, new Promise<void>((r) => (stored = () => (r(), this.storing.get(storedKey) && this.storing.delete(storedKey)))));
+      releaseTurn();
       opts.onStage?.({ stage: 'rendering' });
-      const rendered = await renderOutput(this.backend, out, styleDefaultsFor(config, settings.fonts));
-      const tStore = performance.now();
-      const cleanedTiles = await Promise.all(out.cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') })));
+      // Typesetting and encoding: this page's stretch on the processor.
+      const { rendered, cleanedTiles, tStore } = await this.cpuFor(opts.order)(async () => {
+        const rendered = await renderOutput(this.backend, out, styleDefaultsFor(config, settings.fonts));
+        const tStore = performance.now();
+        const cleanedTiles = await Promise.all(out.cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') })));
+        return { rendered, cleanedTiles, tStore };
+      });
       // The page's pictures are bytes now: their canvases (video memory in a browser, which the
       // garbage collector does not see) go at once — a chapter of 170 pages must not pile them up.
       out.cleaned.dispose();
@@ -339,9 +363,7 @@ export class TranslateService {
         ...(opts.generic ? { generic: true } : {}),
       };
       await this.putResult(key, result);
-      if (seriesKey && !opts.generic) this.rememberTail(seriesKey, key, page);
-      // Context merged and the sentence tail known: the next page of the series may go on.
-      releaseTurn();
+      stored();
       void this.journal({ key, page, storeMs: Math.round(performance.now() - tStore), vision: config.vision, force: opts.force }).catch(() => undefined);
       if (out.reviewLater) this.queueReview({ key, seriesKey, config, context: out.context ?? context, blocks: structuredClone(page.blocks) }, out.reviewLater === 'now');
       await this.recordUsage(rendered.page.usage);
@@ -355,6 +377,7 @@ export class TranslateService {
       }
       throw err;
     } finally {
+      stored();
       releaseTurn();
     }
   }
@@ -546,6 +569,8 @@ export class TranslateService {
     if (!a || !b) return;
     first.translatedText = b;
     page.debug?.steps?.push(`joined with the last line of the previous page: ${first.id}`);
+    // The previous page may still be drawn and stored (it let this one go before that).
+    await this.storing.get(tail.key);
     const prev = await this.getResult(tail.key);
     const pb = prev?.page.blocks.find((x) => x.id === tail.blockId);
     if (!prev || !pb || pb.edited || pb.translatedText !== tail.dst || a === tail.dst) return;
@@ -773,6 +798,11 @@ export class TranslateService {
    * A local model that ran out of video memory gets three more tries, each lighter than the last:
    * other models unloaded, then a smaller context, then a smaller context and picture.
    */
+  /** A page's turn on the processor (see util/cpuLane.ts): by its order among the pages in work. */
+  private cpuFor(order: number | undefined): <T>(fn: () => Promise<T>) => Promise<T> {
+    return (fn) => this.cpuLane.run(order ?? Number.MAX_SAFE_INTEGER, fn);
+  }
+
   /**
    * Run the page with the usual model (lighter retries after «out of memory», see runFitting); when
    * that model does not answer, a stand-in translates it (marked on the page), so a chapter goes on.
@@ -1255,7 +1285,7 @@ export class TranslateService {
     if (!cfg) return;
     // runPipeline checked the privacy mode before it put the page here; checked again all the same.
     assertPrivacy(config.privacy, cfg, 'text');
-    const provider = createProvider(cfg, this.fetchImpl);
+    const provider = createProvider(cfg, this.reviewFetch ?? this.fetchImpl);
     const pages = items.map((i) => i.blocks);
     const usage = await qaPages(pages, { provider, mode: config.qa ?? 'fix', targetLang: config.targetLang, glossary: config.glossary, context: items[items.length - 1].context });
     for (const [i, item] of items.entries()) await this.applyReview(item.key, pages[i], i === 0 ? usage : []);

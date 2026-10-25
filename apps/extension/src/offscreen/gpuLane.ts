@@ -25,6 +25,8 @@ function next(): void {
 
 export const GPU_MODEL = 2;
 export const GPU_NETS = 1;
+/** The model's check of pages already shown: after the pages the reader waits for and their nets. */
+export const GPU_REVIEW = 0.5;
 
 /** One detector or LaMa run (the session is loaded already). */
 export const NETS_LIMIT_MS = 15_000;
@@ -123,7 +125,7 @@ export function isLocalGeneration(url: string, init?: RequestInit): boolean {
 }
 
 /** fetch that holds the card while a local model generates. */
-export function gpuFetch(base: typeof fetch = fetch, limitMs = MODEL_LIMIT_MS): typeof fetch {
+export function gpuFetch(base: typeof fetch = fetch, limitMs = MODEL_LIMIT_MS, priority = GPU_MODEL): typeof fetch {
   return ((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (!isLocalGeneration(url, init)) return base(input, init);
@@ -135,7 +137,7 @@ export function gpuFetch(base: typeof fetch = fetch, limitMs = MODEL_LIMIT_MS): 
     else outer?.addEventListener('abort', follow, { once: true });
     // The whole answer is read inside the turn: the model works until the body ends.
     return onGpu(
-      GPU_MODEL,
+      priority,
       async () => {
         const res = await base(input, { ...init, signal: ctrl.signal });
         const body = await res.arrayBuffer();
