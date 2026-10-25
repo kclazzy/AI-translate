@@ -64,7 +64,7 @@ startActivity({
     if (st === 'translating') return 'context';
     return 'other';
   },
-  save: (sessions) => db.put('kv', 'activity', sessions),
+  save: async (sessions) => void (await db.put('kv', 'activity', sessions)),
   load: () => db.get<ActivitySession[]>('kv', 'activity'),
 });
 let fontsReady: Promise<void> | null = null;
