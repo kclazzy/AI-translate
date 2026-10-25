@@ -37,6 +37,7 @@ import { LamaGetButton, lamaModeOf, useLamaDownloaded } from '../lama';
 import { DetectorChoice } from '../detector';
 import { UpscaleChoice } from '../upscale';
 import { SpeedBenchmark } from './SpeedBenchmark';
+import { ActivityCard } from './ActivityCard';
 import { clearAutoTuned, useAutoTuned } from '../autoOptimal';
 import { LanguagePair } from '../LanguagePair';
 import { ErrorBox, Field, FoldPanel, NumberInput, Segmented, Switch, toast, useAction } from '../ui';
@@ -686,6 +687,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
           </Field>
         </div>
         <SpeedBenchmark settings={s} />
+        <ActivityCard />
         <details className="ait-fine" data-testid="fine-tuning">
           <summary>{tr('Тонкая настройка')}</summary>
           <div className="ait-set-grid">

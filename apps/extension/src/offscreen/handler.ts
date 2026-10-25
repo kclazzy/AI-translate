@@ -12,6 +12,7 @@ import { releaseUpscaler, upscaleNet, upscalerDownloaded } from './upscale';
 import { GPU_REVIEW, gpuFetch, MODEL_LIMIT_MS, setWorkWaiting } from './gpuLane';
 import { ocrDeviceFor, ocrDownloaded, readText, releaseManga, releaseOcr, setOcrDevice } from './ocr';
 import { probeNetsEngine, setNetsEngine } from './ortRuntime';
+import { activitySessions, pageDone, startActivity, type ActivitySession } from './activity';
 import '../shared/browserTranslate';
 import { setUiLang, tr } from '@ait/core/i18n';
 
@@ -47,6 +48,25 @@ const memoryBackoff = new MemoryBackoff();
 queue.gate = (inWork, next) => fitsInMemory(readHardware(), inWork.map((c) => c ?? TYPICAL_PAGE_COST), next ?? TYPICAL_PAGE_COST);
 // The detector and LaMa keep their sessions while pictures still wait (see releaseWhenIdle).
 setWorkWaiting(() => queue.size > 0);
+/** Stages after which a page needs the model no more (only erasing, typesetting, the check). */
+const FINISHING = new Set(['cleaning', 'rendering', 'checking', 'done']);
+const PREPARING = new Set(['decoding', 'detecting', 'ocr']);
+// Where the chapter's time goes, for the analysis pack and the settings (see activity.ts).
+startActivity({
+  hasWork: () => queue.size > 0,
+  idleReason: () => {
+    // The page the model would serve next: the earliest started one still before its translation.
+    const next = [...tasks.values()].filter((t) => t.startedAt && !FINISHING.has(t.stage?.stage ?? '')).sort((a, b) => a.startedAt! - b.startedAt!)[0];
+    if (!next) return queue.waitingForMemory ? 'memory' : [...tasks.values()].some((t) => t.startedAt) ? 'finish' : 'other';
+    const st = next.stage?.stage;
+    if (!st || st === 'queued') return 'picture';
+    if (PREPARING.has(st)) return 'prep';
+    if (st === 'translating') return 'context';
+    return 'other';
+  },
+  save: (sessions) => db.put('kv', 'activity', sessions),
+  load: () => db.get<ActivitySession[]>('kv', 'activity'),
+});
 let fontsReady: Promise<void> | null = null;
 /** A picture with no answer for this long is failed and the queue moves on. */
 const WATCHDOG_LOCAL_MIN = 12;
@@ -488,7 +508,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
           emitTo(task, null, emit, (id, s) => ({ source: 'offscreen', type: 'error', jobId: id, tabId: s.tabId, error }));
           stopQueueAfter(task, error, emit);
         })
-        .finally(() => forget(task));
+        .finally(() => (pageDone(), forget(task)));
       return { queued: true, status: jobStatus(jobId) };
     }
     case 'run-strip': {
@@ -573,7 +593,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
           for (const [id, s] of task.subs) if (!task.delivered.has(s.part)) emit({ source: 'offscreen', type: 'error', jobId: id, tabId: s.tabId, error });
           stopQueueAfter(task, error, emit);
         })
-        .finally(() => forget(task));
+        .finally(() => (pageDone(), forget(task)));
       return { queued: true, status: jobStatus(jobIds[0]) };
     }
     case 'cancel': {
@@ -705,6 +725,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
           platform: 'extension',
           backend: browserBackend,
           journal: await db.get('kv', 'journal'),
+          activity: await activitySessions(),
           errors: await db.get('kv', 'errors'),
         });
         const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/zip' }));

@@ -456,3 +456,4 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ait-fine { margin-top: 12px; border-top: 1px solid var(--line, rgba(127,127,127,.25)); padding-top: 10px; }
 .ait-fine > summary { cursor: pointer; font-weight: 500; }
 .ait-fine[open] > summary { margin-bottom: 10px; }
+.ait-activity { white-space: pre-wrap; font: 12px/1.5 var(--mono, ui-monospace, monospace); background: var(--paper, transparent); padding: 8px 10px; border-radius: 8px; margin: 6px 0; }

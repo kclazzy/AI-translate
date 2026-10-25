@@ -10,7 +10,7 @@ describe('the video card lane', () => {
     const after = onGpu(GPU_MODEL, async () => 'next');
     await expect(stuck).rejects.toBeInstanceOf(GpuTimeout);
     await expect(after).resolves.toBe('next');
-    expect(gpuState()).toEqual({ busy: false, waiting: 0 });
+    expect(gpuState()).toEqual({ busy: false, waiting: 0, holder: null });
   });
 
   it('one at a time, the model first', async () => {
@@ -39,7 +39,7 @@ describe('the video card lane', () => {
     ctrl.abort(new DOMException('stop', 'AbortError'));
     await expect(waiting).rejects.toThrow('stop');
     await hold;
-    expect(gpuState()).toEqual({ busy: false, waiting: 0 });
+    expect(gpuState()).toEqual({ busy: false, waiting: 0, holder: null });
   });
 
   it('a local server that does not answer: the request is stopped as a timeout and the card is free', async () => {
@@ -52,7 +52,7 @@ describe('the video card lane', () => {
     const f = gpuFetch(base, 50);
     await expect(f('http://127.0.0.1:11434/api/chat', { method: 'POST', body: '{}' })).rejects.toMatchObject({ name: 'TimeoutError' });
     expect(aborted).toBe(true);
-    expect(gpuState()).toEqual({ busy: false, waiting: 0 });
+    expect(gpuState()).toEqual({ busy: false, waiting: 0, holder: null });
   });
 
   it('a time limit without the card (work on the processor)', async () => {

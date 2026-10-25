@@ -12,6 +12,8 @@
 type Waiter = { priority: number; seq: number; go: () => void };
 
 let busy = false;
+/** Whose turn it is now (for the idle analysis, see activity.ts). */
+let holder: number | null = null;
 let seq = 0;
 const waiting: Waiter[] = [];
 
@@ -59,6 +61,7 @@ export async function onGpu<T>(priority: number, fn: () => Promise<T>, turn: Gpu
       seq: seq++,
       go: () => {
         signal?.removeEventListener('abort', onAbort);
+        holder = priority;
         go();
       },
     };
@@ -76,6 +79,7 @@ export async function onGpu<T>(priority: number, fn: () => Promise<T>, turn: Gpu
     if (released) return;
     released = true;
     busy = false;
+    holder = null;
     next();
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -107,9 +111,39 @@ export async function withLimit<T>(fn: () => Promise<T>, limitMs: number): Promi
   }
 }
 
-/** Waiting for the card or holding it right now (for tests and the ⓘ line). */
-export function gpuState(): { busy: boolean; waiting: number } {
-  return { busy, waiting: waiting.length };
+/** Waiting for the card or holding it right now (for tests and the ⓘ line); `holder`: the priority of the turn running. */
+export function gpuState(): { busy: boolean; waiting: number; holder: number | null } {
+  return { busy, waiting: waiting.length, holder };
+}
+
+/** Requests to online models answering now (they do not take the card). */
+let online = 0;
+export const onlineInFlight = (): number => online;
+
+/** What Ollama said about a request: loading the model, reading the prompt (with the picture), writing the answer, ms. */
+export type OllamaTimes = { loadMs: number; promptMs: number; genMs: number };
+let onOllama: (t: OllamaTimes) => void = () => {};
+/** Listen to Ollama's own times of each request (activity.ts). */
+export function setOllamaListener(fn: (t: OllamaTimes) => void): void {
+  onOllama = fn;
+}
+
+function ollamaTimes(body: ArrayBuffer): void {
+  // Only a small JSON answer is looked at (a page's answer is a few kB).
+  if (body.byteLength > 2_000_000) return;
+  try {
+    const j = JSON.parse(new TextDecoder().decode(body)) as { load_duration?: number; prompt_eval_duration?: number; eval_duration?: number };
+    if (j.load_duration === undefined && j.eval_duration === undefined) return;
+    onOllama({ loadMs: (j.load_duration ?? 0) / 1e6, promptMs: (j.prompt_eval_duration ?? 0) / 1e6, genMs: (j.eval_duration ?? 0) / 1e6 });
+  } catch {
+    /* not JSON */
+  }
+}
+
+/** A request that makes an online model write (not a list of models, not a health check). */
+function isOnlineGeneration(url: string, init?: RequestInit): boolean {
+  if ((init?.method ?? 'GET').toUpperCase() !== 'POST') return false;
+  return /\/(chat\/completions|messages|generateContent|responses)(\?|$)|:generateContent/.test(url);
 }
 
 /** A request to a model running on this computer (Ollama, LM Studio): the generation itself. */
@@ -128,7 +162,11 @@ export function isLocalGeneration(url: string, init?: RequestInit): boolean {
 export function gpuFetch(base: typeof fetch = fetch, limitMs = MODEL_LIMIT_MS, priority = GPU_MODEL): typeof fetch {
   return ((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (!isLocalGeneration(url, init)) return base(input, init);
+    if (!isLocalGeneration(url, init)) {
+      if (!isOnlineGeneration(url, init)) return base(input, init);
+      online++;
+      return base(input, init).finally(() => online--);
+    }
     // The request itself is stopped too when its time is up (a server that never answers).
     const ctrl = new AbortController();
     const outer = init?.signal;
@@ -141,6 +179,7 @@ export function gpuFetch(base: typeof fetch = fetch, limitMs = MODEL_LIMIT_MS, p
       async () => {
         const res = await base(input, { ...init, signal: ctrl.signal });
         const body = await res.arrayBuffer();
+        ollamaTimes(body);
         return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
       },
       { limitMs, signal: outer },

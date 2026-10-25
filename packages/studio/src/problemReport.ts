@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
-import { sniffImageMime, type AppSettings, type ImageBackend, type PageResult } from '@ait/core';
+import { activityLines, sniffImageMime, type ActivitySession, type AppSettings, type ImageBackend, type PageResult } from '@ait/core';
 import { sanitizeSettings, sanitizeUrl } from './settingsFile';
+import { tr } from '@ait/core/i18n';
 
 type Tile = { y: number; h: number; bytes: Uint8Array };
 
@@ -147,6 +148,9 @@ const ANALYSIS_README = `Пакет для анализа главы — AI Tran
 - journal.json — время каждого этапа, запросы к модели и токены по страницам;
 - errors.json — последние ошибки (код и текст);
 - settings.json — настройки без ключей API;
+- activity.txt / activity.json — куда ушло время последних глав: сколько модель работала,
+  сколько простаивала и почему (картинка качалась, подготовка, ожидание контекста, вёрстка,
+  нехватка памяти), загрузки модели в Ollama;
 - info.txt — версия, модели и число страниц.
 
 Ключей API здесь нет. Адрес страницы не включён. Если картинки личные — не отправляйте файл.
@@ -186,6 +190,8 @@ export async function buildAnalysisPack(input: {
   backend?: ImageBackend;
   journal?: unknown;
   errors?: unknown;
+  /** Where the time of the last chapters went (the extension's activity sessions, newest last). */
+  activity?: ActivitySession[];
   date?: Date;
 }): Promise<{ name: string; bytes: Uint8Array }> {
   const date = input.date ?? new Date();
@@ -202,6 +208,10 @@ export async function buildAnalysisPack(input: {
   if (input.settings) zip.file('settings.json', JSON.stringify(sanitizeSettings(input.settings), null, 2));
   zip.file('journal.json', JSON.stringify(input.journal ?? [], null, 2));
   zip.file('errors.json', JSON.stringify(input.errors ?? [], null, 2));
+  if (input.activity?.length) {
+    zip.file('activity.json', JSON.stringify(input.activity, null, 2));
+    zip.file('activity.txt', input.activity.map((a) => [`${a.startedAt} — ${a.endedAt ?? tr('идёт')}`, ...activityLines(a)].join('\n')).join('\n\n') + '\n');
+  }
   const models = new Set<string>();
   for (const p of input.pages) for (const u of p.page.usage ?? []) models.add(`${u.provider} — ${u.model}`);
   zip.file(

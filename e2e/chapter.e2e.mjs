@@ -206,13 +206,16 @@ try {
   }
   let packNames = [];
   let tsv = '';
+  let activity = '';
   if (pack) {
     await new Promise((r) => setTimeout(r, 500));
     const JSZip = createRequire(join(ROOT, 'packages/studio/package.json'))('jszip');
     const z = await JSZip.loadAsync(readFileSync(join(DL, pack)));
     packNames = Object.keys(z.files);
     tsv = (await z.file('texts.tsv')?.async('string')) ?? '';
+    activity = (await z.file('activity.txt')?.async('string')) ?? '';
   }
+  check('the pack says where the chapter time went: the model, its idle time and why', /Модель занята: \d+%/.test(activity) && /Простой модели: \d+%/.test(activity) && /страниц: [1-9]/.test(activity), activity.slice(0, 600));
   check('«Для анализа» downloads originals, the current translation and all texts in one table', packNames.includes('texts.tsv') && packNames.some((n) => /^001\/original\./.test(n)) && packNames.includes('001/result.jpg') && packNames.includes('001/page.json') && packNames.includes('journal.json') && tsv.includes('page\tblock\ttype'), `${pack} ${packNames.filter((n) => !n.startsWith("0")).join(', ')} rows=${tsv.split('\n').length}`);
 } catch (e) {
   check('unexpected failure', false, String(e?.stack ?? e));
