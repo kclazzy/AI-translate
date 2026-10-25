@@ -8,6 +8,9 @@ import {
   createProvider,
   EngineClient,
   isLocalProvider,
+  MAX_PAGES_IN_FLIGHT,
+  pagesInFlight,
+  readHardware,
   LANGUAGES,
   listOpenAiModels,
   maskKey,
@@ -784,8 +787,8 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               <option value="cloud">{tr('Облако — изображения могут уходить провайдеру')}</option>
             </select>
           </Field>
-          <Field label={tr('Параллельных страниц')}>
-            <NumberInput min={1} max={8} fallback={1} value={s.concurrency} onChange={(concurrency) => update({ concurrency })} />
+          <Field label={tr('Страниц одновременно')}>
+            <PagesInFlight settings={s} update={update} />
           </Field>
         </div>
       </div>
@@ -950,6 +953,36 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
           </span>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** «Страниц одновременно»: «Авто» by this computer's cores and memory, or a number. */
+function PagesInFlight({ settings: s, update }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void }) {
+  const auto = s.concurrencyAuto !== false;
+  const vision = s.providers.find((p) => p.id === s.visionProviderId);
+  const local = s.pipeline !== 'engine' && (!vision || isLocalProvider(vision));
+  const hw = readHardware();
+  const picked = pagesInFlight(hw, { setting: 'auto', local });
+  const about = [hw.cores ? tr('{0} ядер', hw.cores) : '', hw.memoryGb ? tr('{0} ГБ памяти', hw.memoryGb) : ''].filter(Boolean).join(', ');
+  return (
+    <div data-testid="pages-in-flight">
+      <select
+        className="ait-select"
+        value={auto ? 'auto' : String(Math.min(MAX_PAGES_IN_FLIGHT, s.concurrency))}
+        onChange={(e) => (e.target.value === 'auto' ? update({ concurrencyAuto: true }) : update({ concurrencyAuto: false, concurrency: Number(e.target.value) }))}
+        aria-label={tr('Страниц одновременно')}
+      >
+        <option value="auto">{tr('Авто — сейчас {0}', picked.n)}</option>
+        {Array.from({ length: MAX_PAGES_IN_FLIGHT }, (_, i) => (
+          <option key={i} value={String(i + 1)}>{i + 1}</option>
+        ))}
+      </select>
+      <p className="ait-muted" style={{ margin: '4px 0 0', fontSize: 12 }}>
+        {auto
+          ? tr('Подобрано по компьютеру{0}. Следующая страница ждёт, если памяти не хватает.', about ? ` (${about})` : '')
+          : tr('Следующая страница всё равно ждёт, если памяти не хватает.')}
+      </p>
     </div>
   );
 }

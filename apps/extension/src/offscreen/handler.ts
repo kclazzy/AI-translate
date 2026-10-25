@@ -1,4 +1,4 @@
-import { AppError, encodeAtOnce, forgetRemembered, PageWorkers, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
+import { AppError, bytesCost, encodeAtOnce, fitsInMemory, forgetRemembered, isMemoryError, MemoryBackoff, PageWorkers, pagesInFlight, readHardware, TYPICAL_PAGE_COST, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
 import { loadBundledFonts, loadUserFonts } from '@ait/studio/fonts';
 import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
 import { buildAnalysisPack, buildProblemReport, type AnalysisPage } from '@ait/studio/problem-report';
@@ -35,10 +35,15 @@ service.releaseGpu = async () => {
 // the page runs here when they cannot start.
 service.pageWorkers = new PageWorkers(
   () => new Worker(new URL('./pageWorker.ts', import.meta.url), { type: 'module', name: 'ait-page' }),
-  Math.min(3, Math.max(1, (navigator.hardwareConcurrency || 2) - 1)),
+  Math.max(1, Math.min(2, (navigator.hardwareConcurrency || 2) - 1)),
   browserBackend,
 );
 const queue = new TaskQueue(2);
+/** Pages ran out of memory lately: fewer in work for a while (see util/capacity.ts). */
+const memoryBackoff = new MemoryBackoff();
+// The next page waits while the pages in work would take too much memory (costed by their pixels)
+// or the script heap is nearly full; one page always runs.
+queue.gate = (inWork, next) => fitsInMemory(readHardware(), inWork.map((c) => c ?? TYPICAL_PAGE_COST), next ?? TYPICAL_PAGE_COST);
 // The detector and LaMa keep their sessions while pictures still wait (see releaseWhenIdle).
 setWorkWaiting(() => queue.size > 0);
 let fontsReady: Promise<void> | null = null;
@@ -323,7 +328,13 @@ async function prepare() {
   // video card (gpuLane), so the next picture reads while the previous one is erased and typeset on
   // the processor, and translates once the previous one has left its context (service turns).
   // A cloud one gets at most 3 at once.
-  queue.concurrency = local ? 2 : Math.min(3, Math.max(1, settings.concurrency));
+  // How many pages in work at once: by this computer's cores and memory (settings → «Страниц
+  // одновременно»: «Авто» or a number), one fewer for a while after the browser ran out of memory.
+  const hw = readHardware();
+  const flight = pagesInFlight(hw, { setting: settings.concurrencyAuto !== false ? 'auto' : settings.concurrency, local, lowered: memoryBackoff.lowered });
+  queue.concurrency = flight.n;
+  // A thread per page in work, leaving a core for this document.
+  if (service.pageWorkers) service.pageWorkers.size = Math.max(1, Math.min(flight.n, (hw.cores ?? 2) - 1));
   return local;
 }
 
@@ -392,6 +403,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
                   const read = readBytes(msg.blobId);
                   task.read = read;
                   const { bytes } = await read;
+                  queue.setCost(key, bytesCost(bytes));
                   if (task.read !== read) return; // already taken by the run
                   await service.prefetch(bytes, msg.mime, { sourceUrl: msg.pageUrl, generic, force });
                 }
@@ -399,6 +411,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
           run: async (signal) => {
             task.startedAt = Date.now();
             const bytes = msg.type === 'run' ? await bytesOf(msg.blobId) : await cropScreenshot(msg.screenshot, msg.rect, msg.dpr);
+            queue.setCost(key, bytesCost(bytes));
             // Watchdog: a picture that gets no answer for too long fails with a clear reason and
             // the queue moves on (one stuck request must not stop the whole chapter).
             const watch = new AbortController();
@@ -438,6 +451,8 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
           },
         })
         .catch((e) => {
+          // The browser ran out of memory: fewer pages at once for a while.
+          if (isMemoryError(e)) memoryBackoff.hit();
           const error = toAppError(e).toJSON();
           emitTo(task, null, emit, (id, s) => ({ source: 'offscreen', type: 'error', jobId: id, tabId: s.tabId, error }));
           stopQueueAfter(task, error, emit);
@@ -468,6 +483,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
             task.startedAt = Date.now();
             const parts = [];
             for (const p of msg.parts) parts.push({ bytes: (await readBytes(p.blobId)).bytes, mime: p.mime });
+            queue.setCost(key, parts.reduce((n, p) => n + bytesCost(p.bytes), 0));
             const watch = new AbortController();
             const onAbort = () => watch.abort(signal.reason);
             signal.addEventListener('abort', onAbort, { once: true });
@@ -520,6 +536,8 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
           },
         })
         .catch((e) => {
+          // The browser ran out of memory: fewer pages at once for a while.
+          if (isMemoryError(e)) memoryBackoff.hit();
           const error = toAppError(e).toJSON();
           for (const [id, s] of task.subs) if (!task.delivered.has(s.part)) emit({ source: 'offscreen', type: 'error', jobId: id, tabId: s.tabId, error });
           stopQueueAfter(task, error, emit);

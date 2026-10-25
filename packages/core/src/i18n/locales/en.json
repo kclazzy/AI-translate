@@ -1323,5 +1323,11 @@
  "Очистка шла во время перевода: быстрее на {0} с": "Cleaning ran during the translation: {0} s faster",
  "Обрабатывать страницы в фоновых потоках": "Process pages in background threads",
  "Очистка и подготовка картинок идут на нескольких ядрах процессора, по странице на ядро. Выключите, если перевод ведёт себя странно.": "Cleaning and preparing the pictures run on several processor cores, one page per core. Turn it off if translation behaves oddly.",
- "Подготовка и очистка шли в фоновом потоке": "Preparation and cleaning ran in a background thread"
+ "Подготовка и очистка шли в фоновом потоке": "Preparation and cleaning ran in a background thread",
+ "Страниц одновременно": "Pages at once",
+ "Авто — сейчас {0}": "Auto — now {0}",
+ "{0} ядер": "{0} cores",
+ "{0} ГБ памяти": "{0} GB of memory",
+ "Подобрано по компьютеру{0}. Следующая страница ждёт, если памяти не хватает.": "Picked for this computer{0}. The next page waits if memory runs short.",
+ "Следующая страница всё равно ждёт, если памяти не хватает.": "The next page still waits if memory runs short."
 }

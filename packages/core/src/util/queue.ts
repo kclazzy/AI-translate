@@ -10,6 +10,8 @@ export interface QueueTask<T> {
    * waiting task only, one at a time: at most one task is prepared ahead. Failures are ignored.
    */
   prepare?: (signal: AbortSignal) => Promise<void>;
+  /** Memory the task takes while it runs, bytes (see gate; known later: setCost). */
+  cost?: number;
 }
 
 interface Entry<T> extends QueueTask<T> {
@@ -40,8 +42,34 @@ export class TaskQueue {
   private stats: QueueStats = { pending: 0, running: 0, done: 0, failed: 0 };
   private listeners = new Set<(s: QueueStats) => void>();
   private preparing = false;
+  /** The next task waits for memory (the gate said no), not for a free place. */
+  private held = false;
+
+  /**
+   * May the next task start while others run? (`inWork`: the costs of the running ones.) Asked only
+   * when at least one task runs — one is always let in. Checked again whenever a task ends.
+   */
+  gate?: (inWork: (number | undefined)[], next: number | undefined) => boolean;
 
   constructor(public concurrency = 2) {}
+
+  /** The memory a task takes is known now (its picture was read): the gate looks again. */
+  setCost(key: string, cost: number): void {
+    const e = this.entries.get(key);
+    if (!e) return;
+    e.cost = cost;
+    if (!e.started) this.pump();
+  }
+
+  /** Look again whether more tasks may start (more places, memory freed). */
+  kick(): void {
+    this.pump();
+  }
+
+  /** The next task waits for memory now. */
+  get waitingForMemory(): boolean {
+    return this.held;
+  }
 
   add<T>(task: QueueTask<T>): Promise<T> {
     const existing = this.entries.get(task.key);
@@ -134,9 +162,17 @@ export class TaskQueue {
   }
 
   private pump() {
+    this.held = false;
     while (this.running < this.concurrency) {
       const e = this.next();
       if (!e) break;
+      if (this.running > 0 && this.gate) {
+        const inWork = [...this.entries.values()].filter((o) => o.started).map((o) => o.cost);
+        if (!this.gate(inWork, e.cost)) {
+          this.held = true;
+          break;
+        }
+      }
       e.started = true;
       this.running++;
       this.emit();
@@ -165,7 +201,7 @@ export class TaskQueue {
 
   /** The queue is full: prepare the task that starts next (one at a time). */
   private lookahead() {
-    if (this.preparing || this.running < this.concurrency) return;
+    if (this.preparing || (this.running < this.concurrency && !this.held)) return;
     const e = this.next();
     if (!e?.prepare || e.prepareStarted) return;
     e.prepareStarted = true;

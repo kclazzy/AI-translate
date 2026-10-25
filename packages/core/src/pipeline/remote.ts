@@ -319,7 +319,7 @@ export class PageWorkers {
   /** The threads did not work in this browser: every page runs here from now on. */
   broken = false;
 
-  constructor(private readonly make: () => PageWorker, readonly size: number, private readonly backend: ImageBackend, private readonly idleMs = IDLE_MS) {}
+  constructor(private readonly make: () => PageWorker, public size: number, private readonly backend: ImageBackend, private readonly idleMs = IDLE_MS) {}
 
   /** Pages in work in the workers now. */
   get busy(): number {

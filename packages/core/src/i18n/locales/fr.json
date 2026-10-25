@@ -1323,5 +1323,11 @@
  "Очистка шла во время перевода: быстрее на {0} с": "Nettoyage pendant la traduction : {0} s plus rapide",
  "Обрабатывать страницы в фоновых потоках": "Traiter les pages dans des threads en arrière-plan",
  "Очистка и подготовка картинок идут на нескольких ядрах процессора, по странице на ядро. Выключите, если перевод ведёт себя странно.": "Le nettoyage et la préparation des images se font sur plusieurs cœurs du processeur, une page par cœur. Désactivez-le si la traduction se comporte bizarrement.",
- "Подготовка и очистка шли в фоновом потоке": "La préparation et le nettoyage ont tourné dans un thread d'arrière-plan"
+ "Подготовка и очистка шли в фоновом потоке": "La préparation et le nettoyage ont tourné dans un thread d'arrière-plan",
+ "Страниц одновременно": "Pages en même temps",
+ "Авто — сейчас {0}": "Auto — actuellement {0}",
+ "{0} ядер": "{0} cœurs",
+ "{0} ГБ памяти": "{0} Go de mémoire",
+ "Подобрано по компьютеру{0}. Следующая страница ждёт, если памяти не хватает.": "Choisi pour cet ordinateur{0}. La page suivante attend si la mémoire manque.",
+ "Следующая страница всё равно ждёт, если памяти не хватает.": "La page suivante attend quand même si la mémoire manque."
 }

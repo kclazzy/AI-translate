@@ -140,11 +140,20 @@ try {
     s.translationProviderId = null;
     s.privacy = 'local';
     s.pipeline = 'standalone';
-    s.concurrency = 3; // a local model must still run one page at a time
+    // Two pages at once by hand (not by the computer): the third one shows its place in the queue.
+    s.concurrencyAuto = false;
+    s.concurrency = 2;
     store.put(s, 'settings');
     await new Promise((r) => (tx.oncomplete = r));
   });
 
+  {
+    // «Страниц одновременно»: «Авто» says what it picked for this computer; the number set by hand is shown.
+    await studio.goto(`chrome-extension://${extId}/studio.html?view=settings`);
+    await studio.waitForSelector('[data-testid=pages-in-flight] select', { timeout: 15000 });
+    const sel = await studio.$eval('[data-testid=pages-in-flight] select', (e) => ({ value: e.value, auto: e.options[0].textContent }));
+    check('«Страниц одновременно» offers «Авто» picked by the computer, the hand-set number shown', /Авто — сейчас [1-4]/.test(sel.auto) && sel.value === '2', JSON.stringify(sel));
+  }
   const page = await browser.newPage();
   await page.goto('http://127.0.0.1:18091/');
   await page.waitForFunction(() => [...document.images].every((i) => i.complete));

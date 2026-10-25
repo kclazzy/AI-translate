@@ -85,7 +85,10 @@ export interface AppSettings {
   /** Per-site/series profile override: hostname or series id → profile id. */
   seriesProfiles: Record<string, string>;
   glossary: GlossaryEntry[];
+  /** Pages in work at once when «Авто» is off (concurrencyAuto false), 1…4. */
   concurrency: number;
+  /** Pages in work at once picked by the computer's cores and memory (default on; see util/capacity.ts). */
+  concurrencyAuto?: boolean;
   autoTranslate: { enabled: boolean; sites: string[] };
   minImageSize: number;
   saveHistory: boolean;
@@ -434,6 +437,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     qaBatch: 'boolean',
     qaAfterShow: 'boolean',
     pageWorkers: 'boolean',
+    concurrencyAuto: 'boolean',
     selfCheck: 'boolean',
     autoOptimal: 'boolean',
     fallbackProviderId: 'string',
