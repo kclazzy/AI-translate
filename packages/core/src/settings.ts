@@ -87,6 +87,12 @@ export interface AppSettings {
   glossary: GlossaryEntry[];
   /** Pages in work at once when «Авто» is off (concurrencyAuto false), 1…4. */
   concurrency: number;
+  /**
+   * Where the browser pipeline's networks run (detector, recognition, LaMa, upscaler): «auto» — on
+   * the engine on this computer when it runs with a video card (CUDA/DirectML), else in the
+   * browser; «engine» — on the engine whenever it answers; «browser» — always here.
+   */
+  netsWhere?: 'auto' | 'engine' | 'browser';
   /** Pages in work at once picked by the computer's cores and memory (default on; see util/capacity.ts). */
   concurrencyAuto?: boolean;
   autoTranslate: { enabled: boolean; sites: string[] };
@@ -430,6 +436,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     lamaOfferDismissed: 'boolean',
     detectorMode: 'string',
     upscaleMode: 'string',
+    netsWhere: 'string',
     modelCatalog: 'object',
     modelCatalogCheckedAt: 'string',
     interfaceLang: 'string',
@@ -451,6 +458,7 @@ export function migrateSettings(raw: unknown): AppSettings {
   if (out.lamaMode !== undefined && !['off', 'engine', 'browser'].includes(out.lamaMode as string)) delete out.lamaMode;
   if (out.detectorMode !== undefined && !['off', 'browser'].includes(out.detectorMode as string)) delete out.detectorMode;
   if (out.upscaleMode !== undefined && !['off', 'browser'].includes(out.upscaleMode as string)) delete out.upscaleMode;
+  if (out.netsWhere !== undefined && !['auto', 'engine', 'browser'].includes(out.netsWhere as string)) delete out.netsWhere;
   if (Array.isArray(r.presets)) out.presets = r.presets.map(cleanPreset).filter((p): p is ModelPreset => !!p);
   return out as unknown as AppSettings;
 }

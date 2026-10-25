@@ -443,7 +443,7 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ait-pb-tabs { margin-bottom: 16px; }
 .ait-learn { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; margin: 8px 0; border: 1px solid var(--rule); border-radius: var(--r-panel); background: var(--sheet); font-size: 14px; }
 .ait-learn input { flex: 1 1 200px; min-width: 0; }
-.ait-optimal { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; margin: -4px 0 14px; }
+.ait-optimal { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0 4px; }
 .ait-optimal-list { flex: 1 1 100%; border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; background: var(--paper); }
 .ait-optimal-list ul { margin: 0 0 6px; padding-left: 18px; }
 
@@ -453,3 +453,6 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ait-proof textarea { width: 100%; min-width: 180px; resize: vertical; font: inherit; }
 .ait-proof tr.dirty td { background: var(--magenta-soft); }
 .ait-proof-notes { margin-top: 4px; font-size: 12px; color: var(--err); }
+.ait-fine { margin-top: 12px; border-top: 1px solid var(--line, rgba(127,127,127,.25)); padding-top: 10px; }
+.ait-fine > summary { cursor: pointer; font-weight: 500; }
+.ait-fine[open] > summary { margin-bottom: 10px; }

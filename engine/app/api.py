@@ -1,6 +1,7 @@
 """HTTP API of the engine. Security: loopback/LAN host check, extension-only CORS, bearer token."""
 from __future__ import annotations
 
+import asyncio
 import hmac
 import ipaddress
 import json
@@ -21,6 +22,7 @@ from .entitlements import check_entitlement
 from .errors import AppError
 from .jobs import JobManager
 from .llm import close_clients
+from .nets import MAX_MODEL_BYTES, Nets
 from .pipeline import Engine
 from .schemas import TranslateOptions
 from .translation import translate_blocks
@@ -78,6 +80,7 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
     token = settings.ensure_token()
     engine = Engine(settings, transport)
     jobs = JobManager()
+    nets = Nets(settings.data_dir, settings.onnx_providers)
     limiter = RateLimiter(per_minute=120)
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -96,7 +99,7 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
             "Access-Control-Allow-Origin": origin,
             "Vary": "Origin",
             "Access-Control-Allow-Headers": "authorization, content-type, accept",
-            "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
             "Access-Control-Allow-Private-Network": "true",
             "Access-Control-Max-Age": "600",
         }
@@ -120,7 +123,8 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
                 resp.headers.update(cors_headers(origin))
                 return resp
         client = request.client.host if request.client else "?"
-        if request.method == "POST" and not limiter.allow(client):
+        # The networks' runs (many small ones a page, from this computer's extension) are not rate limited.
+        if request.method == "POST" and not request.url.path.startswith("/v1/nets/") and not limiter.allow(client):
             resp = _error(AppError("RATE_LIMITED", "Too many requests", retry_after_ms=5000))
             resp.headers.update(cors_headers(origin))
             return resp
@@ -158,6 +162,8 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
             base.update(engine.capabilities())
             base["paired"] = True
             base["lan"] = settings.lan
+            info = nets.info()
+            base["nets"] = {"available": info["available"], "device": info["device"]}
         return base
 
     @app.get("/v1/capabilities")
@@ -225,5 +231,42 @@ def create_app(settings: Settings, transport: httpx.AsyncBaseTransport | None = 
     async def inpaint(image: UploadFile = File(...), mask: UploadFile = File(...)):
         out = await engine.inpaint(await read_upload(image), await read_upload(mask))
         return Response(out, media_type="image/png")
+
+    # ---- the browser pipeline's networks on this computer's video card (see nets.py) ----
+    @app.get("/v1/nets")
+    async def nets_info() -> dict[str, Any]:
+        return nets.info()
+
+    @app.put("/v1/nets/{sha}")
+    async def nets_store(sha: str, request: Request) -> dict[str, Any]:
+        if nets.has(sha):
+            return {"stored": True, "new": False}
+        size = int(request.headers.get("content-length") or 0)
+        if size > MAX_MODEL_BYTES:
+            raise AppError("IMAGE_TOO_LARGE", "Model too large", retryable=False)
+        chunks = []
+        got = 0
+        async for chunk in request.stream():
+            got += len(chunk)
+            if got > MAX_MODEL_BYTES:
+                raise AppError("IMAGE_TOO_LARGE", "Model too large", retryable=False)
+            chunks.append(chunk)
+        data = b"".join(chunks)
+        await asyncio.to_thread(nets.store, sha, data)
+        return {"stored": True, "new": True}
+
+    @app.post("/v1/nets/{sha}/open")
+    async def nets_open(sha: str, gpu: int = 1) -> dict[str, Any]:
+        return await asyncio.to_thread(nets.describe, sha, bool(gpu))
+
+    @app.post("/v1/nets/{sha}/run")
+    async def nets_run(sha: str, request: Request, gpu: int = 1):
+        body = await request.body()
+        out = await asyncio.to_thread(nets.run, sha, bool(gpu), body)
+        return Response(out, media_type="application/octet-stream")
+
+    @app.delete("/v1/nets/{sha}/session")
+    async def nets_release(sha: str) -> dict[str, int]:
+        return {"released": nets.release(None if sha == "all" else sha)}
 
     return app

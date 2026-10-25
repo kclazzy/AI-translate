@@ -20,14 +20,14 @@ export interface Detection {
 }
 
 /** Picture (RGBA, any size; the pipeline sends 640×640) → boxes in that picture's pixels. */
-export type TextDetector = (img: PixelData, signal?: AbortSignal) => Promise<{ boxes: Detection[]; ep?: 'webgpu' | 'wasm'; runMs?: number; waitMs?: number }>;
+export type TextDetector = (img: PixelData, signal?: AbortSignal) => Promise<{ boxes: Detection[]; ep?: 'webgpu' | 'wasm' | 'engine'; runMs?: number; waitMs?: number }>;
 
 /** Where the detector's time went on one page (journal, ⓘ): computing, waiting its turn on the video card. */
 export interface DetectorStats {
   windows: number;
   runMs: number;
   waitMs: number;
-  ep?: 'webgpu' | 'wasm';
+  ep?: 'webgpu' | 'wasm' | 'engine';
 }
 
 /** The model's input side. */

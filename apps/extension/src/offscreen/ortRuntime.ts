@@ -221,3 +221,155 @@ export function resizePixels(img: { width: number; height: number; data: Uint8Cl
   ctx.drawImage(src, 0, 0, w, h);
   return ctx.getImageData(0, 0, w, h).data;
 }
+
+// ---------------------------------------------------------------------------------------------
+// The networks on the engine (AI Translate Engine on this computer, ONNX Runtime with CUDA):
+// the sessions are made there, the pipeline here does not change (see engine/app/nets.py).
+// ---------------------------------------------------------------------------------------------
+
+type OrtSession = import('onnxruntime-web').InferenceSession;
+type OrtTensor = import('onnxruntime-web').Tensor;
+
+/** A session of either kind, as far as the networks here use it. */
+export interface NetSession {
+  inputNames: readonly string[];
+  outputNames: readonly string[];
+  run(feeds: Record<string, OrtTensor>): Promise<Record<string, OrtTensor>>;
+  release(): Promise<void>;
+  /** Made on the engine: where it runs there («CUDAExecutionProvider»…). */
+  remote?: string;
+}
+
+interface NetsEngine {
+  url: string;
+  token: string;
+}
+let netsEngine: NetsEngine | null = null;
+/** The engine stopped answering: the browser until then. */
+let netsDownUntil = 0;
+const NETS_DOWN_MS = 60_000;
+
+/** Make the networks' sessions on this engine from now on (null: in the browser). Sessions already made stay where they are. */
+export function setNetsEngine(e: NetsEngine | null): boolean {
+  const changed = (e?.url ?? '') !== (netsEngine?.url ?? '') || (e?.token ?? '') !== (netsEngine?.token ?? '');
+  netsEngine = e;
+  return changed;
+}
+
+/** Are new sessions made on the engine now? */
+export function netsOnEngine(): boolean {
+  return !!netsEngine && Date.now() >= netsDownUntil;
+}
+
+/** A video card for the networks: the engine's, or this browser's (WebGPU). */
+export function gpuAvailable(): boolean {
+  return netsOnEngine() || (typeof navigator !== 'undefined' && 'gpu' in navigator);
+}
+
+const TYPES: Record<string, string> = { float32: 'float32', float16: 'float16', int64: 'int64', int32: 'int32', uint8: 'uint8', bool: 'bool' };
+
+/** Tensors in one binary frame (u32 header length, JSON header, the data; see engine/app/nets.py). */
+export function encodeFrame(tensors: [string, { type: string; dims: readonly number[]; data: unknown }][]): Blob {
+  const parts: BlobPart[] = [];
+  const specs = tensors.map(([name, t]) => {
+    const type = TYPES[t.type];
+    if (!type) throw new Error(`Tensor type ${t.type} cannot go to the engine`);
+    const d = t.data as ArrayBufferView;
+    const bytes = new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
+    parts.push(bytes as BlobPart);
+    return { name, type, dims: [...t.dims], length: bytes.byteLength };
+  });
+  const header = new TextEncoder().encode(JSON.stringify({ tensors: specs }));
+  const len = new Uint8Array(4);
+  new DataView(len.buffer).setUint32(0, header.length, true);
+  return new Blob([len, header, ...parts] as BlobPart[]);
+}
+
+export function decodeFrame(buf: ArrayBuffer): { name: string; type: string; dims: number[]; data: ArrayBufferView }[] {
+  const n = new DataView(buf).getUint32(0, true);
+  const { tensors } = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, n))) as { tensors: { name: string; type: string; dims: number[]; length: number }[] };
+  let pos = 4 + n;
+  return tensors.map((t) => {
+    // A copy: typed arrays need their element alignment.
+    const raw = buf.slice(pos, pos + t.length);
+    pos += t.length;
+    const data =
+      t.type === 'float32' ? new Float32Array(raw)
+      : t.type === 'float16' ? new Uint16Array(raw)
+      : t.type === 'int64' ? new BigInt64Array(raw)
+      : t.type === 'int32' ? new Int32Array(raw)
+      : new Uint8Array(raw);
+    return { ...t, data };
+  });
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  return sha256(bytes.slice().buffer as ArrayBuffer);
+}
+
+async function engineCall(e: NetsEngine, path: string, init: RequestInit = {}): Promise<Response> {
+  const res = await fetch(`${e.url.replace(/\/+$/, '')}${path}`, { ...init, headers: { authorization: `Bearer ${e.token}`, ...(init.headers ?? {}) } });
+  return res;
+}
+
+/** A session on the engine: the model is sent once (kept there by its SHA-256). */
+async function remoteSession(ort: Ort, e: NetsEngine, bytes: Uint8Array, gpu: boolean): Promise<NetSession> {
+  const sha = await sha256Hex(bytes);
+  const open = () => engineCall(e, `/v1/nets/${sha}/open?gpu=${gpu ? 1 : 0}`, { method: 'POST' });
+  let res = await open();
+  if (res.status === 404) {
+    const put = await engineCall(e, `/v1/nets/${sha}`, { method: 'PUT', body: bytes as BodyInit, headers: { 'content-type': 'application/octet-stream' } });
+    if (!put.ok) throw new Error(`engine: model upload HTTP ${put.status}`);
+    res = await open();
+  }
+  if (!res.ok) throw new Error(`engine: HTTP ${res.status}`);
+  const info = (await res.json()) as { inputs: string[]; outputs: string[]; on: string };
+  return {
+    inputNames: info.inputs,
+    outputNames: info.outputs,
+    remote: info.on,
+    async run(feeds) {
+      const r = await engineCall(e, `/v1/nets/${sha}/run?gpu=${gpu ? 1 : 0}`, { method: 'POST', body: encodeFrame(Object.entries(feeds)), headers: { 'content-type': 'application/octet-stream' } });
+      if (!r.ok) {
+        // The engine restarted without this model, or stopped: new sessions in the browser for a while.
+        if (r.status >= 500 || r.status === 404) netsDownUntil = Date.now() + NETS_DOWN_MS;
+        throw new Error(`engine: run HTTP ${r.status}`);
+      }
+      const out: Record<string, OrtTensor> = {};
+      for (const t of decodeFrame(await r.arrayBuffer())) out[t.name] = new ort.Tensor(t.type as 'float32', t.data as Float32Array, t.dims);
+      return out;
+    },
+    async release() {
+      await engineCall(e, `/v1/nets/${sha}/session`, { method: 'DELETE' }).catch(() => undefined);
+    },
+  };
+}
+
+/**
+ * A network's session: on the engine when it is set and answers (CUDA there), else in this
+ * browser with these execution providers (WebGPU / WebAssembly).
+ */
+export async function makeSession(ort: Ort, bytes: Uint8Array, executionProviders: string[]): Promise<NetSession> {
+  const e = netsOnEngine() ? netsEngine : null;
+  if (e) {
+    try {
+      return await remoteSession(ort, e, bytes, executionProviders.includes('webgpu'));
+    } catch {
+      // Not there (stopped, an old version): the browser, and the engine is asked again in a minute.
+      netsDownUntil = Date.now() + NETS_DOWN_MS;
+    }
+  }
+  return (await ort.InferenceSession.create(bytes, { executionProviders })) as OrtSession as NetSession;
+}
+
+/** Is the engine there with its networks, and on what? (null: not there, too old, or not paired.) */
+export async function probeNetsEngine(e: NetsEngine): Promise<{ device: string } | null> {
+  try {
+    const res = await engineCall(e, '/v1/nets', { signal: AbortSignal.timeout(2500) });
+    if (!res.ok) return null;
+    const info = (await res.json()) as { available?: boolean; device?: string };
+    return info.available ? { device: info.device ?? 'cpu' } : null;
+  } catch {
+    return null;
+  }
+}

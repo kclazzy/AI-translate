@@ -10,7 +10,8 @@ import { lamaDownloaded, lamaInpainter, releaseLama } from './lama';
 import { detectorDownloaded, releaseDetector, textDetector } from './detector';
 import { releaseUpscaler, upscaleNet, upscalerDownloaded } from './upscale';
 import { GPU_REVIEW, gpuFetch, MODEL_LIMIT_MS, setWorkWaiting } from './gpuLane';
-import { ocrDeviceFor, ocrDownloaded, readText, setOcrDevice } from './ocr';
+import { ocrDeviceFor, ocrDownloaded, readText, releaseManga, releaseOcr, setOcrDevice } from './ocr';
+import { probeNetsEngine, setNetsEngine } from './ortRuntime';
 import '../shared/browserTranslate';
 import { setUiLang, tr } from '@ait/core/i18n';
 
@@ -308,6 +309,35 @@ function watchdogError(limitMin: number) {
   return new AppError('TIMEOUT', { retryable: true, detail: tr('Модель не ответила за {0} мин. Картинка пропущена, перевод главы продолжается. Проверьте модель в настройках: возможно, она не помещается в видеопамять.', limitMin) });
 }
 
+/** What the engine said about its networks lately (asked at most every 30 s). */
+let netsProbe: { key: string; at: number; device: string | null } | null = null;
+const NETS_PROBE_MS = 30_000;
+
+/**
+ * Where the networks run (settings → «Где считать нейросети»): on the engine on this computer —
+ * ONNX Runtime with CUDA there, much faster than WebGPU — when it runs and has a video card
+ * («Авто»), or always on it, or in the browser. Sessions made the other way are made again.
+ */
+async function placeNets(settings: Awaited<ReturnType<typeof loadSettings>>): Promise<void> {
+  const want = settings.netsWhere ?? 'auto';
+  const e = settings.engine;
+  let use: { url: string; token: string } | null = null;
+  if (want !== 'browser' && e?.url && e.token && settings.pipeline !== 'engine') {
+    const key = `${e.url}|${e.token}`;
+    if (!netsProbe || netsProbe.key !== key || Date.now() - netsProbe.at > NETS_PROBE_MS) {
+      netsProbe = { key, at: Date.now(), device: (await probeNetsEngine({ url: e.url, token: e.token }))?.device ?? null };
+    }
+    if (netsProbe.device && (want === 'engine' || netsProbe.device !== 'cpu')) use = { url: e.url, token: e.token };
+  }
+  if (setNetsEngine(use)) {
+    await releaseDetector();
+    await releaseLama();
+    await releaseUpscaler();
+    await releaseOcr();
+    await releaseManga();
+  }
+}
+
 /** The queue setting for the current settings: local servers answer one request at a time. */
 async function prepare() {
   const settings = await loadSettings();
@@ -317,6 +347,7 @@ async function prepare() {
   // translates what recognition reads (see fallbackConfig).
   service.detector = (await detectorDownloaded()) ? textDetector : undefined;
   service.reader = (await ocrDownloaded(settings.sourceLang.split('-')[0] === 'ko')) ? readText : undefined;
+  await placeNets(settings);
   setOcrDevice(ocrDeviceFor(settings));
   // Small scans twice as big, when switched on and downloaded.
   service.upscaler = settings.upscaleMode === 'browser' && (await upscalerDownloaded()) ? upscaleNet : undefined;

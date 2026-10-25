@@ -1,6 +1,6 @@
 import type { Inpainter, PixelData } from '@ait/core';
 import { GPU_NETS, GpuTimeout, NETS_LIMIT_MS, NETS_LOAD_LIMIT_MS, onGpu, releaseWhenIdle, withLimit } from './gpuLane';
-import { cached, downloadChecked, LAMA_MANGA, LAMA_URL, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, resizePixels, type Ort } from './ortRuntime';
+import { cached, downloadChecked, LAMA_MANGA, LAMA_URL, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, resizePixels, type Ort, makeSession, gpuAvailable, type NetSession } from './ortRuntime';
 
 /**
  * LaMa in the browser, 512×512, run with ONNX Runtime on the video card (WebGPU) or the processor
@@ -61,7 +61,7 @@ export async function releaseLama(): Promise<void> {
 let chain: Promise<unknown> = Promise.resolve();
 let cancelIdle: (() => void) | undefined;
 
-let session: Promise<{ ort: Ort; s: import('onnxruntime-web').InferenceSession; image: string; mask: string; onGpu: boolean }> | null = null;
+let session: Promise<{ ort: Ort; s: NetSession; image: string; mask: string; onGpu: boolean }> | null = null;
 
 function load() {
   session ??= (async () => {
@@ -70,14 +70,14 @@ function load() {
     if (!hit || !(await cached(ORT_WASM_URL))) throw new Error('LaMa is not downloaded');
     const ort = await loadOrt();
     const bytes = new Uint8Array(await hit.arrayBuffer());
-    const gpu = !gpuBroken && typeof navigator !== 'undefined' && 'gpu' in navigator;
-    let s: import('onnxruntime-web').InferenceSession;
+    const gpu = !gpuBroken && gpuAvailable();
+    let s: NetSession;
     let onGpu = gpu;
     try {
-      s = await ort.InferenceSession.create(bytes, { executionProviders: gpu ? ['webgpu', 'wasm'] : ['wasm'] });
+      s = await makeSession(ort, bytes, gpu ? ['webgpu', 'wasm'] : ['wasm']);
     } catch {
       onGpu = false;
-      s = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] });
+      s = await makeSession(ort, bytes, ['wasm']);
     }
     const image = s.inputNames.find((n) => /image/i.test(n)) ?? s.inputNames[0];
     const mask = s.inputNames.find((n) => /mask/i.test(n)) ?? s.inputNames[s.inputNames.length - 1];

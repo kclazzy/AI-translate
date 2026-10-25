@@ -8,6 +8,7 @@ echo Installing manga-ocr (Japanese OCR, downloads ~450 MB of weights on first u
 python -m pip install manga-ocr
 echo Installing ONNX Runtime GPU (for LaMa inpainting)...
 python -m pip uninstall -y onnxruntime >nul 2>&1
-python -m pip install onnxruntime-gpu
+python -m pip uninstall -y onnxruntime-directml >nul 2>&1
+python -m pip install "onnxruntime-gpu[cuda,cudnn]"
 echo Done. Put lama_fp32.onnx into engine\models and set AIT_LAMA_ONNX=models\lama_fp32.onnx in .env
 pause

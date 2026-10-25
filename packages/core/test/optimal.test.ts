@@ -73,4 +73,15 @@ describe('settings follow the model', () => {
     const once = { ...s, visionProviderId: 'gm', ...autoOptimal(s, { visionProviderId: 'gm' })!.patch };
     expect(optimalSettings(once, { onlyModel: true }).changes).toEqual([]);
   });
+
+  it('the mode brings what leaves the computer and «pages at once: auto» too, and back', () => {
+    const s = { ...base(), privacy: 'local' as const, concurrencyAuto: false, concurrency: 1 };
+    const toCloud = autoOptimal(s, { visionProviderId: 'gm' })!;
+    expect(toCloud.patch).toMatchObject({ privacy: 'cloud', concurrencyAuto: true });
+    expect(toCloud.before).toMatchObject({ privacy: 'local', concurrencyAuto: false });
+    const back = autoOptimal({ ...s, visionProviderId: 'gm', privacy: 'cloud' }, { visionProviderId: 'ol' })!;
+    expect(back.patch.privacy).toBe('local');
+    // Recognition translated online: the text only leaves.
+    expect(autoOptimal(s, { readMode: 'ocr', visionProviderId: 'gm' })!.patch.privacy).toBe('hybrid');
+  });
 });

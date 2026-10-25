@@ -160,7 +160,7 @@ type ReadResult = { text: string; lines: { box: Box; text: string; score: number
 export type TextReader = ((px: PixelData, lang: string) => Promise<ReadResult>) & {
   all?: (pieces: PixelData[], lang: string) => Promise<ReadResult[]>;
   /** Where it reads now: the video card or the processor (shown with the page's times). */
-  ep?: () => 'webgpu' | 'wasm';
+  ep?: () => 'webgpu' | 'wasm' | 'engine';
 };
 
 /**
@@ -790,7 +790,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   const ocrMode = !!config.ocr && !req.generic;
   /** Time the recognition read the pieces now (0 when read ahead), and where. */
   let ocrMs = 0;
-  let ocrEp: 'webgpu' | 'wasm' | undefined;
+  let ocrEp: 'webgpu' | 'wasm' | 'engine' | undefined;
   if (ocrMode && !deps.ocr) throw new AppError('SETUP_NEEDED', { retryable: false, detail: tr('Скачайте модели распознавания текста (Настройки → Режим работы ИИ → Распознавание).') });
   if (!ocrMode && !config.vision.vision) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: `${config.vision.label} does not accept images; pick a vision model or use the engine` });
   if (!ocrMode) assertPrivacy(config.privacy, config.vision, 'image');

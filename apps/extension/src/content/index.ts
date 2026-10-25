@@ -355,11 +355,11 @@ function main() {
       stages.length && !r.cached ? tr('По этапам: {0}', stages.map(([n, ms]) => `${n} ${s1(ms)} с`).join(', ')) : '',
       slowest && !r.cached && (t.totalMs ?? 0) > 3000 ? tr('Дольше всего: {0}', slowest[0]) : '',
       t.detectorWindows && !r.cached
-        ? tr('Поиск текста: считал {0} с на {1}, ждал видеокарту {2} с', s1(t.detectorRunMs), t.detectorEp === 'webgpu' ? tr('видеокарте') : tr('процессоре'), s1(t.detectorWaitMs))
+        ? tr('Поиск текста: считал {0} с на {1}, ждал видеокарту {2} с', s1(t.detectorRunMs), epName(t.detectorEp), s1(t.detectorWaitMs))
         : '',
       t.overlapMs && t.overlapMs >= 300 && !r.cached ? tr('Очистка шла во время перевода: быстрее на {0} с', s1(t.overlapMs)) : '',
       t.inWorker && !r.cached ? tr('Подготовка и очистка шли в фоновом потоке') : '',
-      t.ocrMs && !r.cached ? tr('Распознавание текста: {0} с на {1}', s1(t.ocrMs), t.ocrEp === 'webgpu' ? tr('видеокарте') : tr('процессоре')) : '',
+      t.ocrMs && !r.cached ? tr('Распознавание текста: {0} с на {1}', s1(t.ocrMs), epName(t.ocrEp)) : '',
       t.llmCalls && !r.cached ? tr('Запросов к модели: {0}, модель отвечала {1} с', t.llmCalls, s1(t.llmMs)) + (t.tokensPerSec ? tr(', {0} токенов/с', fmtNumber(Math.round(t.tokensPerSec))) : '') : '',
       tr('Токены: {0} на входе, {1} на выходе', fmtNumber(tokIn), fmtNumber(tokOut)),
       fromCache ? tr('Из кэша провайдера: {0} токенов', fmtNumber(fromCache)) : '',
@@ -719,6 +719,11 @@ function main() {
       }
       if (jobs.length) void send({ type: 'set-priority', jobs }).catch(() => undefined);
     }, 400);
+  }
+
+  /** Where a network ran, for the ⓘ lines. */
+  function epName(ep: string | undefined): string {
+    return ep === 'engine' ? tr('видеокарте через движок') : ep === 'webgpu' ? tr('видеокарте') : tr('процессоре');
   }
 
   function priorityOf(el: Element): number {

@@ -26,7 +26,7 @@ export function optimalProfile(s: AppSettings): OptimalProfile {
 }
 
 /** The settings that depend on the model: switched by themselves when the model changes. */
-const MODEL_KEYS = ['fastLocal', 'quality', 'twoStepTranslation', 'qaMode', 'qaBatch', 'gpuKeepAliveMin', 'detectorMode', 'lamaMode'] as const;
+const MODEL_KEYS = ['fastLocal', 'quality', 'twoStepTranslation', 'qaMode', 'qaBatch', 'gpuKeepAliveMin', 'detectorMode', 'lamaMode', 'privacy', 'concurrencyAuto'] as const;
 
 function wanted(s: AppSettings, profile: OptimalProfile): Partial<AppSettings> {
   const vram = s.gpuVramGb ?? 12;
@@ -44,10 +44,18 @@ function wanted(s: AppSettings, profile: OptimalProfile): Partial<AppSettings> {
   };
   // Up to 12 GB a local model needs all the video memory: LaMa in the browser would push it out.
   const lamaOff = !big && s.lamaMode === 'browser' ? { lamaMode: 'off' as const } : {};
+  // What leaves the computer follows the mode: nothing with a local model, the text only when an
+  // online model translates recognised text, the pictures when an online model reads them. A cloud
+  // translator kept beside a local reader keeps «text only».
+  const t = providerById(s, s.translationProviderId);
+  const textOut = !!t && !isLocalProvider(t) && !isBrowserTranslator(t);
+  const pages = { concurrencyAuto: true };
   switch (profile) {
     case 'local':
       return {
         ...common,
+        ...pages,
+        privacy: textOut ? 'hybrid' : 'local',
         // The fast mode shrinks the picture and drops the model review: accuracy first.
         fastLocal: false,
         quality: vram >= 8 ? 'balanced' : 'fast',
@@ -63,16 +71,16 @@ function wanted(s: AppSettings, profile: OptimalProfile): Partial<AppSettings> {
     case 'cloud':
       // An online model: the whole picture at full size, a separate translation step and the review
       // with fixes; no video memory to save.
-      return { ...common, quality: 'best', twoStepTranslation: true, qaMode: 'fix', qaBatch: true };
+      return { ...common, ...pages, privacy: 'cloud', quality: 'best', twoStepTranslation: true, qaMode: 'fix', qaBatch: true };
     case 'ocr-browser':
       // The browser's translator takes no context and no review: the checks without a model only.
-      return { ...common, quality: 'balanced', qaMode: 'rules', detectorMode: 'browser' };
+      return { ...common, ...pages, privacy: 'local', quality: 'balanced', qaMode: 'rules', detectorMode: 'browser' };
     case 'ocr-local':
-      return { ...common, fastLocal: false, quality: 'balanced', twoStepTranslation: vram >= 12, qaMode: 'rules', qaBatch: true, gpuKeepAliveMin: 15, detectorMode: 'browser', ...lamaOff };
+      return { ...common, ...pages, privacy: 'local', fastLocal: false, quality: 'balanced', twoStepTranslation: vram >= 12, qaMode: 'rules', qaBatch: true, gpuKeepAliveMin: 15, detectorMode: 'browser', ...lamaOff };
     case 'ocr-cloud':
-      return { ...common, quality: 'balanced', twoStepTranslation: true, qaMode: 'fix', qaBatch: true, detectorMode: 'browser' };
+      return { ...common, ...pages, privacy: 'hybrid', quality: 'balanced', twoStepTranslation: true, qaMode: 'fix', qaBatch: true, detectorMode: 'browser' };
     case 'engine':
-      return common;
+      return { ...common, ...pages };
   }
 }
 
@@ -93,6 +101,8 @@ const label: Partial<Record<keyof AppSettings, (v: unknown) => string>> = {
   phrasebook: () => tr('Разговорник: вкл'),
   detectorMode: (v) => (v === 'browser' ? tr('Точный поиск текста: вкл') : tr('Точный поиск текста: выкл (видеопамять нужна модели)')),
   lamaMode: () => tr('LaMa в браузере: выкл (видеопамять нужна модели)'),
+  privacy: (v) => (v === 'local' ? tr('Приватность: всё на этом компьютере') : v === 'hybrid' ? tr('Приватность: наружу только текст') : tr('Приватность: картинки уходят онлайн-модели')),
+  concurrencyAuto: () => tr('Страниц одновременно: авто'),
 };
 
 /**
@@ -108,7 +118,7 @@ export function optimalSettings(s: AppSettings, opts: { profile?: OptimalProfile
   const patch: Partial<AppSettings> = {};
   const changes: string[] = [];
   const cur = s as unknown as Record<string, unknown>;
-  const defaults: Partial<Record<keyof AppSettings, unknown>> = { twoStepTranslation: !(s.fastLocal || s.quality === 'fast'), qaMode: qaModeOf(s), stitchStrips: true, skipEmptyPages: true, selfCheck: true, detectorMode: 'off', lamaMode: 'off', gpuKeepAliveMin: 5 };
+  const defaults: Partial<Record<keyof AppSettings, unknown>> = { twoStepTranslation: !(s.fastLocal || s.quality === 'fast'), qaMode: qaModeOf(s), stitchStrips: true, skipEmptyPages: true, selfCheck: true, detectorMode: 'off', lamaMode: 'off', gpuKeepAliveMin: 5, concurrencyAuto: true };
   for (const [k, v] of Object.entries(want) as [keyof AppSettings, unknown][]) {
     if (v === undefined) continue;
     if (opts.onlyModel && !(MODEL_KEYS as readonly string[]).includes(k)) continue;

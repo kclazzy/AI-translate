@@ -345,6 +345,91 @@ try {
       check('Manga OCR reads the Japanese bubble', asked.some((t) => t.includes('なにしてる')), `asked=${JSON.stringify(asked)}`);
     }
   }
+
+  // ---- The same recognition with its networks on the engine (ONNX Runtime there) -----------------
+  {
+    const { spawn } = await import('node:child_process');
+    const py = join(ROOT, 'engine/.venv/bin/python');
+    if (existsSync(py)) {
+      const proc = spawn(py, ['-m', 'app', '--port', '18767'], { cwd: join(ROOT, 'engine'), env: { ...process.env, AIT_DATA_DIR: join(tmpdir(), `ait-ocrnets-${Date.now()}`), AIT_TOKEN: 'ocr-token' }, stdio: 'pipe' });
+      proc.stderr.on('data', (d) => process.env.DEBUG && process.stderr.write(d));
+      try {
+        let up = false;
+        for (let i = 0; i < 60 && !up; i++) {
+          up = await fetch('http://127.0.0.1:18767/v1/health').then((r) => r.ok).catch(() => false);
+          if (!up) await new Promise((r) => setTimeout(r, 500));
+        }
+        // Off the settings page first: it keeps its own copy of the settings and would save it back.
+        await studio.goto(`chrome-extension://${extId}/studio.html?view=history`);
+        await new Promise((r) => setTimeout(r, 1000));
+        await studio.evaluate(async () => {
+          const db = await new Promise((res) => {
+            const r = indexedDB.open('ai-translate', 1);
+            r.onsuccess = () => res(r.result);
+          });
+          const tx = db.transaction(['kv', 'results'], 'readwrite');
+          const kv = tx.objectStore('kv');
+          const s = await new Promise((res) => {
+            const g = kv.get('settings');
+            g.onsuccess = () => res(g.result ?? {});
+          });
+          s.engine = { ...(s.engine ?? {}), url: 'http://127.0.0.1:18767', token: 'ocr-token', options: s.engine?.options ?? { detector: 'auto', ocr: 'auto', inpainter: 'auto' } };
+          s.netsWhere = 'engine';
+          kv.put(s, 'settings');
+          tx.objectStore('results').clear();
+          await new Promise((r) => (tx.oncomplete = r));
+        });
+        if (process.env.DEBUG) console.log('DBG', await studio.evaluate(async () => {
+          const db = await new Promise((res) => { const r = indexedDB.open('ai-translate', 1); r.onsuccess = () => res(r.result); });
+          const s = await new Promise((res) => { const g = db.transaction('kv').objectStore('kv').get('settings'); g.onsuccess = () => res(g.result); });
+          const f = await fetch('http://127.0.0.1:18767/v1/nets', { headers: { authorization: 'Bearer ocr-token' } }).then((r) => r.status).catch((e) => String(e));
+          return JSON.stringify({ nw: s.netsWhere, e: s.engine, p: s.pipeline, f });
+        }));
+        await studio.evaluate(() => chrome.runtime.sendMessage({ type: 'settings-changed' })).catch(() => undefined);
+        // The texts kept for this picture go (sent the way the page's «Освободить» goes: through the background).
+        await (await sw.worker()).evaluate(() => chrome.runtime.sendMessage({ target: 'offscreen', type: 'free-memory' })).catch(() => undefined);
+        asked.length = 0;
+        const path = haveManga ? 'ja' : '';
+        const img = haveManga ? 'page-ja.png' : 'page.png';
+        const want = haveManga ? 'なにしてる' : 'hello there';
+        if (process.env.DEBUG) {
+          const off = browser.targets().find((t) => t.url().includes('offscreen.html'));
+          const cdpS = off ? await off.createCDPSession() : null;
+          if (cdpS) {
+            await cdpS.send('Runtime.enable');
+            cdpS.on('Runtime.consoleAPICalled', (e) => console.log('OFF', e.args.map((a) => a.value ?? a.description).join(' ')));
+            cdpS.on('Runtime.exceptionThrown', (e) => console.log('OFFEXC', JSON.stringify(e.exceptionDetails).slice(0, 400)));
+          } else console.log('OFF none', browser.targets().map((t) => t.url()).join(' '));
+        }
+        const t3 = await browser.newPage();
+        await t3.goto(`http://127.0.0.1:18171/${path}`);
+        await t3.waitForFunction(() => document.images[0].complete && document.images[0].naturalWidth);
+        await new Promise((r) => setTimeout(r, 800));
+        await studio.evaluate(async (u, src) => {
+          const [t] = await chrome.tabs.query({ url: u });
+          await chrome.tabs.sendMessage(t.id, { type: 'translate-src', src });
+        }, `http://127.0.0.1:18171/${path}`, `http://127.0.0.1:18171/${img}`);
+        await t3.bringToFront();
+        for (let i = 0; i < 240 && !asked.length; i++) await new Promise((r) => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, 2000));
+        const eps = await studio.evaluate(async () => {
+          const db = await new Promise((res) => {
+            const r = indexedDB.open('ai-translate', 1);
+            r.onsuccess = () => res(r.result);
+          });
+          return new Promise((res) => {
+            const g = db.transaction('results').objectStore('results').getAll();
+            g.onsuccess = () => res(g.result.map((x) => x.page.timings?.ocrEp));
+          });
+        });
+        const nets = await (await fetch('http://127.0.0.1:18767/v1/nets', { headers: { authorization: 'Bearer ocr-token' } })).json();
+        check('«в движке»: the recognition networks run on the engine and read the same text', asked.some((t) => t.toLowerCase().includes(want)) && eps.includes('engine') && nets.stored?.length >= 2, `asked=${JSON.stringify(asked)} eps=${JSON.stringify(eps)} stored=${nets.stored?.length}`);
+        await t3.close();
+      } finally {
+        proc.kill();
+      }
+    }
+  }
 } catch (e) {
   check('no crash', false, String(e?.stack ?? e));
 } finally {

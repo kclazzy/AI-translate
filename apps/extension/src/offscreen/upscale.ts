@@ -1,6 +1,6 @@
 import type { UpscaleNet } from '@ait/core';
 import { GPU_NETS, GpuTimeout, NETS_LOAD_LIMIT_MS, onGpu, releaseWhenIdle, withLimit } from './gpuLane';
-import { cached, downloadChecked, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, UPSCALER, type Ort } from './ortRuntime';
+import { cached, downloadChecked, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, UPSCALER, type Ort, makeSession, gpuAvailable, type NetSession } from './ortRuntime';
 
 /**
  * The upscaler for small scans (see core image/upscale.ts): waifu2x CUNet for art, 2×, ~5 MB, run
@@ -24,7 +24,7 @@ export async function deleteUpscaler(): Promise<void> {
 }
 
 let gpuBroken = false;
-let session: Promise<{ ort: Ort; s: import('onnxruntime-web').InferenceSession; onGpu: boolean }> | null = null;
+let session: Promise<{ ort: Ort; s: NetSession; onGpu: boolean }> | null = null;
 
 export async function releaseUpscaler(): Promise<void> {
   const s = session;
@@ -39,11 +39,11 @@ function load() {
     if (!hit) throw new Error('The upscaler is not downloaded');
     const ort = await loadOrt();
     const bytes = new Uint8Array(await hit.arrayBuffer());
-    const gpu = !gpuBroken && typeof navigator !== 'undefined' && 'gpu' in navigator;
+    const gpu = !gpuBroken && gpuAvailable();
     try {
-      return { ort, s: await ort.InferenceSession.create(bytes, { executionProviders: gpu ? ['webgpu', 'wasm'] : ['wasm'] }), onGpu: gpu };
+      return { ort, s: await makeSession(ort, bytes, gpu ? ['webgpu', 'wasm'] : ['wasm']), onGpu: gpu };
     } catch {
-      return { ort, s: await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] }), onGpu: false };
+      return { ort, s: await makeSession(ort, bytes, ['wasm']), onGpu: false };
     }
   })();
   session.catch(() => (session = null));

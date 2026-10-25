@@ -141,7 +141,7 @@ export interface PageTimings {
   /** The page's pixel work ran in a background thread (see pipeline/remote.ts). */
   inWorker?: boolean;
   /** Where the recognition in the browser read the text («Распознавание»). */
-  ocrEp?: 'webgpu' | 'wasm';
+  ocrEp?: 'webgpu' | 'wasm' | 'engine';
   /** Separate text translation request(s). */
   translateMs?: number;
   /** Translation check (rules + the model's review). */
@@ -156,7 +156,7 @@ export interface PageTimings {
   detectorRunMs?: number;
   detectorWaitMs?: number;
   detectorWindows?: number;
-  detectorEp?: 'webgpu' | 'wasm';
+  detectorEp?: 'webgpu' | 'wasm' | 'engine';
   /** Typesetting the translation and encoding the tiles (selfCheckMs included). */
   renderMs?: number;
   /** The check after typesetting (pipeline/selfcheck.ts), part of renderMs. */

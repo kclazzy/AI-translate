@@ -35,7 +35,7 @@ class Settings:
     max_upload_bytes: int = 60 * 1024 * 1024
     max_pixels: int = 150_000_000
     lama_onnx: str = ""
-    onnx_providers: list[str] = field(default_factory=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"])
+    onnx_providers: list[str] = field(default_factory=lambda: ["CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider"])
     cache_days: int = 30
 
     @classmethod
@@ -52,7 +52,7 @@ class Settings:
             max_upload_bytes=int(float(e.get("AIT_MAX_UPLOAD_MB", "60")) * 1024 * 1024),
             max_pixels=int(e.get("AIT_MAX_PIXELS", "150000000")),
             lama_onnx=e.get("AIT_LAMA_ONNX", ""),
-            onnx_providers=[p.strip() for p in e.get("AIT_ONNX_PROVIDERS", "CUDAExecutionProvider,CPUExecutionProvider").split(",") if p.strip()],
+            onnx_providers=[p.strip() for p in e.get("AIT_ONNX_PROVIDERS", "CUDAExecutionProvider,DmlExecutionProvider,CPUExecutionProvider").split(",") if p.strip()],
             cache_days=int(e.get("AIT_CACHE_DAYS", "30")),
         )
         if s.lan and s.host == "127.0.0.1":

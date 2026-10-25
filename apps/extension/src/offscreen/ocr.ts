@@ -1,6 +1,6 @@
 import { GPU_SHAPES, isBrowserTranslator, isLocalProvider, mangaOcrRead, mangaOcrReadCached, type MangaOcrNets, readPiece, readPieces, recDictionary, type MangaOcrRun, type OcrResult, type OcrRun, type PixelData, type AppSettings } from '@ait/core';
 import { releaseWhenIdle, withLimit } from './gpuLane';
-import { cached, downloadChecked, gpuF16, loadOrt, MANGA_FAST, MANGA_OCR, MANGA_OCR_URLS, MODELS_CACHE, OCR_DET_URL, OCR_REC_KO_URL, OCR_REC_URL, ORT_WASM_URL, removeModel, type ModelFile } from './ortRuntime';
+import { cached, downloadChecked, gpuF16, loadOrt, MANGA_FAST, MANGA_OCR, MANGA_OCR_URLS, MODELS_CACHE, OCR_DET_URL, OCR_REC_KO_URL, OCR_REC_URL, ORT_WASM_URL, removeModel, type ModelFile, makeSession, gpuAvailable, netsOnEngine, type NetSession } from './ortRuntime';
 
 /**
  * Text recognition in the browser (no model that reads pictures, no Python): PaddleOCR PP-OCRv6
@@ -36,7 +36,7 @@ export async function deleteOcr(): Promise<void> {
   await removeModel(OCR_URLS);
 }
 
-type Session = import('onnxruntime-web').InferenceSession;
+type Session = NetSession;
 interface Loaded {
   ort: Awaited<ReturnType<typeof loadOrt>>;
   det: Session;
@@ -72,7 +72,7 @@ export function ocrDeviceFor(s: AppSettings): 'gpu' | 'cpu' {
   const local = !!by && !isBrowserTranslator(by) && isLocalProvider(by);
   return !local || (s.gpuVramGb ?? 12) >= 10 ? 'gpu' : 'cpu';
 }
-export const ocrOnGpu = (): boolean => device === 'gpu' && !gpuBroken && typeof navigator !== 'undefined' && 'gpu' in navigator;
+export const ocrOnGpu = (): boolean => device === 'gpu' && !gpuBroken && gpuAvailable();
 
 function load(korean: boolean): Promise<Loaded> {
   const gpu = ocrOnGpu();
@@ -97,7 +97,7 @@ async function open(korean: boolean, gpu: boolean): Promise<Loaded> {
   if (!dict) throw new Error('The recogniser has no alphabet');
   // On the video card the pieces go in fixed sizes (GPU_SHAPES): every new size would compile the
   // network's shaders again. On the processor the sizes are free.
-  const make = (bytes: Uint8Array) => ort.InferenceSession.create(bytes, { executionProviders: gpu ? ['webgpu', 'wasm'] : ['wasm'] });
+  const make = (bytes: Uint8Array) => makeSession(ort, bytes, gpu ? ['webgpu', 'wasm'] : ['wasm']);
   return { ort, det: await make(new Uint8Array(await detHit.arrayBuffer())), rec: await make(recBytes), dict, korean, gpu };
 }
 
@@ -141,7 +141,7 @@ readText.all = async (pieces: PixelData[], lang: string): Promise<OcrResult[]> =
 };
 
 /** Where the last pieces were read (shown with the page's times). */
-let lastEp: 'webgpu' | 'wasm' = 'wasm';
+let lastEp: 'webgpu' | 'wasm' | 'engine' = 'wasm';
 readText.ep = () => lastEp;
 
 function readLines(pieces: PixelData[], lang: string, batch: boolean): Promise<OcrResult[]> {
@@ -158,7 +158,7 @@ function readLines(pieces: PixelData[], lang: string, batch: boolean): Promise<O
     const opts = L.gpu ? { shapes: GPU_SHAPES } : {};
     const out = batch ? await readPieces(pieces, run, L.dict, opts) : [await readPiece(pieces[0], run, L.dict, opts)];
     if (L.gpu) compiled = true;
-    lastEp = L.gpu ? 'webgpu' : 'wasm';
+    lastEp = L.rec.remote ? 'engine' : L.gpu ? 'webgpu' : 'wasm';
     return out;
   };
   const limit = () => (session ? 0 : LOAD_MS) + (ocrOnGpu() && !compiled ? COMPILE_MS : 0) + PIECE_MS * Math.max(1, pieces.length);
@@ -249,15 +249,15 @@ async function openManga(): Promise<MangaLoaded> {
   const [v, cross, step] = await Promise.all([get(MANGA_OCR.vocab), get(MANGA_FAST.cross), get(MANGA_FAST.step)]);
   if (!v) throw new Error('Manga OCR is not downloaded');
   const bytes = async (r: Response) => new Uint8Array(await r.arrayBuffer());
-  const cpu = async (r: Response) => ort.InferenceSession.create(await bytes(r), { executionProviders: ['wasm'] });
+  const cpu = async (r: Response) => makeSession(ort, await bytes(r), netsOnEngine() ? ['webgpu', 'wasm'] : ['wasm']);
   // The encoder (most of the time of a bubble) on the video card when it runs fp16 networks;
   // the decoder's small steps on the processor.
   let enc: Session | null = null;
   let encGpu = false;
-  const gpuEnc = ocrOnGpu() && !mangaGpuBroken && (await gpuF16()) ? await get(MANGA_FAST.encoderGpu) : undefined;
+  const gpuEnc = ocrOnGpu() && !mangaGpuBroken && (netsOnEngine() || (await gpuF16())) ? await get(MANGA_FAST.encoderGpu) : undefined;
   if (gpuEnc) {
     try {
-      enc = await ort.InferenceSession.create(await bytes(gpuEnc), { executionProviders: ['webgpu'] });
+      enc = await makeSession(ort, await bytes(gpuEnc), ['webgpu']);
       encGpu = true;
     } catch {
       mangaGpuBroken = true;
@@ -293,7 +293,7 @@ async function readMangaOnce(px: PixelData): Promise<OcrResult> {
   const L = await manga;
   const T = L.ort.Tensor;
   const f32 = (t: { data: Float32Array; dims: number[] }) => new T('float32', t.data, t.dims);
-  lastEp = L.encGpu ? 'webgpu' : 'wasm';
+  lastEp = L.enc.remote ? 'engine' : L.encGpu ? 'webgpu' : 'wasm';
   if (L.cross && L.step) {
     const { cross, step, enc } = L;
     const nets: MangaOcrNets = {

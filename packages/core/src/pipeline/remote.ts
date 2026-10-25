@@ -52,7 +52,7 @@ interface RunMsg {
   id: number;
   req: Omit<PipelineRequest, 'signal' | 'onStage' | 'freshContext' | 'prepared'> & { batchReview?: boolean; prepared?: Omit<PreparedPage, 'original'> };
   fns: Partial<Record<Kind, number>> & { ocrAll?: boolean; fresh?: boolean; stage?: boolean };
-  ep?: 'webgpu' | 'wasm';
+  ep?: 'webgpu' | 'wasm' | 'engine';
   lang: UiLangPref;
   catalog: ModelCatalog | null;
   browser: boolean;
@@ -61,7 +61,7 @@ interface RunMsg {
 type ToWorker =
   | RunMsg
   | { t: 'abort'; id: number }
-  | { t: 'ret'; cid: number; ok: true; value: unknown; ep?: 'webgpu' | 'wasm' }
+  | { t: 'ret'; cid: number; ok: true; value: unknown; ep?: 'webgpu' | 'wasm' | 'engine' }
   | { t: 'ret'; cid: number; ok: false; error: WireError }
   | { t: 'forget' };
 
@@ -171,7 +171,7 @@ export function servePages(port: PagePort, backend: ImageBackend): void {
   const runs = new Map<number, AbortController>();
   /** Stable stand-ins for the caller's detector / reader / LaMa (the memo keys on them). */
   const proxies = new Map<Kind, { ref: number; fn: any }>();
-  let ep: 'webgpu' | 'wasm' | undefined;
+  let ep: 'webgpu' | 'wasm' | 'engine' | undefined;
   let browser: boolean | null = null;
 
   const call = <T>(c: Call, signal?: AbortSignal, transfer: Transferable[] = []): Promise<T> =>
@@ -197,7 +197,7 @@ export function servePages(port: PagePort, backend: ImageBackend): void {
     else {
       const reader = ((px: PixelData, lang: string) => call({ fn: 'ocr', ref, px, lang })) as TextReader;
       if (all) reader.all = (pieces, lang) => call({ fn: 'ocrAll', ref, pieces, lang });
-      reader.ep = () => ep as 'webgpu' | 'wasm';
+      reader.ep = () => ep as 'webgpu' | 'wasm' | 'engine';
       fn = reader;
     }
     proxies.set(kind, { ref, fn });
@@ -512,7 +512,7 @@ export class PageWorkers {
     try {
       let value: unknown;
       const transfer: Transferable[] = [];
-      let ep: 'webgpu' | 'wasm' | undefined;
+      let ep: 'webgpu' | 'wasm' | 'engine' | undefined;
       if (m.fn === 'fetch' || m.fn === 'fresh') {
         const r = slot.runs.get(m.run);
         if (!r) throw new AppError('CANCELLED');

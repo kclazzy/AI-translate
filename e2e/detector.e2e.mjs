@@ -250,6 +250,77 @@ try {
   const again = await waitFor(async () => (await stored()).find((r) => r.page?.blocks?.length), 40000);
   check('after that the next page loads the detector again', typeof again?.page?.timings?.detectorMs === 'number', JSON.stringify(again?.page?.timings ?? {}));
 
+  // ---- On the engine: the same network, its session there (ONNX Runtime of the engine) ----------
+  {
+    const { spawn } = await import('node:child_process');
+    const py = join(ROOT, 'engine/.venv/bin/python');
+    if (existsSync(py)) {
+      const dataDir = join(tmpdir(), `ait-nets-${Date.now()}`);
+      const proc = spawn(py, ['-m', 'app', '--port', '18766'], { cwd: join(ROOT, 'engine'), env: { ...process.env, AIT_DATA_DIR: dataDir, AIT_TOKEN: 'nets-token' }, stdio: 'pipe' });
+      try {
+        const up = await waitFor(async () => (await fetch('http://127.0.0.1:18766/v1/health')).ok, 30000);
+        if (!up) throw new Error('the engine did not start');
+        await studio.evaluate(async () => {
+          const db = await new Promise((res) => {
+            const r = indexedDB.open('ai-translate', 1);
+            r.onsuccess = () => res(r.result);
+          });
+          const tx = db.transaction(['kv', 'results'], 'readwrite');
+          const kv = tx.objectStore('kv');
+          const s = await new Promise((res) => {
+            const g = kv.get('settings');
+            g.onsuccess = () => res(g.result ?? {});
+          });
+          s.engine = { ...(s.engine ?? {}), url: 'http://127.0.0.1:18766', token: 'nets-token', options: s.engine?.options ?? { detector: 'auto', ocr: 'auto', inpainter: 'auto' } };
+          s.netsWhere = 'engine';
+          kv.put(s, 'settings');
+          tx.objectStore('results').clear();
+          await new Promise((r) => (tx.oncomplete = r));
+        });
+        // The boxes kept for this picture go, so the detector runs again.
+        await (await sw.worker()).evaluate(() => chrome.runtime.sendMessage({ target: 'offscreen', type: 'free-memory' }));
+        await tab.reload();
+        await tab.waitForFunction(() => [...document.images].every((i) => i.complete && i.naturalWidth));
+        await new Promise((r) => setTimeout(r, 600));
+        await translate();
+        await tab.bringToFront();
+        const onEngine = await waitFor(async () => (await stored()).find((r) => r.page?.blocks?.length), 60000);
+        const t = onEngine?.page?.timings ?? {};
+        const b2 = onEngine?.page?.blocks?.[0]?.bbox ?? [0, 0, 0, 0];
+        check('«Где считать нейросети: в движке» runs the detector on the engine, with the same boxes', t.detectorEp === 'engine' && b2[0] >= 200 && b2[1] >= 312 && b2[0] + b2[2] <= 400 && b2[1] + b2[3] <= 388, `${JSON.stringify(t)} ${JSON.stringify(b2)}`);
+        const nets = await (await fetch('http://127.0.0.1:18766/v1/nets', { headers: { authorization: 'Bearer nets-token' } })).json();
+        check('the model was sent to the engine once and is kept there', nets.stored?.length === 1 && nets.loaded?.length >= 1, JSON.stringify(nets));
+      } finally {
+        proc.kill();
+      }
+      // The engine gone: the next page is translated in the browser again (after the failed run).
+      await studio.evaluate(async () => {
+        const db = await new Promise((res) => {
+          const r = indexedDB.open('ai-translate', 1);
+          r.onsuccess = () => res(r.result);
+        });
+        const tx = db.transaction(['kv', 'results'], 'readwrite');
+        const kv = tx.objectStore('kv');
+        const s = await new Promise((res) => {
+          const g = kv.get('settings');
+          g.onsuccess = () => res(g.result ?? {});
+        });
+        s.netsWhere = 'auto';
+        kv.put(s, 'settings');
+        tx.objectStore('results').clear();
+        await new Promise((r) => (tx.oncomplete = r));
+      });
+      await (await sw.worker()).evaluate(() => chrome.runtime.sendMessage({ target: 'offscreen', type: 'free-memory' }));
+      await tab.reload();
+      await tab.waitForFunction(() => [...document.images].every((i) => i.complete && i.naturalWidth));
+      await new Promise((r) => setTimeout(r, 600));
+      await translate();
+      await tab.bringToFront();
+      const back = await waitFor(async () => (await stored()).find((r) => r.page?.blocks?.length), 60000);
+      check('without the engine the detector runs in the browser again', back?.page?.timings?.detectorEp && back.page.timings.detectorEp !== 'engine', JSON.stringify(back?.page?.timings ?? {}));
+    }
+  }
+
   // ---- Off: the detector is not used ------------------------------------------------------------
   await sp.$eval('[data-testid=detector-switch] input', (b) => b.click());
   check('the switch turns it off', !!(await waitFor(async () => (await readSettings()).detectorMode === 'off')));

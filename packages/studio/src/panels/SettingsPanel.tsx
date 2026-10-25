@@ -7,6 +7,8 @@ import {
   presetFrom,
   createProvider,
   EngineClient,
+  aiModeOf,
+  isBrowserTranslator,
   isLocalProvider,
   MAX_PAGES_IN_FLIGHT,
   pagesInFlight,
@@ -596,6 +598,26 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
     toast(p.vision ? tr('{0} теперь читает и переводит страницы', tr(p.label)) : tr('{0} теперь переводит текст', tr(p.label)));
   };
 
+  const mode = aiModeOf(s);
+  const visionNow = providerById(s, s.visionProviderId);
+  const usesLocalModel = mode === 'ollama' || (!!visionNow && isLocalProvider(visionNow) && !isBrowserTranslator(visionNow));
+  const engineConnection = (
+    <div className="ait-grid2" data-testid="engine-connection">
+      <Field label={tr('Адрес движка')} hint={tr('На ПК: http://127.0.0.1:8765. С телефона: LAN-адрес из окна движка.')}>
+        <input className="ait-input" value={s.engine.url} onChange={(e) => update({ engine: { ...s.engine, url: e.target.value.trim() } })} />
+      </Field>
+      <Field label={tr('Код сопряжения')} hint={tr('Показывается в окне движка при запуске')}>
+        <input className="ait-input" value={s.engine.token} onChange={(e) => update({ engine: { ...s.engine, token: e.target.value.trim() } })} />
+      </Field>
+      <div style={{ alignSelf: 'end' }}>
+        <button className="ait-btn" onClick={() => void engineTest.run()} disabled={engineTest.busy}>
+          {tr('Проверить движок')}
+        </button>
+      </div>
+      <ErrorBox error={engineTest.error} />
+    </div>
+  );
+
   return (
     <div>
       {params.get('setup') === '1' ? <LocalSetup settings={s} update={update} getKey={getKey} onReady={platform.setupReady ? () => platform.setupReady!(params) : undefined} /> : null}
@@ -604,169 +626,186 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
         <h2>{tr('Языки')}</h2>
         <LanguagePair settings={s} update={update} />
       </div>
-      {s.pipeline === 'standalone' ? <ModelCheckCard settings={s} update={update} getKey={getKey} /> : null}
-      <div className="ait-panel" style={{ display: 'grid', gap: 8 }}>
-        <h2 style={{ margin: 0 }}>{tr('Скорость перевода')}</h2>
-        <SpeedBenchmark settings={s} />
-      </div>
-      {s.pipeline === 'standalone' && platform.kind === 'extension' ? <LocalModels settings={s} update={update} getKey={getKey} autoStart={params.get('pull') === '1'} /> : null}
-      <div className="ait-panel" data-testid="how-to-translate">
-        <h2>{tr('Как переводить')}</h2>
+
+      {/* The way of working, and only what belongs to it; a switch brings the settings that suit it. */}
+      <div className="ait-panel" data-testid="mode-panel">
+        <h2>{tr('Режим работы ИИ')}</h2>
+        <AiModeSwitch settings={s} update={update} force ocrHere={!!platform.ocr} />
+        {mode === 'cloud' ? (
+          <Field label={tr('Онлайн-модель')} hint={tr('Добавить сервис или ключ — в разделе «Модели и серверы» ниже')}>
+            <select className="ait-select" data-testid="cloud-model" value={s.visionProviderId ?? ''} onChange={(e) => update({ visionProviderId: e.target.value || null })}>
+              {visionCandidates.filter((p) => !isLocalProvider(p)).map((p) => <option key={p.id} value={p.id}>{tr(p.label)} · {p.model}</option>)}
+            </select>
+          </Field>
+        ) : null}
+        {mode === 'engine' ? (
+          <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
+            {engineConnection}
+            <div className="ait-grid2">
+              <Field label={tr('Поиск текста')}>
+                <select className="ait-select" value={s.engine.options.detector} onChange={(e) => update({ engine: { ...s.engine, options: { ...s.engine.options, detector: e.target.value as AppSettings['engine']['options']['detector'] } } })}>
+                  <option value="auto">{tr('Авто (баблы, иначе vision)')}</option>
+                  <option value="classic">{tr('Только баблы (без модели)')}</option>
+                  <option value="vision">{tr('Vision-модель')}</option>
+                </select>
+              </Field>
+              <Field label={tr('Распознавание (OCR)')}>
+                <select className="ait-select" value={s.engine.options.ocr} onChange={(e) => update({ engine: { ...s.engine, options: { ...s.engine.options, ocr: e.target.value as AppSettings['engine']['options']['ocr'] } } })}>
+                  <option value="auto">{tr('Авто')}</option>
+                  <option value="manga-ocr">{tr('manga-ocr (японский)')}</option>
+                  <option value="paddle">{tr('PaddleOCR (корейский, китайский)')}</option>
+                  <option value="vision">{tr('Vision-модель')}</option>
+                </select>
+              </Field>
+              <Field label={tr('Очистка')}>
+                <select className="ait-select" value={s.engine.options.inpainter} onChange={(e) => update({ engine: { ...s.engine, options: { ...s.engine.options, inpainter: e.target.value as AppSettings['engine']['options']['inpainter'] } } })}>
+                  <option value="auto">{tr('Авто')}</option>
+                  <option value="fill">{tr('Заливка цветом бабла')}</option>
+                  <option value="telea">OpenCV</option>
+                  <option value="lama">{tr('LaMa (нужна модель)')}</option>
+                </select>
+              </Field>
+            </div>
+          </div>
+        ) : null}
         <OptimalLocal settings={s} update={update} />
+      </div>
+      {s.pipeline === 'standalone' ? <ModelCheckCard settings={s} update={update} getKey={getKey} /> : null}
+      {s.pipeline === 'standalone' && platform.kind === 'extension' && usesLocalModel ? <LocalModels settings={s} update={update} getKey={getKey} autoStart={params.get('pull') === '1'} /> : null}
+
+      <div className="ait-panel" data-testid="how-to-translate">
+        <h2>{tr('Качество и скорость')}</h2>
+        <div className="ait-grid2">
+          <div className="ait-field">
+            <span>{tr('Качество')}</span>
+            <Segmented label={tr('Качество')} value={s.quality} onChange={(quality) => update({ quality })} options={[{ value: 'fast', label: tr('Быстро') }, { value: 'balanced', label: tr('Баланс') }, { value: 'best', label: tr('Максимум') }]} />
+            <small>{tr('Чем выше, тем крупнее картинка уходит модели и дольше ответ')}</small>
+          </div>
+          <Field label={tr('Страниц одновременно')}>
+            <PagesInFlight settings={s} update={update} />
+          </Field>
+        </div>
+        <SpeedBenchmark settings={s} />
+        <details className="ait-fine" data-testid="fine-tuning">
+          <summary>{tr('Тонкая настройка')}</summary>
+          <div className="ait-set-grid">
+            <div className="ait-set-col">
+              <SetGroup title={tr('Проверка перевода')}>
+                <Field label={tr('Проверка перевода')} hint={tr('Ещё один короткий запрос на страницу: смысл, контекст, эмоции, персонажи, грамматика, термины')}>
+                  <select className="ait-select" data-testid="qa-mode" value={qaModeOf(s)} onChange={(e) => update({ qaMode: e.target.value as AppSettings['qaMode'] })}>
+                    <option value="fix">{tr('Исправлять ошибки автоматически')}</option>
+                    <option value="report">{tr('Только показывать замечания')}</option>
+                    <option value="rules">{tr('Только проверки без модели (для локальной модели)')}</option>
+                    <option value="off">{tr('Выключена (быстрее)')}</option>
+                  </select>
+                </Field>
+                <SetSwitch testId="qa-after-show" checked={s.qaAfterShow !== false} onChange={(qaAfterShow) => update({ qaAfterShow })} label={tr('Показывать перевод до проверки')} hint={tr('Страница появляется сразу после вёрстки, проверка моделью идёт следом и перерисовывает то, что исправила.')} />
+                <SetSwitch testId="qa-batch" checked={!!s.qaBatch} onChange={(qaBatch) => update({ qaBatch })} label={tr('Проверять несколько коротких страниц за раз')} hint={tr('Быстрее в режимах „Быстро“ и „Баланс“; в „Максимум“ каждая страница проверяется отдельно.')} />
+                <SetSwitch
+                  checked={s.twoStepTranslation ?? (s.quality !== 'fast' && !s.fastLocal)}
+                  onChange={(twoStepTranslation) => update({ twoStepTranslation })}
+                  label={tr('Переводить отдельным шагом — точнее смысл и окончания слов, чуть дольше')}
+                />
+                <Field label={tr('Запасной переводчик')} hint={tr('Переводит страницу, если обычная модель не ответила (не запущена, нет сети, кончился лимит). Такая картинка помечена, ⟳ попробует обычную модель снова.')}>
+                  <select className="ait-select" data-testid="fallback" value={s.fallbackProviderId ?? ''} onChange={(e) => update({ fallbackProviderId: e.target.value || undefined })}>
+                    <option value="">{browserTranslateSupported() ? tr('Переводчик браузера (по умолчанию)') : tr('Нет (этот браузер не переводит сам)')}</option>
+                    {s.providers.filter((p) => p.id !== s.visionProviderId).map((p) => <option key={p.id} value={p.id}>{`${tr(p.label)} · ${p.model}`}</option>)}
+                    <option value="off">{tr('Не использовать')}</option>
+                  </select>
+                </Field>
+              </SetGroup>
+            </div>
+            <div className="ait-set-col">
+              <SetGroup title={tr('Страницы')}>
+                <SetSwitch checked={s.stitchStrips !== false} onChange={(stitchStrips) => update({ stitchStrips })} label={tr('Склеивать соседние картинки ленты (вебтун) — баблы на стыке не теряются')} />
+                <SetSwitch testId="skip-empty" checked={s.skipEmptyPages !== false} onChange={(skipEmptyPages) => update({ skipEmptyPages })} label={tr('Пропускать картинки без текста')} hint={tr('Пейзажи и фоны без букв не отправляются модели — быстрее для вебтунов. На пропущенной картинке ⟳ переведёт её всё равно.')} />
+                <SetSwitch testId="page-workers" checked={s.pageWorkers !== false} onChange={(pageWorkers) => update({ pageWorkers })} label={tr('Обрабатывать страницы в фоновых потоках')} hint={tr('Очистка и подготовка картинок идут на нескольких ядрах процессора, по странице на ядро. Выключите, если перевод ведёт себя странно.')} />
+                <SetSwitch checked={s.autoApplyCached !== false} onChange={(autoApplyCached) => update({ autoApplyCached })} label={tr('Сразу показывать уже переведённые картинки, когда страница открывается снова')} />
+              </SetGroup>
+              <SetGroup title={tr('Наборы настроек')}>
+                <div className="ait-set-presets" data-testid="presets">
+                  {(s.presets ?? []).map((p) => (
+                    <span key={p.id} className="ait-set-preset">
+                      <b>{p.name}</b>
+                      <small className="ait-muted">{Object.values(p.models).join(' + ')}</small>
+                      <button className="ait-btn small" onClick={() => update(applyPreset(s, p))}>{tr('Применить')}</button>
+                      <button className="ait-btn small danger" aria-label={tr('Удалить набор {0}', p.name)} onClick={() => update({ presets: (s.presets ?? []).filter((x) => x.id !== p.id) })}>✕</button>
+                    </span>
+                  ))}
+                  <SetHint text={tr('Модель, качество и проверка — одним выбором (например «Быстро локально» и «Точно в облаке»)')} />
+                  <button
+                    className="ait-btn small"
+                    style={{ justifySelf: 'start' }}
+                    onClick={() => {
+                      const name = prompt(tr('Название набора'), tr('Набор {0}', (s.presets?.length ?? 0) + 1));
+                      if (name?.trim()) update({ presets: [...(s.presets ?? []), presetFrom(s, name.trim())] });
+                    }}
+                  >
+                    {tr('Сохранить текущие как набор')}
+                  </button>
+                </div>
+              </SetGroup>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      {s.pipeline === 'standalone' ? (
+        <div className="ait-panel" data-testid="nets-panel">
+          <h2>{tr('Нейросети на этом компьютере')}</h2>
+          <div className="ait-set-grid">
+            <div className="ait-set-col">
+              <DetectorChoice settings={s} update={update} />
+              <LamaChoice settings={s} update={update} offer={params.get('offer') === 'lama'} />
+              <UpscaleChoice settings={s} update={update} />
+            </div>
+            <div className="ait-set-col">
+              {platform.kind === 'extension' ? <NetsWhere settings={s} update={update} connection={engineConnection} /> : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="ait-panel" data-testid="typesetting">
+        <h2>{tr('Текст и вёрстка')}</h2>
         <div className="ait-set-grid">
           <div className="ait-set-col">
-            <SetGroup title={tr('Качество')}>
-              <div className="ait-field">
-                <Segmented label={tr('Качество')} value={s.quality} onChange={(quality) => update({ quality })} options={[{ value: 'fast', label: tr('Быстро') }, { value: 'balanced', label: tr('Баланс') }, { value: 'best', label: tr('Максимум') }]} />
-                <small>{tr('Чем выше, тем крупнее картинка уходит модели и дольше ответ')}</small>
-              </div>
-              <Field label={tr('Проверка перевода')} hint={tr('Ещё один короткий запрос на страницу: смысл, контекст, эмоции, персонажи, грамматика, термины')}>
-                <select className="ait-select" data-testid="qa-mode" value={qaModeOf(s)} onChange={(e) => update({ qaMode: e.target.value as AppSettings['qaMode'] })}>
-                  <option value="fix">{tr('Исправлять ошибки автоматически')}</option>
-                  <option value="report">{tr('Только показывать замечания')}</option>
-                  <option value="rules">{tr('Только проверки без модели (для локальной модели)')}</option>
-                  <option value="off">{tr('Выключена (быстрее)')}</option>
-                </select>
-              </Field>
-              <Field label={tr('Запасной переводчик')} hint={tr('Переводит страницу, если обычная модель не ответила (не запущена, нет сети, кончился лимит). Такая картинка помечена, ⟳ попробует обычную модель снова.')}>
-                <select className="ait-select" data-testid="fallback" value={s.fallbackProviderId ?? ''} onChange={(e) => update({ fallbackProviderId: e.target.value || undefined })}>
-                  <option value="">{browserTranslateSupported() ? tr('Переводчик браузера (по умолчанию)') : tr('Нет (этот браузер не переводит сам)')}</option>
-                  {s.providers.filter((p) => p.id !== s.visionProviderId).map((p) => <option key={p.id} value={p.id}>{`${tr(p.label)} · ${p.model}`}</option>)}
-                  <option value="off">{tr('Не использовать')}</option>
-                </select>
-              </Field>
-              <SetSwitch testId="translate-logo" checked={!!s.translateLogo} onChange={(translateLogo) => update({ translateLogo })} label={tr('Переводить логотип названия')} hint={tr('Выключено: логотип, титры авторов и названия магазинов остаются как нарисованы.')} />
-              <SetSwitch testId="qa-after-show" checked={s.qaAfterShow !== false} onChange={(qaAfterShow) => update({ qaAfterShow })} label={tr('Показывать перевод до проверки')} hint={tr('Страница появляется сразу после вёрстки, проверка моделью идёт следом и перерисовывает то, что исправила.')} />
-              <SetSwitch testId="qa-batch" checked={!!s.qaBatch} onChange={(qaBatch) => update({ qaBatch })} label={tr('Проверять несколько коротких страниц за раз')} hint={tr('Быстрее в режимах „Быстро“ и „Баланс“; в „Максимум“ каждая страница проверяется отдельно.')} />
-              <SetSwitch
-                checked={s.twoStepTranslation ?? (s.quality !== 'fast' && !s.fastLocal)}
-                onChange={(twoStepTranslation) => update({ twoStepTranslation })}
-                label={tr('Переводить отдельным шагом — точнее смысл и окончания слов, чуть дольше')}
-              />
-              <div className="ait-set-sfx">
-                <Switch checked={s.translateSfx} onChange={(translateSfx) => update({ translateSfx })} label={tr('Переводить звуковые эффекты')} />
-                <select className="ait-select" aria-label={tr('Звуки (SFX)')} value={s.sfxStyle} onChange={(e) => update({ sfxStyle: e.target.value as AppSettings['sfxStyle'] })}>
-                  <option value="translated">{tr('Перевод')}</option>
-                  <option value="original">{tr('Оставить оригинал')}</option>
-                  <option value="small">{tr('Мелкий')}</option>
-                  <option value="large">{tr('Крупный')}</option>
-                  <option value="artistic">{tr('Художественный')}</option>
-                </select>
-              </div>
-            </SetGroup>
-            <SetGroup title={tr('Наборы настроек')}>
-              <div className="ait-set-presets" data-testid="presets">
-                {(s.presets ?? []).map((p) => (
-                  <span key={p.id} className="ait-set-preset">
-                    <b>{p.name}</b>
-                    <small className="ait-muted">{Object.values(p.models).join(' + ')}</small>
-                    <button className="ait-btn small" onClick={() => update(applyPreset(s, p))}>{tr('Применить')}</button>
-                    <button className="ait-btn small danger" aria-label={tr('Удалить набор {0}', p.name)} onClick={() => update({ presets: (s.presets ?? []).filter((x) => x.id !== p.id) })}>✕</button>
-                  </span>
-                ))}
-                <SetHint text={tr('Модель, качество и проверка — одним выбором (например «Быстро локально» и «Точно в облаке»)')} />
-                <button
-                  className="ait-btn small"
-                  style={{ justifySelf: 'start' }}
-                  onClick={() => {
-                    const name = prompt(tr('Название набора'), tr('Набор {0}', (s.presets?.length ?? 0) + 1));
-                    if (name?.trim()) update({ presets: [...(s.presets ?? []), presetFrom(s, name.trim())] });
-                  }}
-                >
-                  {tr('Сохранить текущие как набор')}
-                </button>
-              </div>
-            </SetGroup>
-            {platform.kind === 'extension' ? (
-              <SetGroup>
-                <AutoSaveFolder settings={s} update={update} />
-              </SetGroup>
-            ) : null}
+            <div className="ait-set-sfx">
+              <Switch checked={s.translateSfx} onChange={(translateSfx) => update({ translateSfx })} label={tr('Переводить звуковые эффекты')} />
+              <select className="ait-select" aria-label={tr('Звуки (SFX)')} value={s.sfxStyle} onChange={(e) => update({ sfxStyle: e.target.value as AppSettings['sfxStyle'] })}>
+                <option value="translated">{tr('Перевод')}</option>
+                <option value="original">{tr('Оставить оригинал')}</option>
+                <option value="small">{tr('Мелкий')}</option>
+                <option value="large">{tr('Крупный')}</option>
+                <option value="artistic">{tr('Художественный')}</option>
+              </select>
+            </div>
+            <SetSwitch testId="translate-logo" checked={!!s.translateLogo} onChange={(translateLogo) => update({ translateLogo })} label={tr('Переводить логотип названия')} hint={tr('Выключено: логотип, титры авторов и названия магазинов остаются как нарисованы.')} />
+            <SetSwitch checked={!!s.bubblesOnly} onChange={(bubblesOnly) => update({ bubblesOnly })} label={tr('Только баблы: звуки и надписи на фоне оставлять как в оригинале')} />
+            <SetSwitch checked={!!s.onlySourceLang} onChange={(onlySourceLang) => update({ onlySourceLang })} label={tr('Переводить только текст на исходном языке (нужен выбранный исходный язык)')} />
+            <SetSwitch testId="self-check" checked={s.selfCheck !== false} onChange={(selfCheck) => update({ selfCheck })} label={tr('Самопроверка после вёрстки')} hint={tr('Ищет недостёртый оригинал, текст за краем бабла, слишком мелкий текст, задетый рисунок и неподходящий цвет. Очевидное исправляет сам, остальное показывает в редакторе («Следующее замечание»).')} />
           </div>
           <div className="ait-set-col">
-            <SetGroup title={tr('Страницы')}>
-              <SetSwitch checked={s.stitchStrips !== false} onChange={(stitchStrips) => update({ stitchStrips })} label={tr('Склеивать соседние картинки ленты (вебтун) — баблы на стыке не теряются')} />
-              <SetSwitch checked={!!s.bubblesOnly} onChange={(bubblesOnly) => update({ bubblesOnly })} label={tr('Только баблы: звуки и надписи на фоне оставлять как в оригинале')} />
-              <SetSwitch checked={!!s.onlySourceLang} onChange={(onlySourceLang) => update({ onlySourceLang })} label={tr('Переводить только текст на исходном языке (нужен выбранный исходный язык)')} />
-              <SetSwitch testId="skip-empty" checked={s.skipEmptyPages !== false} onChange={(skipEmptyPages) => update({ skipEmptyPages })} label={tr('Пропускать картинки без текста')} hint={tr('Пейзажи и фоны без букв не отправляются модели — быстрее для вебтунов. На пропущенной картинке ⟳ переведёт её всё равно.')} />
-              <SetSwitch testId="page-workers" checked={s.pageWorkers !== false} onChange={(pageWorkers) => update({ pageWorkers })} label={tr('Обрабатывать страницы в фоновых потоках')} hint={tr('Очистка и подготовка картинок идут на нескольких ядрах процессора, по странице на ядро. Выключите, если перевод ведёт себя странно.')} />
-              <SetSwitch checked={s.autoApplyCached !== false} onChange={(autoApplyCached) => update({ autoApplyCached })} label={tr('Сразу показывать уже переведённые картинки, когда страница открывается снова')} />
-              <div className="ait-field">
-                <span>{tr('Страницы главы в редакторе')}</span>
-                <Segmented label={tr('Страницы главы в редакторе')} value={s.editorPageList ?? 'bottom'} onChange={(editorPageList) => update({ editorPageList })} options={[{ value: 'bottom', label: tr('Снизу') }, { value: 'right', label: tr('Справа') }]} />
-              </div>
-            </SetGroup>
-            <SetGroup title={tr('Вёрстка')}>
-              <label className="ait-field" data-testid="font-scale">
-                <span>{tr('Размер текста перевода: {0}%', Math.round((s.fonts.scale ?? 1) * 100))}</span>
-                <input type="range" min={0.6} max={1.5} step={0.05} value={s.fonts.scale ?? 1} onChange={(e) => update({ fonts: { ...s.fonts, scale: Number(e.target.value) } })} aria-label={tr('Размер текста перевода')} />
-                <SetHint text={tr('Меньше 100% — текст мельче, чем помещается в бабл; больше — крупнее, пока помещается. Размер, заданный в редакторе вручную, не меняется.')} />
-              </label>
-              <label className="ait-field" data-testid="font-min">
-                <span>{s.fonts.minSize ? tr('Минимальный размер текста: {0} px', s.fonts.minSize) : tr('Минимальный размер текста: авто')}</span>
-                <input type="range" min={0} max={30} step={1} value={s.fonts.minSize ?? 0} onChange={(e) => update({ fonts: { ...s.fonts, minSize: Number(e.target.value) || undefined } })} aria-label={tr('Минимальный размер текста')} />
-                <SetHint text={tr('Перевод не станет мельче этого размера, даже если не помещается в бабл. «Авто» — около 1,6% ширины картинки, не меньше 12 px.')} />
-              </label>
-              <label className="ait-field">
-                <span>{tr('Стирать оригинал с запасом: {0} px', s.inpaintExpand ?? 3)}</span>
-                <input type="range" min={0} max={12} value={s.inpaintExpand ?? 3} onChange={(e) => update({ inpaintExpand: Number(e.target.value) })} aria-label={tr('Запас вокруг букв при стирании')} />
-                <SetHint text={tr('Больше — если вокруг перевода остаются следы старых букв; меньше — если стирается лишний рисунок.')} />
-              </label>
-              <LamaChoice settings={s} update={update} offer={params.get('offer') === 'lama'} />
-              <DetectorChoice settings={s} update={update} />
-              <UpscaleChoice settings={s} update={update} />
-              <SetSwitch testId="self-check" checked={s.selfCheck !== false} onChange={(selfCheck) => update({ selfCheck })} label={tr('Самопроверка после вёрстки')} hint={tr('Ищет недостёртый оригинал, текст за краем бабла, слишком мелкий текст, задетый рисунок и неподходящий цвет. Очевидное исправляет сам, остальное показывает в редакторе («Следующее замечание»).')} />
-            </SetGroup>
+            <label className="ait-field" data-testid="font-scale">
+              <span>{tr('Размер текста перевода: {0}%', Math.round((s.fonts.scale ?? 1) * 100))}</span>
+              <input type="range" min={0.6} max={1.5} step={0.05} value={s.fonts.scale ?? 1} onChange={(e) => update({ fonts: { ...s.fonts, scale: Number(e.target.value) } })} aria-label={tr('Размер текста перевода')} />
+              <SetHint text={tr('Меньше 100% — текст мельче, чем помещается в бабл; больше — крупнее, пока помещается. Размер, заданный в редакторе вручную, не меняется.')} />
+            </label>
+            <label className="ait-field" data-testid="font-min">
+              <span>{s.fonts.minSize ? tr('Минимальный размер текста: {0} px', s.fonts.minSize) : tr('Минимальный размер текста: авто')}</span>
+              <input type="range" min={0} max={30} step={1} value={s.fonts.minSize ?? 0} onChange={(e) => update({ fonts: { ...s.fonts, minSize: Number(e.target.value) || undefined } })} aria-label={tr('Минимальный размер текста')} />
+              <SetHint text={tr('Перевод не станет мельче этого размера, даже если не помещается в бабл. «Авто» — около 1,6% ширины картинки, не меньше 12 px.')} />
+            </label>
+            <label className="ait-field">
+              <span>{tr('Стирать оригинал с запасом: {0} px', s.inpaintExpand ?? 3)}</span>
+              <input type="range" min={0} max={12} value={s.inpaintExpand ?? 3} onChange={(e) => update({ inpaintExpand: Number(e.target.value) })} aria-label={tr('Запас вокруг букв при стирании')} />
+              <SetHint text={tr('Больше — если вокруг перевода остаются следы старых букв; меньше — если стирается лишний рисунок.')} />
+            </label>
           </div>
         </div>
       </div>
 
-      <div className="ait-panel">
-        <h2>{tr('Режим работы ИИ')}</h2>
-        <AiModeSwitch settings={s} update={update} force ocrHere={!!platform.ocr} />
-        {s.pipeline === 'engine' ? (
-          <div className="ait-grid2" style={{ marginTop: 12 }}>
-            <Field label={tr('Адрес движка')} hint={tr('На ПК: http://127.0.0.1:8765. С телефона: LAN-адрес из окна движка.')}>
-              <input className="ait-input" value={s.engine.url} onChange={(e) => update({ engine: { ...s.engine, url: e.target.value.trim() } })} />
-            </Field>
-            <Field label={tr('Код сопряжения')} hint={tr('Показывается в окне движка при запуске')}>
-              <input className="ait-input" value={s.engine.token} onChange={(e) => update({ engine: { ...s.engine, token: e.target.value.trim() } })} />
-            </Field>
-            <Field label={tr('Поиск текста')}>
-              <select className="ait-select" value={s.engine.options.detector} onChange={(e) => update({ engine: { ...s.engine, options: { ...s.engine.options, detector: e.target.value as AppSettings['engine']['options']['detector'] } } })}>
-                <option value="auto">{tr('Авто (баблы, иначе vision)')}</option>
-                <option value="classic">{tr('Только баблы (без модели)')}</option>
-                <option value="vision">{tr('Vision-модель')}</option>
-              </select>
-            </Field>
-            <Field label={tr('Распознавание (OCR)')}>
-              <select className="ait-select" value={s.engine.options.ocr} onChange={(e) => update({ engine: { ...s.engine, options: { ...s.engine.options, ocr: e.target.value as AppSettings['engine']['options']['ocr'] } } })}>
-                <option value="auto">{tr('Авто')}</option>
-                <option value="manga-ocr">{tr('manga-ocr (японский)')}</option>
-                <option value="paddle">{tr('PaddleOCR (корейский, китайский)')}</option>
-                <option value="vision">{tr('Vision-модель')}</option>
-              </select>
-            </Field>
-            <Field label={tr('Очистка')}>
-              <select className="ait-select" value={s.engine.options.inpainter} onChange={(e) => update({ engine: { ...s.engine, options: { ...s.engine.options, inpainter: e.target.value as AppSettings['engine']['options']['inpainter'] } } })}>
-                <option value="auto">{tr('Авто')}</option>
-                <option value="fill">{tr('Заливка цветом бабла')}</option>
-                <option value="telea">OpenCV</option>
-                <option value="lama">{tr('LaMa (нужна модель)')}</option>
-              </select>
-            </Field>
-            <div style={{ alignSelf: 'end' }}>
-              <button className="ait-btn" onClick={() => void engineTest.run()} disabled={engineTest.busy}>
-                {tr('Проверить движок')}
-              </button>
-            </div>
-          </div>
-        ) : null}
-        <ErrorBox error={engineTest.error} />
-      </div>
-
-      <div className="ait-panel">
-        <h2>{tr('Модели')}</h2>
+      <FoldPanel title={tr('Модели и серверы')} summary={s.providers.map((p) => tr(p.label)).join(', ') || tr('нет')} testId="servers">
         <div className="ait-grid2">
           <Field label={tr('Читает изображение')} hint={tr('Нужна модель с поддержкой изображений')}>
             <select className="ait-select" value={s.visionProviderId ?? ''} onChange={(e) => update({ visionProviderId: e.target.value || null })}>
@@ -780,36 +819,33 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               {s.providers.map((p) => <option key={p.id} value={p.id}>{tr(p.label)} · {p.model}</option>)}
             </select>
           </Field>
-          <Field label={tr('Приватность')}>
+          <Field label={tr('Приватность')} hint={tr('Подбирается по режиму; здесь — чтобы задать строже')}>
             <select className="ait-select" value={s.privacy} onChange={(e) => update({ privacy: e.target.value as AppSettings['privacy'] })}>
               <option value="local">{tr('Только локально — ничего не уходит наружу')}</option>
               <option value="hybrid">{tr('Гибрид — наружу уходит только текст')}</option>
               <option value="cloud">{tr('Облако — изображения могут уходить провайдеру')}</option>
             </select>
           </Field>
-          <Field label={tr('Страниц одновременно')}>
-            <PagesInFlight settings={s} update={update} />
-          </Field>
         </div>
-      </div>
-
-      <FoldPanel title={tr('Локальные серверы')} summary={localProviders.map((p) => tr(p.label)).join(', ') || tr('нет')} testId="local-servers">
-        {localProviders.map((p) => (
-          <ProviderEditor key={p.id} cfg={p} onChange={setProvider} onRemove={() => removeProvider(p.id)} onUse={() => pickProvider(p)} inUse={p.vision ? s.visionProviderId === p.id && !s.translationProviderId : s.translationProviderId === p.id} />
-        ))}
-        {addRow(PROVIDER_PRESETS.filter((p) => p.local))}
-        {guideFor(PROVIDER_PRESETS.filter((p) => p.local))}
+        <h3>{tr('Локальные серверы')}</h3>
+        <div data-testid="local-servers">
+          {localProviders.map((p) => (
+            <ProviderEditor key={p.id} cfg={p} onChange={setProvider} onRemove={() => removeProvider(p.id)} onUse={() => pickProvider(p)} inUse={p.vision ? s.visionProviderId === p.id && !s.translationProviderId : s.translationProviderId === p.id} />
+          ))}
+          {addRow(PROVIDER_PRESETS.filter((p) => p.local))}
+          {guideFor(PROVIDER_PRESETS.filter((p) => p.local))}
+        </div>
+        <h3>{tr('Облачные модели')}</h3>
+        <div data-testid="cloud-providers">
+          {cloudProviders.map((p) => (
+            <ProviderEditor key={p.id} cfg={p} onChange={setProvider} onRemove={() => removeProvider(p.id)} onUse={() => pickProvider(p)} inUse={p.vision ? s.visionProviderId === p.id && !s.translationProviderId : s.translationProviderId === p.id} />
+          ))}
+          {addRow(PROVIDER_PRESETS.filter((p) => !p.local))}
+          {guideFor(PROVIDER_PRESETS.filter((p) => !p.local))}
+        </div>
       </FoldPanel>
-      <FoldPanel title={tr('Облачные модели')} summary={cloudProviders.length ? cloudProviders.map((p) => tr(p.label)).join(', ') : tr('не подключены — Claude, OpenAI, Gemini, OpenRouter…')} testId="cloud-providers">
-        {cloudProviders.map((p) => (
-          <ProviderEditor key={p.id} cfg={p} onChange={setProvider} onRemove={() => removeProvider(p.id)} onUse={() => pickProvider(p)} inUse={p.vision ? s.visionProviderId === p.id && !s.translationProviderId : s.translationProviderId === p.id} />
-        ))}
-        {addRow(PROVIDER_PRESETS.filter((p) => !p.local))}
-        {guideFor(PROVIDER_PRESETS.filter((p) => !p.local))}
-      </FoldPanel>
 
-      <div className="ait-panel">
-        <h2>{tr('Профили перевода')}</h2>
+      <FoldPanel title={tr('Профили перевода')} summary={tr(s.profiles.find((p) => p.id === s.activeProfileId)?.name ?? '')} testId="profiles">
         <div className="ait-row" style={{ marginBottom: 12 }}>
           <Field label={tr('Профиль')}>
             <select className="ait-select" value={profile.id} onChange={(e) => setProfileId(e.target.value)}>
@@ -859,7 +895,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
             </tbody>
           </table>
         ) : null}
-      </div>
+      </FoldPanel>
 
       <div className="ait-panel">
         <h2>{tr('Интерфейс и данные')}</h2>
@@ -877,8 +913,12 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
           <Field label={tr('Тема')}>
             <Segmented label={tr('Тема')} value={s.theme} onChange={(theme) => update({ theme })} options={[{ value: 'system', label: tr('Как в системе') }, { value: 'light', label: tr('Светлая') }, { value: 'dark', label: tr('Тёмная') }]} />
           </Field>
-          <Field label={tr('Режим работы')}>
-            <Segmented label={tr('Режим')} value={s.uiMode} onChange={(uiMode) => update({ uiMode })} options={[{ value: 'reader', label: tr('Читатель') }, { value: 'advanced', label: tr('Продвинутый') }, { value: 'scanlator', label: tr('Сканлейтер') }]} />
+          <div className="ait-field" style={{ gridColumn: 'span 2' }}>
+            <span>{tr('Вид интерфейса')}</span>
+            <Segmented label={tr('Вид интерфейса')} value={s.uiMode} onChange={(uiMode) => update({ uiMode })} options={[{ value: 'reader', label: tr('Читатель') }, { value: 'advanced', label: tr('Продвинутый') }, { value: 'scanlator', label: tr('Сканлейтер') }]} />
+          </div>
+          <Field label={tr('Страницы главы в редакторе')}>
+            <Segmented label={tr('Страницы главы в редакторе')} value={s.editorPageList ?? 'bottom'} onChange={(editorPageList) => update({ editorPageList })} options={[{ value: 'bottom', label: tr('Снизу') }, { value: 'right', label: tr('Справа') }]} />
           </Field>
           <Field label={tr('Хранить кэш, дней')}>
             <NumberInput min={1} max={365} fallback={14} value={s.cacheDays} onChange={(cacheDays) => update({ cacheDays })} />
@@ -896,6 +936,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
         <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
           <Switch checked={s.saveHistory} onChange={(saveHistory) => update({ saveHistory })} label={tr('Сохранять историю переводов')} />
           <Switch checked={s.debug} onChange={(debug) => update({ debug })} label={tr('Показывать отладку (время этапов, токены, стоимость)')} />
+          {platform.kind === 'extension' ? <AutoSaveFolder settings={s} update={update} /> : null}
         </div>
         <StorageLine settings={s} update={update} />
         <div style={{ marginTop: 14 }}>
@@ -983,6 +1024,66 @@ function PagesInFlight({ settings: s, update }: { settings: AppSettings; update:
           ? tr('Подобрано по компьютеру{0}. Следующая страница ждёт, если памяти не хватает.', about ? ` (${about})` : '')
           : tr('Следующая страница всё равно ждёт, если памяти не хватает.')}
       </p>
+    </div>
+  );
+}
+
+/**
+ * «Где считать нейросети»: the detector, recognition, LaMa and the upscaler in this browser
+ * (WebGPU) or on the AI Translate Engine on this computer (ONNX Runtime with CUDA / DirectML —
+ * several times faster on a video card). «Авто» uses the engine when it runs with a video card.
+ */
+function NetsWhere({ settings: s, update, connection }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; connection: ReactNode }) {
+  const want = s.netsWhere ?? 'auto';
+  const [eng, setEng] = useState<{ ok: boolean; device?: string } | null>(null);
+  useEffect(() => {
+    let off = false;
+    if (!s.engine.url || !s.engine.token || want === 'browser') {
+      setEng(null);
+      return;
+    }
+    void new EngineClient(s.engine.url, s.engine.token).health().then(
+      (h) => !off && setEng({ ok: (h as { paired?: boolean }).paired !== false, device: (h as { nets?: { available?: boolean; device?: string } }).nets?.available ? (h as { nets?: { device?: string } }).nets?.device : undefined }),
+      () => !off && setEng({ ok: false }),
+    );
+    return () => {
+      off = true;
+    };
+  }, [s.engine.url, s.engine.token, want]);
+  const onEngine = want !== 'browser' && !!eng?.ok && !!eng.device && (want === 'engine' || eng.device !== 'cpu');
+  const device = (d?: string) => (d === 'cuda' ? 'CUDA' : d === 'directml' ? 'DirectML' : d === 'cpu' ? tr('процессор') : d ?? '');
+  const status =
+    want === 'browser'
+      ? tr('Считаются в браузере (видеокарта через WebGPU, иначе процессор).')
+      : onEngine
+        ? tr('Считаются в движке: {0}.', device(eng?.device))
+        : !s.engine.token
+          ? tr('Движок не подключён — считаются в браузере.')
+          : eng && !eng.ok
+            ? tr('Движок не отвечает или код не подошёл — считаются в браузере.')
+            : eng && !eng.device
+              ? tr('В движке нет ONNX Runtime — запустите его заново через start-engine.bat. Пока считаются в браузере.')
+              : eng?.device === 'cpu'
+                ? tr('Движок без видеокарты — в «Авто» нейросети считаются в браузере.')
+                : tr('Проверяю движок…');
+  return (
+    <div className="ait-field" data-testid="nets-where">
+      <span>{tr('Где считать нейросети')}</span>
+      <select className="ait-select" value={want} onChange={(e) => update({ netsWhere: e.target.value as AppSettings['netsWhere'] })}>
+        <option value="auto">{tr('Авто — в движке, если он запущен с видеокартой')}</option>
+        <option value="engine">{tr('В движке AI Translate (CUDA)')}</option>
+        <option value="browser">{tr('В браузере')}</option>
+      </select>
+      <small className="ait-muted" data-testid="nets-status">{status}</small>
+      {want !== 'browser' ? (
+        <details open={want === 'engine' && !s.engine.token}>
+          <summary style={{ cursor: 'pointer' }}>{tr('Движок AI Translate на этом компьютере')}</summary>
+          <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+            <small className="ait-muted">{tr('Запустите engine\\scripts\\start-engine.bat: он сам поставит ONNX Runtime для видеокарты (CUDA у NVIDIA, иначе DirectML). Модели передаются движку один раз из браузера.')}</small>
+            {connection}
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }

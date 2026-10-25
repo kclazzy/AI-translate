@@ -1,6 +1,6 @@
 import { DETECTOR_SIZE, parseDetectorOutputs, type Detection, type PixelData, type RawTensor, type TextDetector } from '@ait/core';
 import { GPU_NETS, GpuTimeout, NETS_LIMIT_MS, NETS_LOAD_LIMIT_MS, onGpu, releaseWhenIdle, withLimit } from './gpuLane';
-import { cached, DETECTOR_FP32_URL, DETECTOR_URL, downloadWithRuntime, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, resizePixels } from './ortRuntime';
+import { cached, DETECTOR_FP32_URL, DETECTOR_URL, downloadWithRuntime, loadOrt, MODELS_CACHE, ORT_WASM_URL, removeModel, resizePixels, makeSession, gpuAvailable, type NetSession } from './ortRuntime';
 
 /**
  * The neural text / bubble detector (ogkalu/comic-text-and-bubble-detector, Apache-2.0: RT-DETR-v2
@@ -26,13 +26,13 @@ export async function deleteDetector(): Promise<void> {
   await removeModel([DETECTOR_URL, DETECTOR_FP32_URL]);
 }
 
-type Session = import('onnxruntime-web').InferenceSession;
+type Session = NetSession;
 interface Loaded {
   s: Session;
   ort: Awaited<ReturnType<typeof loadOrt>>;
   image: string;
   sizes?: string;
-  ep: 'webgpu' | 'wasm';
+  ep: 'webgpu' | 'wasm' | 'engine';
   url: string;
 }
 let session: Promise<Loaded> | null = null;
@@ -45,7 +45,7 @@ function load(prefer?: 'wasm'): Promise<Loaded> {
   session ??= (async () => {
     const ort = await loadOrt();
     const cache = await caches.open(MODELS_CACHE);
-    const gpu = prefer !== 'wasm' && !gpuBroken && typeof navigator !== 'undefined' && 'gpu' in navigator;
+    const gpu = prefer !== 'wasm' && !gpuBroken && gpuAvailable();
     let last: unknown = new Error('The text detector is not downloaded');
     for (const url of [DETECTOR_URL, DETECTOR_FP32_URL]) {
       const hit = await cache.match(url);
@@ -53,10 +53,10 @@ function load(prefer?: 'wasm'): Promise<Loaded> {
       const bytes = new Uint8Array(await hit.arrayBuffer());
       for (const ep of gpu ? (['webgpu', 'wasm'] as const) : (['wasm'] as const)) {
         try {
-          const s = await ort.InferenceSession.create(bytes, { executionProviders: ep === 'webgpu' ? ['webgpu', 'wasm'] : ['wasm'] });
+          const s = await makeSession(ort, bytes, ep === 'webgpu' ? ['webgpu', 'wasm'] : ['wasm']);
           const image = s.inputNames.find((n) => /pixel|image|input/i.test(n)) ?? s.inputNames[0];
           const sizes = s.inputNames.find((n) => n !== image && /size|orig/i.test(n)) ?? s.inputNames.find((n) => n !== image);
-          return { s, ort, image, sizes, ep, url };
+          return { s, ort, image, sizes, ep: s.remote ? ('engine' as const) : ep, url };
         } catch (e) {
           last = e;
         }
@@ -103,7 +103,7 @@ export const textDetector: TextDetector = (img) => {
     } catch (e) {
       // A model that loads on the video card but fails there (int8 operators): once more on the processor.
       const L = await session?.catch(() => null);
-      if (L?.ep !== 'webgpu') throw e;
+      if (L?.ep !== 'webgpu' && L?.ep !== 'engine') throw e;
       // …and the card is not tried again (a lost device fails every run after it).
       gpuBroken = true;
       await releaseDetector();
