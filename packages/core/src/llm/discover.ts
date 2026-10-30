@@ -2,6 +2,7 @@ import { activeCatalog } from './catalog';
 import { httpError, joinUrl, safeFetch } from './http';
 import type { FetchLike, ProviderConfig } from './types';
 import { tr } from '../i18n';
+import { isOllama, ollamaNumCtx, ollamaUrl } from './openai';
 
 export interface DiscoveredModel {
   id: string;
@@ -241,4 +242,21 @@ export async function ollamaUnloadAll(baseUrl: string, fetchImpl: FetchLike = (u
     ),
   );
   return loaded.map((m) => m.name);
+}
+
+/**
+ * Load the model into video memory before the first page needs it (Ollama: a request without a
+ * prompt), so the loading runs while the page is downloaded and prepared. The same context size as
+ * the pages' requests: with another one Ollama would load the model again for the first page.
+ * False when the server is not Ollama or does not answer.
+ */
+export async function ollamaWarm(cfg: Pick<ProviderConfig, 'preset' | 'baseUrl' | 'model' | 'numCtx' | 'keepAliveMin'>, fetchImpl: FetchLike = (u, i) => fetch(u, i)): Promise<boolean> {
+  if (!isOllama(cfg) || !cfg.model) return false;
+  const keep = cfg.keepAliveMin === undefined ? '5m' : `${Math.max(1, cfg.keepAliveMin)}m`;
+  try {
+    const res = await fetchImpl(ollamaUrl(cfg.baseUrl, 'api/generate'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: cfg.model, keep_alive: keep, options: { num_ctx: ollamaNumCtx(cfg) } }) });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from 'vitest';
-import { checkForUpdate, checkVisionModel, configFromPreset, defaultSettings, gpuShare, TranslateService, guessVramGb, MODEL_TIERS, ollamaDelete, ollamaLoaded, ollamaUnloadAll, OpenAICompatibleProvider, pickAsset, pipelineConfigFromSettings, tierForVram } from '../src';
+import { checkForUpdate, checkVisionModel, configFromPreset, defaultSettings, gpuShare, TranslateService, guessVramGb, MODEL_TIERS, ollamaDelete, ollamaLoaded, ollamaUnloadAll, ollamaWarm, OpenAICompatibleProvider, pickAsset, pipelineConfigFromSettings, tierForVram } from '../src';
 import { TaskQueue } from '../src/util/queue';
 import { jsonResponse, napiBackend } from './helpers';
 
@@ -119,6 +119,24 @@ describe('video memory', () => {
     expect(await ollamaUnloadAll('http://localhost:11434/v1', f)).toEqual(['qwen3.5:9b-q4_K_M']);
     expect(calls.at(-1)).toBe('POST http://localhost:11434/api/generate {"model":"qwen3.5:9b-q4_K_M","keep_alive":0}');
     expect(await ollamaLoaded('http://localhost:11434/v1', async () => { throw new TypeError('offline'); })).toEqual([]);
+  });
+  it('loads the model ahead with the same context size the pages use (no second load)', async () => {
+    const bodies: { u: string; b: Record<string, unknown> }[] = [];
+    const f = async (u: string, i?: RequestInit) => {
+      bodies.push({ u, b: JSON.parse(String(i?.body)) });
+      return jsonResponse({ message: { content: 'ok' }, done: true });
+    };
+    const cfg = { ...configFromPreset('ollama', 'qwen3.5:9b'), numCtx: 12288, keepAliveMin: 15 };
+    expect(await ollamaWarm(cfg, f)).toBe(true);
+    await new OpenAICompatibleProvider(cfg, f).complete({ system: 's', messages: [{ role: 'user', content: 'x' }] });
+    const [warm, page] = bodies;
+    expect(warm.u).toBe('http://localhost:11434/api/generate');
+    expect(warm.b).toEqual({ model: cfg.model, keep_alive: '15m', options: { num_ctx: 12288 } });
+    expect((page.b.options as { num_ctx: number }).num_ctx).toBe(12288);
+    // Not an Ollama server, or Ollama is off: nothing to load, no error.
+    expect(await ollamaWarm({ ...configFromPreset('lmstudio', 'm') }, f)).toBe(false);
+    expect(await ollamaWarm(cfg, async () => { throw new TypeError('offline'); })).toBe(false);
+    expect(bodies).toHaveLength(2);
   });
   it('settings decide how long the model stays loaded', () => {
     const s = defaultSettings();

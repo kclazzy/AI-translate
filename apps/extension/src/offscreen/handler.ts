@@ -1,4 +1,4 @@
-import { AppError, bytesCost, encodeAtOnce, fitsInMemory, forgetRemembered, isMemoryError, MemoryBackoff, PageWorkers, pagesInFlight, readHardware, TYPICAL_PAGE_COST, tilesToImage, isLocalProvider, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
+import { AppError, bytesCost, encodeAtOnce, fitsInMemory, forgetRemembered, isMemoryError, MemoryBackoff, PageWorkers, pagesInFlight, readHardware, TYPICAL_PAGE_COST, tilesToImage, isLocalProvider, ollamaWarm, pipelineConfigFromSettings, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
 import { loadBundledFonts, loadUserFonts } from '@ait/studio/fonts';
 import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
 import { buildAnalysisPack, buildProblemReport, type AnalysisPage } from '@ait/studio/problem-report';
@@ -73,6 +73,26 @@ const WATCHDOG_LOCAL_MIN = 12;
 const WATCHDOG_CLOUD_MIN = 5;
 /** Keep the local model loaded this long while a chapter is still in the queue. */
 const CHAPTER_KEEP_ALIVE_MIN = 15;
+/** When the local model was last loaded ahead (once a minute at most). */
+let warmedAt = 0;
+
+/**
+ * The first picture of a chapter not translated before: load the local model into video memory now,
+ * while the picture is decoded and its lettering found — not after (seconds to tens of seconds for a
+ * 9B model). Not through the video card's turns: loading is memory, not computing.
+ */
+function warmModel(): void {
+  // Checked now, before the picture joins the queue (the settings are read after).
+  const st = queue.getStats();
+  if (st.pending + st.running > 0 || Date.now() - warmedAt < 60_000) return;
+  warmedAt = Date.now();
+  void loadSettings()
+    .then((settings) => {
+      const vision = pipelineConfigFromSettings(settings).vision;
+      return vision ? ollamaWarm(vision) : false;
+    })
+    .catch(() => undefined);
+}
 /** Results bigger than this go to the page tile by tile (browsers refuse messages over 64 MiB). */
 const MAX_TILES_IN_MESSAGE = 40 * 1024 * 1024;
 
@@ -455,6 +475,8 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
         task.read = undefined;
         return ((ahead && (await ahead.catch(() => undefined))) || (await readBytes(blobId))).bytes;
       };
+      // Not translated before: the local model loads while this picture is read and prepared.
+      if (local) warmModel();
       void queue
         .add({
           key,
@@ -553,6 +575,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
           return { queued: false, cached: true };
         }
       }
+      if (local) warmModel();
       void queue
         .add({
           key,

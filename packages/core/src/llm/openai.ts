@@ -99,7 +99,7 @@ export class OpenAICompatibleProvider implements LlmProvider {
       // How long the model stays in video memory after this page (0 = unload now).
       keep_alive: this.config.keepAliveMin === undefined ? '5m' : this.config.keepAliveMin <= 0 ? 0 : `${this.config.keepAliveMin}m`,
       // 8k tokens hold a page picture, the prompt and the answer; 16k only with plenty of video memory.
-      options: { temperature: req.temperature ?? this.config.temperature ?? 0.2, num_predict: maxTokens, num_ctx: this.config.numCtx ?? 8192 },
+      options: { temperature: req.temperature ?? this.config.temperature ?? 0.2, num_predict: maxTokens, num_ctx: ollamaNumCtx(this.config) },
     };
     if (req.json) body.format = 'json';
     const { signal, dispose } = timeoutSignal(this.config.timeoutMs ?? 600_000, req.signal);
@@ -131,6 +131,11 @@ export class OpenAICompatibleProvider implements LlmProvider {
 
 export function isOllama(cfg: Pick<ProviderConfig, 'preset' | 'baseUrl'>): boolean {
   return cfg.preset === 'ollama' || /:11434(\/|$)/.test(cfg.baseUrl);
+}
+
+/** The context window asked of Ollama (a different one makes it load the model again). */
+export function ollamaNumCtx(cfg: Pick<ProviderConfig, 'numCtx'>): number {
+  return cfg.numCtx ?? 8192;
 }
 
 /** Ollama's native API lives next to its OpenAI-compatible /v1. */
