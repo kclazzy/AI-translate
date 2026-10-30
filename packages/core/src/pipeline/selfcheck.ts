@@ -69,17 +69,40 @@ const interiorKnown = (b: BubbleInfo | null): b is BubbleInfo => !!b && (!!b.row
 
 /** Is (x, y) inside the bubble's interior (rows of the outline, or the ellipse), with a tolerance? */
 export function inInterior(b: BubbleInfo, x: number, y: number, tol = 0): boolean {
+  const span = interiorSpan(b, y, tol);
+  return !!span && x >= span[0] && x <= span[1];
+}
+
+/** The interior's extent [left, right] on row y (with a tolerance), or null where the row misses it. */
+export function interiorSpan(b: BubbleInfo, y: number, tol = 0): [number, number] | null {
   const r = b.rows;
   if (r && r.l.length) {
     const i = Math.round((y - r.y) / r.step);
-    if (i < -Math.ceil(tol / r.step) || i >= r.l.length + Math.ceil(tol / r.step)) return false;
+    if (i < -Math.ceil(tol / r.step) || i >= r.l.length + Math.ceil(tol / r.step)) return null;
     const k = Math.max(0, Math.min(r.l.length - 1, i));
-    return x >= r.l[k] - tol && x <= r.r[k] + tol && r.r[k] > r.l[k];
+    return r.r[k] > r.l[k] ? [r.l[k] - tol, r.r[k] + tol] : null;
   }
   const [bx, by, bw, bh] = b.box;
   const rx = bw / 2 + tol;
   const ry = bh / 2 + tol;
-  return ((x - bx - bw / 2) / rx) ** 2 + ((y - by - bh / 2) / ry) ** 2 <= 1;
+  const dy = (y - by - bh / 2) / ry;
+  if (dy * dy > 1) return null;
+  const half = rx * Math.sqrt(1 - dy * dy);
+  return [bx + bw / 2 - half, bx + bw / 2 + half];
+}
+
+/** Pixels of the zone inside any of the bubbles' interiors (with a tolerance), row by row. */
+function interiorMask(bubbles: BubbleInfo[], [zx, zy, w, h]: Box, tol: number): Uint8Array {
+  const m = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++)
+    for (const bb of bubbles) {
+      const span = interiorSpan(bb, zy + y, tol);
+      if (!span) continue;
+      const x0 = Math.max(0, Math.ceil(span[0]) - zx);
+      const x1 = Math.min(w - 1, Math.floor(span[1]) - zx);
+      if (x1 >= x0) m.fill(1, y * w + x0, y * w + x1 + 1);
+    }
+  return m;
 }
 
 /** The biggest rectangle around the bubble's middle that lies inside its interior. */
@@ -171,6 +194,25 @@ interface Ctx {
   minReadable: number;
   /** Bubbles of every block (art inside any of them may be painted over). */
   bubbles: BubbleInfo[];
+  /** Raised whenever a fix writes into the cleaned picture: what was read from it before is stale. */
+  rev: number;
+  /** Pixel checks already worked out for a zone at a `rev` (a block is checked again after its fixes). */
+  seen: Map<string, unknown>;
+  /** Layouts by block (a block is not changed in place: a fix makes a new one). */
+  layouts: WeakMap<TextBlock, { l: LayoutResult; box: Box }>;
+}
+
+/** The pixel check `fn` for `key`, worked out once while the cleaned picture stays the same. */
+function once<T>(ctx: Ctx, key: string, fn: () => T): T {
+  const k = `${ctx.rev}|${key}`;
+  if (!ctx.seen.has(k)) ctx.seen.set(k, fn());
+  return ctx.seen.get(k) as T;
+}
+
+/** A fix wrote into the cleaned picture. */
+function changed(ctx: Ctx): void {
+  ctx.rev++;
+  ctx.seen.clear();
 }
 
 /** Run the self-check over a rendered page's blocks; returns new blocks (the cleaned image may change). */
@@ -209,6 +251,9 @@ function checker(input: SelfCheckInput) {
     page: { width: page.width, height: page.height },
     minReadable: minReadableSize(page.width),
     bubbles: page.blocks.flatMap((b) => (interiorKnown(b.bubble) ? [b.bubble] : [])),
+    rev: 0,
+    seen: new Map(),
+    layouts: new WeakMap(),
   };
   let fixed = 0;
   let flagged = 0;
@@ -238,9 +283,15 @@ function checker(input: SelfCheckInput) {
   return { block, result: (blocks: TextBlock[]): SelfCheckResult => ({ blocks, fixed, flagged }) };
 }
 
+/** The block's layout (the same block is laid out again by the checks and fixes: once is enough). */
 function layoutOf(ctx: Ctx, b: TextBlock): { l: LayoutResult; box: Box } {
-  const l = layoutBlock(ctx.m, b, ctx.in.defaults, ctx.page);
-  return { l, box: l.box ?? targetBox(b, ctx.in.defaults) };
+  let r = ctx.layouts.get(b);
+  if (!r) {
+    const l = layoutBlock(ctx.m, b, ctx.in.defaults, ctx.page);
+    r = { l, box: l.box ?? targetBox(b, ctx.in.defaults) };
+    ctx.layouts.set(b, r);
+  }
+  return r;
 }
 
 function checkBlock(ctx: Ctx, b: TextBlock): SelfCheckIssue[] {
@@ -266,43 +317,53 @@ function leftover(ctx: Ctx, b: TextBlock): LetterCluster[] {
   let zone = clampBox(expandBox(b.bbox, 4), cleaned.width, cleaned.height);
   if (b.bubble && interiorKnown(b.bubble)) zone = intersect(zone, b.bubble.box) ?? zone;
   if (zone[2] < 8 || zone[3] < 8) return [];
-  const before = findLetterClusters(original, zone);
-  if (!before.length) return [];
-  return findLetterClusters(cleaned, zone).filter((c) => before.some((o) => {
-    const cut = intersect(c.box, o.box);
-    return !!cut && area(cut) >= area(c.box) * 0.5;
-  }));
+  return once(ctx, `left:${zone}`, () => {
+    const before = findLetterClusters(original, zone);
+    if (!before.length) return [];
+    return findLetterClusters(cleaned, zone).filter((c) => before.some((o) => {
+      const cut = intersect(c.box, o.box);
+      return !!cut && area(cut) >= area(c.box) * 0.5;
+    }));
+  });
 }
 
 // ---------------------------------------------------------------- art
 
 /** Where art around the block was changed by cleaning beyond the letters and the bubble interiors. */
 function artChanged(ctx: Ctx, b: TextBlock): { share: number; zone: Box; mask: Uint8Array | null } {
-  const { original, cleaned } = ctx.in;
+  const { cleaned } = ctx.in;
   let core = b.bbox;
   if (b.textBox) core = union(core, b.textBox);
   if (b.bubble) core = union(core, b.bubble.box);
   const zone = clampBox(expandBox(core, Math.max(24, Math.round(Math.min(core[2], core[3]) * 0.25))), cleaned.width, cleaned.height);
   if (zone[2] < 2 || zone[3] < 2) return { share: 0, zone, mask: null };
+  return once(ctx, `art:${zone}:${b.fontSizeEstimate}`, () => artChangedIn(ctx, b, zone));
+}
+
+function artChangedIn(ctx: Ctx, b: TextBlock, zone: Box): { share: number; zone: Box; mask: Uint8Array | null } {
+  const { original, cleaned } = ctx.in;
   const a = original.getRegion(...zone);
   const c = cleaned.getRegion(...zone);
-  const [zx, zy, w, h] = zone;
+  const [, , w, h] = zone;
   const n = w * h;
-  const diff = (i: number) => Math.abs(a.data[i] - c.data[i]) + Math.abs(a.data[i + 1] - c.data[i + 1]) + Math.abs(a.data[i + 2] - c.data[i + 2]);
+  // How much cleaning changed each pixel (read twice below: worked out once).
+  const dv = new Uint16Array(n);
+  for (let p = 0, i = 0; p < n; p++, i += 4) dv[p] = Math.abs(a.data[i] - c.data[i]) + Math.abs(a.data[i + 1] - c.data[i + 1]) + Math.abs(a.data[i + 2] - c.data[i + 2]);
   // The letters: pixels the cleaning changed strongly (dark letters made light, white made dark…)
   // in strokes no thicker than lettering is. A solid slab painted over the art survives an opening
   // (erode, grow back) of that size; strokes of letters vanish in it.
   const strong = new Uint8Array(n);
   const bubbles = ctx.bubbles.filter((bb) => intersect(bb.box, zone));
+  const inside = interiorMask(bubbles, zone, 1);
   // Changes outside every bubble interior at all? (A closed bubble filled inside: none, and the
   // costly part below — finding the letter strokes — is not needed.)
   let outsideAny = false;
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const p = y * w + x;
-      const v = diff(p * 4);
+      const v = dv[p];
       if (v > SELF_CHECK_LIMITS.ink) strong[p] = 1;
-      if (!outsideAny && v > SELF_CHECK_LIMITS.changed && !bubbles.some((bb) => inInterior(bb, zx + x, zy + y, 1))) outsideAny = true;
+      if (!outsideAny && v > SELF_CHECK_LIMITS.changed && !inside[p]) outsideAny = true;
     }
   if (!outsideAny) return { share: 0, zone, mask: null };
   const r = Math.max(5, Math.round((b.fontSizeEstimate || 24) * 0.2));
@@ -315,8 +376,8 @@ function artChanged(ctx: Ctx, b: TextBlock): { share: number; zone: Box; mask: U
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const p = y * w + x;
-      if (near[p] || diff(p * 4) <= SELF_CHECK_LIMITS.changed) continue;
-      if (bubbles.some((bb) => inInterior(bb, zx + x, zy + y, 1))) continue;
+      if (near[p] || dv[p] <= SELF_CHECK_LIMITS.changed) continue;
+      if (inside[p]) continue;
       mask[p] = 1;
       bad++;
     }
@@ -408,6 +469,7 @@ function fixBlock(ctx: Ctx, b: TextBlock, issue: SelfCheckIssue): { block: TextB
         const pad = Math.max(2, Math.round(c.letterHeight * 0.15));
         // Over the art (no bubble) only a smudge: a plate here would stay as a grey box (LaMa has run already).
         cleanBlock(cleaned, clampBox(expandBox(c.box, pad), cleaned.width, cleaned.height), { sfx: b.textType === 'SFX', expand: 2, noPlate: !b.bubble || b.bubble.shape === 'rect' });
+        changed(ctx);
       }
       return { block: b, note: left.length ? `cleaned again (${left.length} place(s))` : undefined };
     }
@@ -422,8 +484,10 @@ function fixBlock(ctx: Ctx, b: TextBlock, issue: SelfCheckIssue): { block: TextB
       for (let p = 0; p < r.mask.length; p++) if (r.mask[p]) for (let k = 0; k < 3; k++) next.data[p * 4 + k] = orig.data[p * 4 + k];
       const hadLeft = leftover(ctx, b).length;
       cleaned.putRegion(next, r.zone[0], r.zone[1]);
+      changed(ctx);
       if (leftover(ctx, b).length > hadLeft) {
         cleaned.putRegion(before, r.zone[0], r.zone[1]);
+        changed(ctx);
         return { block: b };
       }
       return { block: b, note: 'art restored from the original' };
