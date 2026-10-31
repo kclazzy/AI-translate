@@ -49,6 +49,8 @@ export interface PipelineConfig {
   collage?: boolean;
   /** Read the text with recognition in this browser (PaddleOCR) instead of a vision model; a text model translates. */
   ocr?: boolean;
+  /** Cascade: recognition first, the picture to the model only when the reading is unsure (see cascade.ts). */
+  cascade?: boolean;
   /** Small scans are made twice as big before reading (see image/upscale.ts; needs the service's upscaler). */
   upscale?: boolean;
   /** Разговорник: hints for recurring expressions (see translate/phrasebook). */
@@ -145,8 +147,9 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     phrasebook: s.phrasebook,
     lama: (s.lamaMode ?? (s.lamaEngine ? 'engine' : 'off')) === 'off' ? undefined : (s.lamaMode ?? 'engine') as 'engine' | 'browser',
     // Recognition needs the detector to find the text.
-    detector: s.detectorMode === 'browser' || s.readMode === 'ocr' || undefined,
+    detector: s.detectorMode === 'browser' || s.readMode === 'ocr' || cascadeOn(s) || undefined,
     ocr: s.readMode === 'ocr' || undefined,
+    cascade: cascadeOn(s) || undefined,
     upscale: (s.pipeline !== 'engine' && s.upscaleMode === 'browser') || undefined,
     skipEmptyPages: s.skipEmptyPages ?? true,
     qaBatch: s.qaBatch || undefined,
@@ -156,6 +159,11 @@ export function pipelineConfigFromSettings(s: AppSettings, seriesKey?: string): 
     // Default: on with a local model (the picture is most of its time), off for a cloud one.
     collage: (s.detectorMode === 'browser' && (s.readCrops ?? isLocalVision(s))) || undefined,
   };
+}
+
+/** The cascade applies where a model reads the pictures (not in «Распознавание», not in the engine). */
+function cascadeOn(s: AppSettings): boolean {
+  return !!s.cascade && s.readMode !== 'ocr' && s.pipeline !== 'engine';
 }
 
 function isLocalVision(s: AppSettings): boolean {
@@ -195,6 +203,7 @@ export async function pipelineHash(c: PipelineConfig): Promise<string> {
     tl: c.translateLogo ? 1 : undefined,
     col: c.collage && c.detector ? 1 : undefined,
     ocr: c.ocr ? 1 : undefined,
+    cas: c.cascade ? 1 : undefined,
     up: c.upscale ? 1 : undefined,
   };
   return (await sha256Hex(JSON.stringify(payload))).slice(0, 24);

@@ -142,6 +142,8 @@ export interface PageTimings {
   inWorker?: boolean;
   /** Where the recognition in the browser read the text («Распознавание»). */
   ocrEp?: 'webgpu' | 'wasm' | 'engine';
+  /** Cascade: who read the page — the recognition (the model only translated) or the model. */
+  readBy?: 'ocr' | 'vision';
   /** Separate text translation request(s). */
   translateMs?: number;
   /** Translation check (rules + the model's review). */

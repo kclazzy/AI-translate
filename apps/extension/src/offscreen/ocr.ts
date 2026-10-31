@@ -68,7 +68,7 @@ export function setOcrDevice(d: 'gpu' | 'cpu'): void {
  */
 export function ocrDeviceFor(s: AppSettings): 'gpu' | 'cpu' {
   if (s.pipeline === 'engine') return 'cpu';
-  const by = s.providers.find((p) => p.id === (s.readMode === 'ocr' ? s.visionProviderId : s.fallbackProviderId)) ?? null;
+  const by = s.providers.find((p) => p.id === (s.readMode === 'ocr' || s.cascade ? s.visionProviderId : s.fallbackProviderId)) ?? null;
   const local = !!by && !isBrowserTranslator(by) && isLocalProvider(by);
   return !local || (s.gpuVramGb ?? 12) >= 10 ? 'gpu' : 'cpu';
 }

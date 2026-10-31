@@ -161,6 +161,22 @@ try {
   const fallbackOptions = await studio.$$eval('[data-testid="fallback"] option', (o) => o.map((x) => x.value));
   check('the settings offer a stand-in translator', fallbackOptions.includes('off') && fallbackOptions.includes(''), JSON.stringify(fallbackOptions));
 
+  // «Сначала распознавание» (the cascade): a switch in «Качество и скорость»; on, it is stored and
+  // offers what is missing (the networks are not downloaded in this browser).
+  {
+    const sw0 = await studio.waitForSelector('[data-testid="cascade"] [role="switch"], [data-testid="cascade"] input', { timeout: 5000 }).catch(() => null);
+    await sw0?.click();
+    await new Promise((r) => setTimeout(r, 1200));
+    const st = await studio.evaluate(async () => {
+      const db = await new Promise((res) => { const r = indexedDB.open('ai-translate', 1); r.onsuccess = () => res(r.result); });
+      return new Promise((res) => { const g = db.transaction('kv').objectStore('kv').get('settings'); g.onsuccess = () => res(g.result); });
+    });
+    const ui = await studio.$eval('[data-testid="cascade"]', (e) => e.textContent).catch(() => '');
+    check('«Сначала распознавание» is switched on in the settings, stored, and says what it still needs', !!sw0 && st?.cascade === true && /Скачиваю распознавание|Скачать распознавание/.test(ui), `${st?.cascade} · ${ui}`);
+    await sw0?.click();
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
   // «Облако» with no online model yet: the click offers to connect one right there.
   {
     const cloudBtn = await studio.$('[data-testid="ai-mode"] button[data-mode="cloud"]');

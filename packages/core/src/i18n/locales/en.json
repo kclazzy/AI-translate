@@ -1389,5 +1389,10 @@
  "Console → API Keys → Create API Key; скопируйте ключ сразу.": "Console → API Keys → Create API Key; copy the key right away.",
  "kimi-k2.6 — читает картинки, быстрый и недорогой; kimi-k3.1-pro — точнее, но дороже и медленнее (всегда «думает»).": "kimi-k2.6 — reads pictures, fast and inexpensive; kimi-k3.1-pro — more accurate but pricier and slower (always “thinks”).",
  "Ключ из Kimi Code здесь не подходит — нужен ключ с platform.kimi.ai.": "A Kimi Code key does not work here — you need a key from platform.kimi.ai.",
- "Kimi: читает картинки, недорого.": "Kimi: reads pictures, inexpensive."
+ "Kimi: читает картинки, недорого.": "Kimi: reads pictures, inexpensive.",
+ "Пока его нет, модель читает каждую страницу сама.": "Until then, the model reads every page itself.",
+ "Скачать распознавание (~{0} МБ)": "Download recognition (~{0} MB)",
+ "Скачиваю распознавание (один раз)… {0}%": "Downloading recognition (once)… {0}%",
+ "Сначала распознавание — быстрее": "Recognition first — faster",
+ "Текст сначала читают нейросети на видеокарте. Прочитано уверенно — модели уходит только текст, это в несколько раз быстрее; есть сомнения — модель читает картинку, как обычно.": "The text is first read by networks on the video card. Read clearly — only the text goes to the model, several times faster; in doubt — the model reads the picture as usual."
 }

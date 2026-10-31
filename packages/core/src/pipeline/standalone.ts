@@ -28,6 +28,7 @@ import { addStep, createDebug, recording } from './debug';
 import { dedupeReads, dropRepeatedParts, echoesContext, nearBoxes, normText, sameText } from './dupes';
 import { backgroundUnder, colourFor } from './selfcheck';
 import { bubbleAround, detectedTextNear, detectorFindsText, detectPage, ellipseBubble, isTextKind, missedDetections, snapBlocksToDetections, type Detection, type DetectorStats, type TextDetector } from './detect';
+import { cascadeRoute, type ReadRoute } from './cascade';
 
 export interface PipelineRequest {
   bytes: Uint8Array;
@@ -118,7 +119,7 @@ export async function preparePage(req: Pick<PipelineRequest, 'bytes' | 'mime' | 
   }
   if (checksText(req) && !prep.textCheck) prep.textCheck = await checkForTextAsync(original);
   // Recognition in this browser: the next page's text is read while this one is translated.
-  if (req.config.ocr && !req.generic && deps.ocr && prep.detections && !prep.textCheck?.noText) {
+  if ((req.config.ocr || req.config.cascade) && !req.generic && deps.ocr && prep.detections && !prep.textCheck?.noText) {
     const t2 = performance.now();
     try {
       const pieces = ocrPieces(prep.detections, original.width, original.height);
@@ -156,6 +157,12 @@ function usesDetector(req: Pick<PipelineRequest, 'config' | 'generic'>, deps: St
 
 /** Text recognition in this browser (PaddleOCR, see ocr/paddle.ts): the text of one piece of a page. */
 type ReadResult = { text: string; lines: { box: Box; text: string; score: number; vertical: boolean }[] };
+/** A page's pieces as the recognition read them; `free`: outside the bubbles. */
+interface OcrRead {
+  pieces: Box[];
+  reads: ReadResult[];
+  free: boolean[];
+}
 /** Reads one piece of a page; `all` (when there) reads every piece of a page in one go (faster). */
 export type TextReader = ((px: PixelData, lang: string) => Promise<ReadResult>) & {
   all?: (pieces: PixelData[], lang: string) => Promise<ReadResult[]>;
@@ -787,19 +794,17 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   const stage = (s: StageEvent['stage'], progress?: number) => req.onStage?.({ stage: s, progress });
   if (!config.vision) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: 'No vision provider' });
   // Recognition in this browser: the picture never goes to a model, a text model translates.
-  const ocrMode = !!config.ocr && !req.generic;
+  const ocrOnly = !!config.ocr && !req.generic;
+  // The cascade: the same recognition first; the model reads the picture only when it is unsure.
+  const cascade = !ocrOnly && !!config.cascade && !req.generic && !!deps.ocr;
   /** Time the recognition read the pieces now (0 when read ahead), and where. */
   let ocrMs = 0;
   let ocrEp: 'webgpu' | 'wasm' | 'engine' | undefined;
-  if (ocrMode && !deps.ocr) throw new AppError('SETUP_NEEDED', { retryable: false, detail: tr('Скачайте модели распознавания текста (Настройки → Режим работы ИИ → Распознавание).') });
-  if (!ocrMode && !config.vision.vision) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: `${config.vision.label} does not accept images; pick a vision model or use the engine` });
-  if (!ocrMode) assertPrivacy(config.privacy, config.vision, 'image');
-  // A separate translation request: another model, or the same one in two steps (more accurate).
-  const translatorCfg = ocrMode
-    ? (config.translator ?? config.vision)
-    : config.translator && config.translator.id !== config.vision.id ? config.translator : config.twoStep ? config.vision : null;
-  const separate = !!translatorCfg;
-  if (translatorCfg) assertPrivacy(config.privacy, translatorCfg, 'text');
+  /** The cascade's choice for this page (finish() reads it: declared before any early return). */
+  let readBy: ReadRoute | undefined;
+  if (ocrOnly && !deps.ocr) throw new AppError('SETUP_NEEDED', { retryable: false, detail: tr('Скачайте модели распознавания текста (Настройки → Режим работы ИИ → Распознавание).') });
+  if (!ocrOnly && !config.vision.vision) throw new AppError('NOT_CONFIGURED', { retryable: false, detail: `${config.vision.label} does not accept images; pick a vision model or use the engine` });
+  if (!ocrOnly) assertPrivacy(config.privacy, config.vision, 'image');
 
   stage('decoding');
   const prepared = req.prepared;
@@ -845,6 +850,47 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
     detectorMs = Math.round(performance.now() - t1);
   }
   if (dets) addStep(debug, `detector: ${dets.filter((d) => d.kind !== 'bubble').length} text box(es), ${dets.filter((d) => d.kind === 'bubble').length} bubble(s)`);
+  // The detector found the text; the recognition reads each piece of it, line by line.
+  if (ocrOnly && !dets) throw new AppError('SETUP_NEEDED', { retryable: false, detail: tr('Для распознавания нужен «Точный поиск текста»: скачайте его в настройках.') });
+  let ocrRead: OcrRead | undefined;
+  if (ocrOnly) ocrRead = await readByOcr(dets!);
+  if (cascade) {
+    try {
+      ocrRead = dets ? await readByOcr(dets) : undefined;
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError') throw e;
+      addStep(debug, `cascade: the recognition failed (${errorText(e)})`);
+    }
+    const v = ocrRead ? cascadeRoute(ocrRead.reads.map((r, i) => ({ text: r?.text ?? '', lines: r?.lines ?? [], free: ocrRead!.free[i] }))) : { route: 'vision' as const, reason: 'no reading' };
+    readBy = v.route;
+    addStep(debug, `cascade: ${v.route === 'ocr' ? 'read by the recognition, the model translates the text' : 'the model reads the picture'} — ${v.reason}`);
+  }
+  const ocrMode = ocrOnly || readBy === 'ocr';
+  // A separate translation request: another model, or the same one in two steps (more accurate).
+  const translatorCfg = ocrMode
+    ? (config.translator ?? config.vision)
+    : config.translator && config.translator.id !== config.vision.id ? config.translator : config.twoStep ? config.vision : null;
+  const separate = !!translatorCfg;
+  if (translatorCfg) assertPrivacy(config.privacy, translatorCfg, 'text');
+  /** The recognition's reading of the pieces the detector found: read ahead, or now. */
+  async function readByOcr(d: Detection[]): Promise<OcrRead> {
+    const found = d.filter((x) => isTextKind(x.kind));
+    const t = performance.now();
+    // Read ahead while the previous page was translated (the same detections, the same language)?
+    const ahead = prep.reads && prep.readFor === config.sourceLang && prep.detections === d ? prep.reads : undefined;
+    const pieces = ahead?.pieces ?? ocrPieces(d, original.width, original.height);
+    const reads = ahead?.results ?? (await remembered(deps.ocr!, `${await pictureKey(req.bytes)}|${config.sourceLang}|${JSON.stringify(pieces)}`, () => readPieces(deps.ocr!, original, pieces, config.sourceLang, (n) => stage('ocr', n / pieces.length))));
+    if (ahead) addStep(debug, `text read ahead (while the page before was translated): ${ahead.ms} ms`);
+    ocrMs = ahead ? 0 : Math.round(performance.now() - t);
+    ocrEp = deps.ocr?.ep?.();
+    stage('ocr', 1);
+    // Text outside the bubbles (sounds, signs, narration): the detector says so for every box in the piece.
+    const free = pieces.map((b) => {
+      const inside = found.filter((x) => overlapRatio(x.box, b) > 0.5);
+      return inside.length > 0 && inside.every((x) => x.kind === 'text_free');
+    });
+    return { pieces, reads, free };
+  }
   // One request reads and translates: it needs the previous page's context already.
   async function takeFreshContext(): Promise<void> {
     const get = req.freshContext;
@@ -860,32 +906,19 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
   let collageUsed = false;
   let answers: { view: View; answer: VisionAnswer; usage: Usage }[] = [];
   if (ocrMode) {
-    // The detector found the text; each piece of it is read here, line by line.
-    if (!dets) throw new AppError('SETUP_NEEDED', { retryable: false, detail: tr('Для распознавания нужен «Точный поиск текста»: скачайте его в настройках.') });
-    const found = dets.filter((d) => isTextKind(d.kind));
+    const { pieces, reads, free } = ocrRead!;
     const blocks: VisionAnswer['blocks'] = [];
-    const t0 = performance.now();
-    // Read ahead while the previous page was translated (the same detections, the same language)?
-    const ahead = prep.reads && prep.readFor === config.sourceLang && prep.detections === dets ? prep.reads : undefined;
-    const pieces = ahead?.pieces ?? ocrPieces(dets, original.width, original.height);
-    const reads = ahead?.results ?? (await remembered(deps.ocr!, `${await pictureKey(req.bytes)}|${config.sourceLang}|${JSON.stringify(pieces)}`, () => readPieces(deps.ocr!, original, pieces, config.sourceLang, (n) => stage('ocr', n / pieces.length))));
-    if (ahead) addStep(debug, `text read ahead (while the page before was translated): ${ahead.ms} ms`);
-    ocrMs = ahead ? 0 : Math.round(performance.now() - t0);
-    ocrEp = deps.ocr?.ep?.();
-    stage('ocr', 1);
     for (const [i, b] of pieces.entries()) {
       const r = reads[i];
       if (!r?.text) continue;
-      const inside = found.filter((d) => overlapRatio(d.box, b) > 0.5);
-      const free = inside.length > 0 && inside.every((d) => d.kind === 'text_free');
       blocks.push({
         box: [(b[0] / original.width) * 1000, (b[1] / original.height) * 1000, ((b[0] + b[2]) / original.width) * 1000, ((b[1] + b[3]) / original.height) * 1000],
         text: r.text,
-        type: free ? 'NARRATION' : 'DIALOGUE',
+        type: free[i] ? 'NARRATION' : 'DIALOGUE',
         vertical: r.lines.length > 0 && r.lines.filter((l) => l.vertical).length > r.lines.length / 2,
       });
     }
-    addStep(debug, `text recognition in the browser: ${pieces.length} piece(s), ${blocks.length} with text, ${Math.round(performance.now() - t0)} ms`);
+    addStep(debug, `text recognition in the browser: ${pieces.length} piece(s), ${blocks.length} with text, ${ocrMs} ms`);
     answers = [{ view: { y: 0, h: original.height }, answer: { blocks, entities: [], summary: '' }, usage: { provider: 'ocr', model: 'PP-OCR', inputTokens: 0, outputTokens: 0, costUsd: 0 } }];
     collageUsed = true;
   }
@@ -1478,6 +1511,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         detectMs: Math.max(0, Math.round(tDetected - tDecoded) - ocrMs),
         ocrMs,
         ...(ocrEp ? { ocrEp } : {}),
+        ...(readBy ? { readBy } : {}),
         translateMs: blocksOut.length ? Math.round(tTranslated - tDetected) : 0,
         // Includes inpaintMs (as before LaMa was measured on its own). The cleaning's own work: it
         // ran while the translation was on its way, then went on once it was in.

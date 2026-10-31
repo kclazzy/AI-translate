@@ -36,6 +36,7 @@ import { LocalModels, LocalSetup, ModelCheckCard, ModelPicker, UpdateCheck } fro
 import { usePlatform } from '../platform';
 import { LamaGetButton, lamaModeOf, useLamaDownloaded } from '../lama';
 import { DetectorChoice } from '../detector';
+import { CascadeChoice } from '../cascade';
 import { UpscaleChoice } from '../upscale';
 import { SpeedBenchmark } from './SpeedBenchmark';
 import { ActivityCard } from './ActivityCard';
@@ -662,6 +663,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
             <PagesInFlight settings={s} update={update} />
           </Field>
         </div>
+        {s.pipeline === 'standalone' ? <CascadeChoice settings={s} update={update} /> : null}
         <SpeedBenchmark settings={s} />
         <ActivityCard />
         <details className="ait-fine" data-testid="fine-tuning">

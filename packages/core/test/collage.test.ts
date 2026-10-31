@@ -204,3 +204,56 @@ describe('AI mode «Распознавание»: text read in the browser, a te
     await expect(runStandalonePipeline({ bytes: await page(), config: cfg }, { backend: napiBackend, fetchImpl: mockOpenAi(() => '{}').fetchImpl as any, detect: fakeDetector(dets, W, H) })).rejects.toMatchObject({ code: 'SETUP_NEEDED' });
   });
 });
+
+describe('cascade: recognition first, the picture to the model only when the reading is unsure', () => {
+  const answer = (body: any) => {
+    const last = body.messages.at(-1).content;
+    if (typeof last === 'string') {
+      const blocks = JSON.parse(/<blocks>\n(.*)\n<\/blocks>/s.exec(last)?.[1] ?? '[]');
+      return JSON.stringify({ translations: blocks.map((b: any) => ({ id: b.id, text: /hello/i.test(b.text) ? 'Привет' : 'Пока' })), entities: [], summary: '' });
+    }
+    const norm = (b: Box) => [Math.round((b[0] / W) * 1000), Math.round((b[1] / H) * 1000), Math.round(((b[0] + b[2]) / W) * 1000), Math.round(((b[1] + b[3]) / H) * 1000)];
+    return JSON.stringify({ blocks: bubbles.map((b) => ({ box: norm(b.box), text: b.text, translation: b.text === 'HELLO' ? 'Привет' : 'Пока', type: 'DIALOGUE' })), entities: [], summary: '' });
+  };
+  const reader = (score: number) => {
+    let n = 0;
+    return async () => {
+      const text = n++ === 0 ? 'HELLO' : 'GOODBYE';
+      return { text, lines: [{ box: [0, 0, 10, 10] as Box, text, score, vertical: false }] };
+    };
+  };
+  const cfg = () => ({ ...config(false), cascade: true });
+  const sentPicture = (calls: any[]) => calls.some((c) => c.body.messages.some((m: any) => Array.isArray(m.content)));
+
+  it('a clear reading: no picture goes to the model, it only translates the text', async () => {
+    const { fetchImpl, calls } = mockOpenAi(answer);
+    const out = await runStandalonePipeline({ bytes: await page(), config: cfg() }, { backend: napiBackend, fetchImpl: fetchImpl as any, detect: fakeDetector(dets, W, H), ocr: reader(0.98) });
+    expect(sentPicture(calls)).toBe(false);
+    expect(out.page.blocks.map((b) => b.translatedText).sort()).toEqual(['Пока', 'Привет']);
+    expect(out.page.timings.readBy).toBe('ocr');
+  });
+
+  it('an unsure reading: the model reads the picture as without the cascade', async () => {
+    const { fetchImpl, calls } = mockOpenAi(answer);
+    const out = await runStandalonePipeline({ bytes: await page(), config: cfg() }, { backend: napiBackend, fetchImpl: fetchImpl as any, detect: fakeDetector(dets, W, H), ocr: reader(0.3) });
+    expect(sentPicture(calls)).toBe(true);
+    expect(out.page.blocks.map((b) => b.translatedText).sort()).toEqual(['Пока', 'Привет']);
+    expect(out.page.timings.readBy).toBe('vision');
+  });
+
+  it('recognition not downloaded: the model reads the picture, no error', async () => {
+    const { fetchImpl, calls } = mockOpenAi(answer);
+    const out = await runStandalonePipeline({ bytes: await page(), config: cfg() }, { backend: napiBackend, fetchImpl: fetchImpl as any, detect: fakeDetector(dets, W, H) });
+    expect(sentPicture(calls)).toBe(true);
+    expect(out.page.blocks).toHaveLength(2);
+  });
+
+  it('setting: on only with a model that reads pictures, turns the detector on, part of the cache key', async () => {
+    const d = defaultSettings();
+    const s = { ...d, cascade: true, providers: [{ ...configFromPreset('lmstudio', 'vlm'), id: 'l', vision: true }], visionProviderId: 'l' } as any;
+    expect(pipelineConfigFromSettings(s)).toMatchObject({ cascade: true, detector: true });
+    expect(pipelineConfigFromSettings({ ...s, readMode: 'ocr' }).cascade).toBeUndefined();
+    expect(pipelineConfigFromSettings({ ...s, cascade: false }).cascade).toBeUndefined();
+    expect(await pipelineHash(pipelineConfigFromSettings(s))).not.toBe(await pipelineHash(pipelineConfigFromSettings({ ...s, cascade: false })));
+  });
+});

@@ -156,6 +156,8 @@ export interface AppSettings {
   readCrops?: boolean;
   /** How the text is read: a vision model (default) or recognition in this browser (see aiMode.ts). */
   readMode?: 'vision' | 'ocr';
+  /** Cascade: recognition in the browser first, the picture to the model only when the reading is unsure. */
+  cascade?: boolean;
   /** The model server last used in each AI mode (see aiMode.ts), to switch back to it. */
   modeProviders?: { ollama?: string; cloud?: string; ocr?: string };
   /** The user said «Не предлагать» to the LaMa offer shown after a page with text over artwork. */
@@ -432,6 +434,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     translateLogo: 'boolean',
     readCrops: 'boolean',
     readMode: 'string',
+    cascade: 'boolean',
     modeProviders: 'object',
     lamaOfferDismissed: 'boolean',
     detectorMode: 'string',
