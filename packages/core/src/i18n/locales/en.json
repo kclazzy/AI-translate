@@ -1394,5 +1394,16 @@
  "Скачать распознавание (~{0} МБ)": "Download recognition (~{0} MB)",
  "Скачиваю распознавание (один раз)… {0}%": "Downloading recognition (once)… {0}%",
  "Сначала распознавание — быстрее": "Recognition first — faster",
- "Текст сначала читают нейросети на видеокарте. Прочитано уверенно — модели уходит только текст, это в несколько раз быстрее; есть сомнения — модель читает картинку, как обычно.": "The text is first read by networks on the video card. Read clearly — only the text goes to the model, several times faster; in doubt — the model reads the picture as usual."
+ "Текст сначала читают нейросети на видеокарте. Прочитано уверенно — модели уходит только текст, это в несколько раз быстрее; есть сомнения — модель читает картинку, как обычно.": "The text is first read by networks on the video card. Read clearly — only the text goes to the model, several times faster; in doubt — the model reads the picture as usual.",
+ "Время": "Time",
+ "Как": "How",
+ "Нет модели, которая читает картинки: добавьте локальную или онлайн-модель (с ключом).": "No model that reads pictures: add a local or an online model (with its key).",
+ "Пробная страница через каждую модель: как обычно и со «Сначала распознавание». Онлайн-модели уйдёт пробная картинка.": "The sample page through each model: as usual and with «Recognition first». The online model gets the sample picture.",
+ "Сравнение скорости": "Speed comparison",
+ "Сравниваю…": "Comparing…",
+ "Сравнить локальную и онлайн-модель": "Compare the local and the online model",
+ "модель читает картинку": "the model reads the picture",
+ "онлайн": "online",
+ "прочитано неуверенно — читала модель": "read unsurely — the model read it",
+ "сначала распознавание": "recognition first"
 }

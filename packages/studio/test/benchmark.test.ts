@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { benchmarkOf, fmtSeconds } from '../src/benchmark';
+import { benchmarkOf, compareVariants, fmtSeconds } from '../src/benchmark';
 
 const usage = [{ provider: 'p', model: 'qwen-vl', inputTokens: 1200, outputTokens: 300, costUsd: 0 }];
 
@@ -31,5 +31,20 @@ describe('speed benchmark', () => {
     expect(b.rows.every((r) => r.ms === null)).toBe(true);
     expect(b.slowest).toBeNull();
     expect(fmtSeconds(null)).toBe('—');
+  });
+});
+
+describe('speed comparison: a local and an online model, with and without «Сначала распознавание»', () => {
+  const local = { id: 'ol', kind: 'openai-compatible', preset: 'ollama', baseUrl: 'http://localhost:11434/v1', model: 'qwen3.5:9b', vision: true, label: 'Ollama' } as never;
+  const cloud = { id: 'gm', kind: 'openai-compatible', preset: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', vision: true, label: 'Gemini' } as never;
+  const text = { id: 'ds', kind: 'openai-compatible', preset: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', vision: false, label: 'DeepSeek' } as never;
+  it('plans every variant there is, the local ones first', () => {
+    const v = compareVariants([text, cloud, local], { keyed: new Set(['gm']), recognition: true });
+    expect(v.map((x) => `${x.providerId}:${x.cascade ? 'c' : 'v'}`)).toEqual(['ol:v', 'ol:c', 'gm:v', 'gm:c']);
+    expect(v.find((x) => x.providerId === 'gm')!.settings).toMatchObject({ visionProviderId: 'gm', translationProviderId: null, privacy: 'cloud', pipeline: 'standalone', readMode: 'vision' });
+    expect(v.find((x) => x.providerId === 'ol')!.settings.privacy).toBe('local');
+  });
+  it('an online model without a key, or no recognition: those variants are left out', () => {
+    expect(compareVariants([cloud, local], { keyed: new Set(), recognition: false }).map((x) => `${x.providerId}:${x.cascade ? 'c' : 'v'}`)).toEqual(['ol:v']);
   });
 });

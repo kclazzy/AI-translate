@@ -1,4 +1,4 @@
-import type { PageResult, Usage } from '@ait/core';
+import { isBrowserTranslator, isLocalProvider, type AppSettings, type PageResult, type ProviderConfig, type Usage } from '@ait/core';
 import { lazyStrings, uiLocale } from '@ait/core/i18n';
 
 /** Stages of one page, in the order the program does them. */
@@ -78,4 +78,40 @@ export function fmtSeconds(ms: number | null): string {
   if (ms === null) return '—';
   const d = ms < 10_000 ? 1 : 0;
   return (ms / 1000).toLocaleString(uiLocale(), { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+
+/** One run of the speed comparison: a model that reads pictures, with or without the cascade. */
+export interface CompareVariant {
+  providerId: string;
+  label: string;
+  local: boolean;
+  cascade: boolean;
+  /** The settings for this run only (over the stored ones). */
+  settings: Partial<AppSettings>;
+}
+
+/**
+ * What «Сравнить локальную и онлайн-модель» runs: the first local and the first online model that
+ * read pictures (an online one only with its key saved), each without and — when the recognition is
+ * downloaded — with «Сначала распознавание». Local ones first.
+ */
+export function compareVariants(providers: ProviderConfig[], have: { keyed: Set<string>; recognition: boolean }): CompareVariant[] {
+  const vision = providers.filter((p) => p.vision && !isBrowserTranslator(p));
+  const local = vision.find((p) => isLocalProvider(p));
+  const online = vision.find((p) => !isLocalProvider(p) && have.keyed.has(p.id));
+  const out: CompareVariant[] = [];
+  for (const p of [local, online]) {
+    if (!p) continue;
+    const isLocal = p === local;
+    for (const cascade of have.recognition ? [false, true] : [false]) {
+      out.push({
+        providerId: p.id,
+        label: p.label || p.model,
+        local: isLocal,
+        cascade,
+        settings: { visionProviderId: p.id, translationProviderId: null, pipeline: 'standalone', readMode: 'vision', cascade, privacy: isLocal ? 'local' : 'cloud' },
+      });
+    }
+  }
+  return out;
 }

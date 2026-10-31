@@ -38,7 +38,7 @@ import { LamaGetButton, lamaModeOf, useLamaDownloaded } from '../lama';
 import { DetectorChoice } from '../detector';
 import { CascadeChoice } from '../cascade';
 import { UpscaleChoice } from '../upscale';
-import { SpeedBenchmark } from './SpeedBenchmark';
+import { SpeedBenchmark, SpeedCompare } from './SpeedBenchmark';
 import { ActivityCard } from './ActivityCard';
 import { clearAutoTuned, useAutoTuned } from '../autoOptimal';
 import { LanguagePair } from '../LanguagePair';
@@ -665,6 +665,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
         </div>
         {s.pipeline === 'standalone' ? <CascadeChoice settings={s} update={update} /> : null}
         <SpeedBenchmark settings={s} />
+        {s.pipeline === 'standalone' ? <SpeedCompare settings={s} /> : null}
         <ActivityCard />
         <details className="ait-fine" data-testid="fine-tuning">
           <summary>{tr('Тонкая настройка')}</summary>

@@ -1394,5 +1394,16 @@
  "Скачать распознавание (~{0} МБ)": "Texterkennung herunterladen (~{0} MB)",
  "Скачиваю распознавание (один раз)… {0}%": "Texterkennung wird heruntergeladen (einmalig)… {0}%",
  "Сначала распознавание — быстрее": "Zuerst Texterkennung – schneller",
- "Текст сначала читают нейросети на видеокарте. Прочитано уверенно — модели уходит только текст, это в несколько раз быстрее; есть сомнения — модель читает картинку, как обычно.": "Der Text wird zuerst von neuronalen Netzen auf der Grafikkarte gelesen. Sicher gelesen – an das Modell geht nur der Text, mehrfach schneller; bei Zweifeln liest das Modell das Bild wie gewohnt."
+ "Текст сначала читают нейросети на видеокарте. Прочитано уверенно — модели уходит только текст, это в несколько раз быстрее; есть сомнения — модель читает картинку, как обычно.": "Der Text wird zuerst von neuronalen Netzen auf der Grafikkarte gelesen. Sicher gelesen – an das Modell geht nur der Text, mehrfach schneller; bei Zweifeln liest das Modell das Bild wie gewohnt.",
+ "Время": "Zeit",
+ "Как": "Wie",
+ "Нет модели, которая читает картинки: добавьте локальную или онлайн-модель (с ключом).": "Kein Modell, das Bilder liest: Fügen Sie ein lokales oder ein Online-Modell (mit Schlüssel) hinzu.",
+ "Пробная страница через каждую модель: как обычно и со «Сначала распознавание». Онлайн-модели уйдёт пробная картинка.": "Die Probeseite durch jedes Modell: wie gewohnt und mit „Zuerst Texterkennung“. Das Online-Modell erhält das Probebild.",
+ "Сравнение скорости": "Geschwindigkeitsvergleich",
+ "Сравниваю…": "Vergleiche…",
+ "Сравнить локальную и онлайн-модель": "Lokales und Online-Modell vergleichen",
+ "модель читает картинку": "das Modell liest das Bild",
+ "онлайн": "online",
+ "прочитано неуверенно — читала модель": "unsicher gelesen – das Modell hat gelesen",
+ "сначала распознавание": "zuerst Texterkennung"
 }

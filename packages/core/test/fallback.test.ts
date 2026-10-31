@@ -92,3 +92,30 @@ describe('a stand-in when the usual model does not answer', () => {
     await expect(svc.translate(await page(), 'image/png')).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
   }, 60000);
 });
+
+describe('a translation with other settings for one call (the speed comparison)', () => {
+  it('uses the model and the cascade given for the call; the stored settings stay as they are', async () => {
+    const asked: string[] = [];
+    const answer = (u: string, body: any) => {
+      asked.push(`${u} ${body.messages.some((m: any) => Array.isArray(m.content) || m.images?.length) ? 'picture' : 'text'}`);
+      const blocks = JSON.parse(/<blocks>\n(.*)\n<\/blocks>/s.exec(body.messages.at(-1).content)?.[1] ?? '[]');
+      const content = blocks.length ? JSON.stringify({ translations: blocks.map((b: any) => ({ id: b.id, text: 'ПРИВЕТ' })), entities: [], summary: '' }) : JSON.stringify({ blocks: [{ box: [366, 450, 540, 520], text: 'HELLO', translation: 'ПРИВЕТ', type: 'DIALOGUE' }], entities: [], summary: '' });
+      return { choices: [{ message: { content } }], usage: { prompt_tokens: 5, completion_tokens: 5 }, message: { content } };
+    };
+    const f = async (u: string, i?: RequestInit) => new Response(JSON.stringify(answer(u, JSON.parse(String(i?.body)))), { status: 200, headers: { 'content-type': 'application/json' } });
+    const cloud = { ...configFromPreset('openai', 'oa'), id: 'oa', vision: true, apiKey: 'sk-test' };
+    const stored = settings({ providers: [...settings().providers, cloud] });
+    const svc = new TranslateService(memoryDb(), { get: async () => undefined } as any, napiBackend, async () => stored, f as any);
+    svc.compactTiles = false;
+    svc.detector = async (img: { width: number; height: number }) => ({ boxes: [{ box: [(200 * img.width) / 600, (270 * img.height) / 600, (160 * img.width) / 600, (40 * img.height) / 600] as Box, kind: 'text_bubble' as const, score: 0.9 }] }) as any;
+    svc.reader = (async () => ({ text: 'HELLO', lines: [{ box: [0, 0, 10, 10] as Box, text: 'HELLO', score: 0.99, vertical: false }] })) as any;
+    const a = await svc.translate(await page(), 'image/png', { force: true, settings: { visionProviderId: 'oa', privacy: 'cloud' } });
+    expect(asked.at(-1)).toMatch(/api\.openai\.com.* picture$/);
+    expect(a.result.page.blocks[0].translatedText).toBe('ПРИВЕТ');
+    const b = await svc.translate(await page(), 'image/png', { force: true, settings: { visionProviderId: 'oa', privacy: 'cloud', cascade: true } });
+    expect(b.result.page.timings.readBy).toBe('ocr');
+    expect(asked.at(-1)).toMatch(/api\.openai\.com.* text$/);
+    expect(stored.visionProviderId).toBe('ol');
+    expect(stored.cascade).toBeUndefined();
+  }, 60000);
+});

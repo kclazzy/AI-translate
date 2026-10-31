@@ -106,6 +106,8 @@ export interface HistoryEntry {
 }
 
 export interface TranslateOptions {
+  /** Settings for this call only, over the stored ones (the speed comparison tries other models). */
+  settings?: Partial<AppSettings>;
   sourceUrl?: string;
   title?: string;
   seriesKey?: string;
@@ -211,8 +213,8 @@ export class TranslateService {
     return { ...s, providers };
   }
 
-  async config(seriesKey?: string): Promise<{ settings: AppSettings; config: PipelineConfig }> {
-    const settings = await this.settingsWithKeys();
+  async config(seriesKey?: string, over?: Partial<AppSettings>): Promise<{ settings: AppSettings; config: PipelineConfig }> {
+    const settings = { ...(await this.settingsWithKeys()), ...over };
     return { settings, config: pipelineConfigFromSettings(settings, seriesKey) };
   }
 
@@ -284,7 +286,7 @@ export class TranslateService {
   }
 
   private async translateInTurn(bytes: Uint8Array, realMime: string, opts: TranslateOptions, seriesKey: string | undefined, tStart: number, before: Promise<void> | undefined, releaseTurn: () => void): Promise<{ result: StoredResult; cached: boolean }> {
-    const { settings, config } = await this.config(seriesKey);
+    const { settings, config } = await this.config(seriesKey, opts.settings);
     if (opts.keepAliveMin !== undefined) {
       for (const k of ['vision', 'translator'] as const) {
         const p = config[k];
