@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
 import { describe, expect, it } from 'vitest';
-import { mangaOcrInput, mangaOcrRead, mangaOcrText, type MangaOcrRun } from '../src/ocr/mangaOcr';
+import { mangaOcrInput, mangaOcrRead, mangaOcrReadCached, mangaOcrText, type MangaOcrRun } from '../src/ocr/mangaOcr';
 
 // The real networks: MANGA_OCR_MODELS=folder with manga-ocr-{encoder,decoder}-<kind>.onnx and manga-ocr-vocab.txt.
 const DIR = process.env.MANGA_OCR_MODELS ?? '';
@@ -105,5 +105,33 @@ describe('Manga OCR with a cache', () => {
     expect(seen.map((s) => s.pos)).toEqual([0, 1, 2, 3]);
     expect(seen.map((s) => s.past)).toEqual([1, 2, 3, 4]);
     expect(seen[2].mask).toEqual([0, 1, 1, 1]);
+  });
+});
+
+describe('Manga OCR confidence', () => {
+  const vocab = ['[PAD]', '[UNK]', '[CLS]', '[SEP]', '[MASK]', 'な', 'に', 'し'];
+  /** A decoder that writes `want`, each step with logit `margin` for the chosen token (0 for the rest). */
+  const reader = (want: number[], margin: number) => {
+    const nets = {
+      encode: async () => ({ data: new Float32Array(4), dims: [1, 1, 4] }),
+      cross: async () => Array.from({ length: 4 }, () => ({ data: new Float32Array(4), dims: [1, 1, 1, 4] })),
+      step: async ({ pos }: { pos: number }) => {
+        const logits = new Float32Array(vocab.length);
+        logits[want[pos] ?? 7] = margin;
+        return { logits: { data: logits, dims: [1, 1, vocab.length] }, present: Array.from({ length: 4 }, () => ({ data: new Float32Array(4), dims: [1, 1, 1, 4] })) };
+      },
+    };
+    return mangaOcrReadCached({ width: 100, height: 300, data: new Uint8ClampedArray(100 * 300 * 4) }, nets, vocab);
+  };
+  it('a sure reading scores high, a hesitant one low, a decoder that went round in circles 0', async () => {
+    const sure = await reader([5, 6, 7, 3], 12);
+    const unsure = await reader([5, 6, 7, 3], 1.5);
+    expect(sure.text).toBe('なにし');
+    expect(unsure.text).toBe('なにし');
+    expect(sure.lines[0].score).toBeGreaterThan(0.95);
+    expect(unsure.lines[0].score).toBeLessThan(0.6);
+    const lost = await reader([], 12);
+    expect(lost.text).toMatch(/^し+$/);
+    expect(lost.lines[0].score).toBe(0);
   });
 });

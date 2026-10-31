@@ -47,7 +47,8 @@ export function mangaOcrText(ids: number[], vocab: string[]): string {
   return text.replace(/[!-~]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0));
 }
 
-function argmaxLast(out: OcrTensor): number {
+/** The likeliest next token and the log of its probability (softmax over the last position). */
+function pickLast(out: OcrTensor): { id: number; logp: number } {
   const [, n, v] = out.dims;
   const off = (n - 1) * v;
   let best = 0;
@@ -59,13 +60,33 @@ function argmaxLast(out: OcrTensor): number {
       best = i;
     }
   }
-  return best;
+  let sum = 0;
+  for (let i = 0; i < v; i++) sum += Math.exp(out.data[off + i] - bestV);
+  return { id: best, logp: -Math.log(sum) };
+}
+
+/**
+ * How sure the reading is (0–1): the geometric mean of the chosen tokens' probabilities, the end
+ * included; 0 when the decoder went round in circles. Used to trust the reading (pipeline/cascade.ts).
+ */
+class Sureness {
+  private sum = 0;
+  private n = 0;
+  lost = false;
+  add(logp: number): void {
+    this.sum += logp;
+    this.n++;
+  }
+  get score(): number {
+    return this.lost || !this.n ? 0 : Math.exp(this.sum / this.n);
+  }
 }
 
 /** Read one piece of a page (a bubble). `maxTokens` stops a decoder that does not end. */
 export async function mangaOcrRead(px: PixelData, run: MangaOcrRun, vocab: string[], opts: { maxTokens?: number; signal?: AbortSignal } = {}): Promise<OcrResult> {
   const hidden = await run('encoder', { pixel_values: mangaOcrInput(px) });
   const ids = [START];
+  const sure = new Sureness();
   const max = opts.maxTokens ?? 120;
   // One token at a time; a bubble is short (a few dozen tokens), so no cache of the past is kept.
   for (let i = 0; i < max; i++) {
@@ -74,15 +95,19 @@ export async function mangaOcrRead(px: PixelData, run: MangaOcrRun, vocab: strin
       encoder_hidden_states: hidden,
       input_ids: { data: BigInt64Array.from(ids.map(BigInt)), dims: [1, ids.length] },
     });
-    const next = argmaxLast(logits);
+    const { id: next, logp } = pickLast(logits);
+    sure.add(logp);
     if (next === END) break;
     ids.push(next);
     // The same token over and over: the decoder is lost (an empty or noisy piece).
-    if (ids.length > 12 && ids.slice(-8).every((t) => t === next)) break;
+    if (ids.length > 12 && ids.slice(-8).every((t) => t === next)) {
+      sure.lost = true;
+      break;
+    }
   }
   const text = mangaOcrText(ids, vocab);
   const vertical = px.height > px.width * 1.2;
-  return { text, lines: text ? [{ box: [0, 0, px.width, px.height], text, score: 1, vertical }] : [] };
+  return { text, lines: text ? [{ box: [0, 0, px.width, px.height], text, score: sure.score, vertical }] : [] };
 }
 
 
@@ -109,6 +134,7 @@ export async function mangaOcrReadCached(px: PixelData, nets: MangaOcrNets, voca
   // A first column that is masked out keeps every shape non-empty.
   let past: OcrTensor[] = Array.from({ length: 4 }, () => ({ data: new Float32Array(KV_HEADS * KV_DIM), dims: [1, KV_HEADS, 1, KV_DIM] }));
   const ids = [START];
+  const sure = new Sureness();
   const max = opts.maxTokens ?? 120;
   for (let t = 0; t < max; t++) {
     if (opts.signal?.aborted) throw opts.signal.reason ?? new DOMException('Aborted', 'AbortError');
@@ -116,12 +142,16 @@ export async function mangaOcrReadCached(px: PixelData, nets: MangaOcrNets, voca
     mask[0] = 0n;
     const { logits, present } = await nets.step({ id: ids[ids.length - 1], pos: t, mask, past, cross });
     past = present;
-    const next = argmaxLast(logits);
+    const { id: next, logp } = pickLast(logits);
+    sure.add(logp);
     if (next === END) break;
     ids.push(next);
-    if (ids.length > 12 && ids.slice(-8).every((x) => x === next)) break;
+    if (ids.length > 12 && ids.slice(-8).every((x) => x === next)) {
+      sure.lost = true;
+      break;
+    }
   }
   const text = mangaOcrText(ids, vocab);
   const vertical = px.height > px.width * 1.2;
-  return { text, lines: text ? [{ box: [0, 0, px.width, px.height], text, score: 1, vertical }] : [] };
+  return { text, lines: text ? [{ box: [0, 0, px.width, px.height], text, score: sure.score, vertical }] : [] };
 }
