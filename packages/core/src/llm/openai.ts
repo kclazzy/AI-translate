@@ -38,6 +38,8 @@ export class OpenAICompatibleProvider implements LlmProvider {
     if (req.json && this.config.jsonMode === 'json_object') body.response_format = { type: 'json_object' };
     // llama.cpp server, vLLM and LM Studio read chat-template switches; cloud APIs may reject unknown fields.
     if (noThinking && local) body.chat_template_kwargs = { enable_thinking: false };
+    Object.assign(body, kimiRules(this.config));
+    for (const [k, v] of Object.entries(body)) if (v === undefined) delete body[k];
 
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (this.config.apiKey) headers.authorization = `Bearer ${this.config.apiKey}`;
@@ -131,6 +133,20 @@ export class OpenAICompatibleProvider implements LlmProvider {
 
 export function isOllama(cfg: Pick<ProviderConfig, 'preset' | 'baseUrl'>): boolean {
   return cfg.preset === 'ollama' || /:11434(\/|$)/.test(cfg.baseUrl);
+}
+
+/**
+ * Kimi (Moonshot AI) fixes the sampling of its models and refuses a request with another
+ * temperature (400 «only 1 is allowed»). K2.6: 0.6 with thinking switched off (a page is read
+ * quickly); K3 / K3.1 always think: only the shortest thinking is asked; K2.7 Code: nothing.
+ */
+export function kimiRules(cfg: Pick<ProviderConfig, 'preset' | 'baseUrl' | 'model'>): Record<string, unknown> {
+  if (cfg.preset !== 'kimi' && !/moonshot\.(ai|cn)/.test(cfg.baseUrl)) return {};
+  const m = cfg.model.toLowerCase();
+  if (/^kimi-k2\.[56]/.test(m)) return { temperature: 0.6, thinking: { type: 'disabled' } };
+  if (/^kimi-k3/.test(m)) return { temperature: undefined, reasoning_effort: 'low' };
+  if (/^kimi-/.test(m)) return { temperature: undefined };
+  return {};
 }
 
 /** The context window asked of Ollama (a different one makes it load the model again). */

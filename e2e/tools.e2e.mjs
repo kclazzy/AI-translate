@@ -167,7 +167,12 @@ try {
     const enabledBefore = cloudBtn ? await cloudBtn.evaluate((b) => !b.disabled) : false;
     await cloudBtn?.click();
     const form = await studio.waitForSelector('[data-testid="cloud-connect"]', { timeout: 5000 }).catch(() => null);
+    let guide = null;
     if (form) {
+      // Kimi: picked in the list, its guide (where the key is made) shows right in the form.
+      await studio.select('[data-testid="cloud-connect"] select', 'kimi');
+      guide = await studio.waitForSelector('[data-testid="cloud-connect"] [data-testid="guide-kimi"]', { timeout: 3000 }).then((g) => g.evaluate((d) => ({ href: d.querySelector('a')?.href, text: d.textContent }))).catch(() => null);
+      check('the online-model form shows how to connect the chosen service (Kimi: where the key is made)', guide?.href === 'https://platform.kimi.ai/console/api-keys' && /platform\.kimi\.ai/.test(guide.text), JSON.stringify(guide));
       await studio.type('[data-testid="cloud-connect"] input', 'test-key-123');
       await studio.evaluate(() => [...document.querySelectorAll('[data-testid="cloud-connect"] button')].find((b) => b.textContent.includes('Подключить'))?.click());
       await new Promise((r) => setTimeout(r, 1200));
@@ -183,7 +188,7 @@ try {
       });
     });
     const v = s?.providers?.find((p) => p.id === s.visionProviderId);
-    check('«Облако» without an online model: connect one in place, the mode switches and pictures may go out', enabledBefore && !!form && v && !/localhost|127\.0\.0\.1/.test(v.baseUrl) && s.privacy === 'cloud' && !JSON.stringify(s).includes('test-key-123'), JSON.stringify({ form: !!form, vision: v?.preset, privacy: s?.privacy }));
+    check('«Облако» without an online model: connect one in place, the mode switches and pictures may go out', enabledBefore && !!form && v && !/localhost|127\.0\.0\.1/.test(v.baseUrl) && v.preset === 'kimi' && v.baseUrl === 'https://api.moonshot.ai/v1' && s.privacy === 'cloud' && !JSON.stringify(s).includes('test-key-123'), JSON.stringify({ form: !!form, vision: v?.preset, privacy: s?.privacy }));
     // Back as it was for the rest of the test.
     await studio.evaluate(async () => {
       const db = await new Promise((res) => {

@@ -4,6 +4,7 @@ import { useContext, useState } from 'react';
 import { OcrModelsCard } from './ocr';
 import { startOcrSetup } from './ocrSetup';
 import { PlatformContext } from './platform';
+import { ProviderGuideBox } from './ProviderGuide';
 
 const MODES: AiMode[] = ['ollama', 'cloud', 'ocr'];
 
@@ -136,6 +137,7 @@ function CloudConnect({ settings: s, update, onDone }: { settings: AppSettings; 
           {presets.map((x) => <option key={x.preset} value={x.preset}>{tr(x.label)}</option>)}
         </select>
       </label>
+      <ProviderGuideBox preset={p} />
       {p?.needsKey !== false ? (
         <label className="ait-field">
           <span>{tr('Ключ API')}</span>

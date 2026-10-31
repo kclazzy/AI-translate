@@ -1384,5 +1384,10 @@
  "Вставьте ключ": "Schlüssel einfügen",
  "Ключ хранится только на этом компьютере. Картинки будут уходить выбранному сервису.": "Der Schlüssel bleibt nur auf diesem Computer. Bilder gehen an den gewählten Dienst.",
  "Подключить и переключиться": "Verbinden und wechseln",
- "Подключить онлайн-модель": "Online-Modell verbinden"
+ "Подключить онлайн-модель": "Online-Modell verbinden",
+ "Зарегистрируйтесь на platform.kimi.ai и пополните баланс (от $1; бесплатного лимита нет).": "Registrieren Sie sich auf platform.kimi.ai und laden Sie Guthaben auf (ab 1 $; kein kostenloses Kontingent).",
+ "Console → API Keys → Create API Key; скопируйте ключ сразу.": "Console → API Keys → Create API Key; kopieren Sie den Schlüssel sofort.",
+ "kimi-k2.6 — читает картинки, быстрый и недорогой; kimi-k3.1-pro — точнее, но дороже и медленнее (всегда «думает»).": "kimi-k2.6 – liest Bilder, schnell und günstig; kimi-k3.1-pro – genauer, aber teurer und langsamer („denkt“ immer).",
+ "Ключ из Kimi Code здесь не подходит — нужен ключ с platform.kimi.ai.": "Ein Schlüssel aus Kimi Code funktioniert hier nicht – Sie brauchen einen Schlüssel von platform.kimi.ai.",
+ "Kimi: читает картинки, недорого.": "Kimi: liest Bilder, günstig."
 }

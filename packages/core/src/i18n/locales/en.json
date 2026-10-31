@@ -1384,5 +1384,10 @@
  "Вставьте ключ": "Paste the key",
  "Ключ хранится только на этом компьютере. Картинки будут уходить выбранному сервису.": "The key is kept on this computer only. Pictures will go to the chosen service.",
  "Подключить и переключиться": "Connect and switch",
- "Подключить онлайн-модель": "Connect an online model"
+ "Подключить онлайн-модель": "Connect an online model",
+ "Зарегистрируйтесь на platform.kimi.ai и пополните баланс (от $1; бесплатного лимита нет).": "Sign up at platform.kimi.ai and top up your balance (from $1; there is no free tier).",
+ "Console → API Keys → Create API Key; скопируйте ключ сразу.": "Console → API Keys → Create API Key; copy the key right away.",
+ "kimi-k2.6 — читает картинки, быстрый и недорогой; kimi-k3.1-pro — точнее, но дороже и медленнее (всегда «думает»).": "kimi-k2.6 — reads pictures, fast and inexpensive; kimi-k3.1-pro — more accurate but pricier and slower (always “thinks”).",
+ "Ключ из Kimi Code здесь не подходит — нужен ключ с platform.kimi.ai.": "A Kimi Code key does not work here — you need a key from platform.kimi.ai.",
+ "Kimi: читает картинки, недорого.": "Kimi: reads pictures, inexpensive."
 }

@@ -26,7 +26,7 @@ short, friendly, plain words.
   (`…`, `:`, `?`, `!`, `—`, `·`, arrows `→ ⇄ ↗`, emoji, `✓`).
 - Do not translate product and model names, file formats, commands, environment variables,
   URLs and settings names typed by the user: AI Translate, Ollama, LM Studio, Claude, OpenAI,
-  Gemini, DeepSeek, OpenRouter, Qwen, llama.cpp, vLLM, Chrome, Windows, GitHub, PDF, CBZ,
+  Gemini, DeepSeek, OpenRouter, Kimi, Moonshot AI, Qwen, llama.cpp, vLLM, Chrome, Windows, GitHub, PDF, CBZ,
   EPUB, ZIP, PNG, JPG, API, JSON, CORS, VRAM, GPU, `OLLAMA_ORIGINS`, `setx`, `ollama pull` …
 - Names of buttons quoted inside other strings («Сохранить», «Проверить подключение» …) must
   match how you translated those buttons; use the quotation marks normal for the language.

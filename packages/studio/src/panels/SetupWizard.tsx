@@ -71,6 +71,7 @@ export function SetupWizard({ settings, update, onDone }: { settings: AppSetting
                 <option value="anthropic">Anthropic Claude</option>
                 <option value="openai">OpenAI</option>
                 <option value="openrouter">OpenRouter</option>
+                <option value="kimi">Kimi (Moonshot AI)</option>
               </select>
             </Field>
             <Field label={tr('Ключ API')} hint={tr('Хранится на телефоне в зашифрованном виде')}>

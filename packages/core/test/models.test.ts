@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from 'vitest';
-import { checkForUpdate, checkVisionModel, configFromPreset, defaultSettings, gpuShare, TranslateService, guessVramGb, MODEL_TIERS, ollamaDelete, ollamaLoaded, ollamaUnloadAll, ollamaWarm, OpenAICompatibleProvider, pickAsset, pipelineConfigFromSettings, tierForVram } from '../src';
+import { checkForUpdate, checkVisionModel, configFromPreset, defaultSettings, gpuShare, TranslateService, guessVramGb, MODEL_TIERS, ollamaDelete, ollamaLoaded, ollamaUnloadAll, ollamaWarm, OpenAICompatibleProvider, pickAsset, pipelineConfigFromSettings, PROVIDER_PRESETS, tierForVram } from '../src';
 import { TaskQueue } from '../src/util/queue';
 import { jsonResponse, napiBackend } from './helpers';
 
@@ -94,6 +94,36 @@ describe('release assets', () => {
     expect(pickAsset(info, 'android')?.url).toBe('a');
     expect(pickAsset(info, 'ios')?.url).toBe('i');
     expect(pickAsset({ assets: [] }, 'desktop')).toBeUndefined();
+  });
+});
+
+describe('Kimi', () => {
+  const bodyFor = async (model: string) => {
+    let body: Record<string, unknown> = {};
+    const f = async (_u: string, i?: RequestInit) => {
+      body = JSON.parse(String(i?.body));
+      return jsonResponse({ choices: [{ message: { content: '{"ok":1}' } }], usage: { prompt_tokens: 10, completion_tokens: 2 } });
+    };
+    await new OpenAICompatibleProvider({ ...configFromPreset('kimi', 'k'), model, apiKey: 'sk-x' }, f).complete({ system: 's', messages: [{ role: 'user', content: [{ type: 'image', mime: 'image/png', base64: 'AAAA' }, { type: 'text', text: 'read' }] }], json: true });
+    return body;
+  };
+  it('is a cloud service that reads pictures, with a guide', () => {
+    const p = PROVIDER_PRESETS.find((x) => x.preset === 'kimi');
+    expect(p).toMatchObject({ baseUrl: 'https://api.moonshot.ai/v1', vision: true, needsKey: true, local: false });
+    expect(p?.guide?.keyUrl).toBe('https://platform.kimi.ai/console/api-keys');
+  });
+  it('asks each model only what it accepts (fixed sampling, thinking switched off or kept short)', async () => {
+    const k26 = await bodyFor('kimi-k2.6');
+    expect(k26).toMatchObject({ temperature: 0.6, thinking: { type: 'disabled' }, response_format: { type: 'json_object' } });
+    expect((k26.messages as { content: { type: string; image_url?: { url: string } }[] }[])[1].content[0]).toEqual({ type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } });
+    const k3 = await bodyFor('kimi-k3.1-pro');
+    expect(k3).not.toHaveProperty('temperature');
+    expect(k3).not.toHaveProperty('thinking');
+    expect(k3.reasoning_effort).toBe('low');
+    const code = await bodyFor('kimi-k2.7-code');
+    expect(code).not.toHaveProperty('temperature');
+    expect(code).not.toHaveProperty('thinking');
+    expect(code).not.toHaveProperty('reasoning_effort');
   });
 });
 
