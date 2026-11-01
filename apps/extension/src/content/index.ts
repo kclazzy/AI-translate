@@ -891,6 +891,7 @@ function main() {
           target: targetLang,
           showingOriginal: originalsShown,
           translated: done.length,
+          inWork: [...items.values()].filter((it) => it.status === 'queued' || it.status === 'working').length,
         };
         sendResponse(langs);
         return false;

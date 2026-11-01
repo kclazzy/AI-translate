@@ -79,6 +79,14 @@ const watchOff = async (t) => {
 };
 browser.on('targetcreated', watchOff);
 for (const t of browser.targets()) await watchOff(t);
+
+// What the popup shows as «в работе»: the tab's job count on the extension's badge.
+const badgeOf = (studio, url) =>
+  studio.evaluate(async (url) => {
+    const [t] = await chrome.tabs.query({ url });
+    return t ? chrome.action.getBadgeText({ tabId: t.id }) : 'no tab';
+  }, url);
+
 try {
   // Cut the fixture page into two pictures in the browser.
   const helper = await browser.newPage();
@@ -188,6 +196,11 @@ try {
   const sizes = imageCalls.map((c) => /The image is (\d+×\d+)/.exec(JSON.stringify(c.messages))?.[1]);
   check('the two pictures go to the model once, glued into the whole page', imageCalls.length === 1 && sizes[0] === '800×1100', `calls=${imageCalls.length} sizes=${sizes.join(',')}`);
   check('the chapter file is downloaded', !!file, file ?? 'none');
+  {
+    let b = '';
+    for (let i = 0; i < 20 && (b = await badgeOf(studio, tab.url())); i++) await new Promise((r) => setTimeout(r, 250));
+    check('everything translated: the popup shows no work in progress', b === '', `badge=${JSON.stringify(b)}`);
+  }
   if (process.env.DEBUG) {
     const swNow = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().endsWith('background.js'), { timeout: 5000 }).catch(() => null);
     console.log('SWLOG', swNow ? await (await swNow.worker()).evaluate(() => (globalThis.__aitLog ?? []).slice(-15).join('\n')).catch((e) => String(e)) : 'none');

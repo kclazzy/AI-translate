@@ -782,6 +782,14 @@ async function handleUi(msg: UiToBackground): Promise<unknown> {
       return null;
     case 'set-enabled':
       return setEnabled(msg.enabled);
+    case 'settle-jobs': {
+      // Only the count: work still going for this tab (pictures prepared ahead) goes on.
+      const ids = [...(running.get(msg.tabId) ?? [])];
+      running.delete(msg.tabId);
+      setBadge(msg.tabId);
+      saveRunning();
+      return { ids };
+    }
     case 'cancel-all': {
       if (msg.tabId === undefined) running.clear();
       else running.delete(msg.tabId);

@@ -14,6 +14,7 @@ import { ocrDownloaded } from '../offscreen/ocr';
 import { prepareTranslator, translatorStatus } from '../shared/browserTranslate';
 import { detectorDownloaded } from '../offscreen/detector';
 import './popup.css';
+import { inWorkShown } from './busy';
 import type { PageLangs, SpeedStats } from '../shared/messages';
 import { db, hostOf, loadSettings, saveSettings, secrets } from '../shared/store';
 import { applyUiLangFromSettings, tr, trp, fmtUsd } from '@ait/core/i18n';
@@ -125,9 +126,20 @@ function Popup() {
     void chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => {
       setTab(t ?? null);
       // The badge counts pictures in work on this tab.
-      if (t?.id !== undefined) void chrome.action.getBadgeText({ tabId: t.id }).then((n) => setBusy(Number(n) || 0));
-      // Which languages the page shows: the button names the one a click switches to.
-      if (t?.id !== undefined) void chrome.tabs.sendMessage(t.id, { type: 'get-langs' }).then((l: PageLangs) => setLangs(l ?? null), () => undefined);
+      // «N в работе»: what the page itself still waits for (see inWorkShown); the badge without a page answer.
+      if (t?.id !== undefined) {
+        const id = t.id;
+        void Promise.all([
+          chrome.action.getBadgeText({ tabId: id }).then((n) => Number(n) || 0, () => 0),
+          // Which languages the page shows: the button names the one a click switches to.
+          chrome.tabs.sendMessage(id, { type: 'get-langs' }).then((l: PageLangs) => l ?? null, () => null),
+        ]).then(([badge, l]) => {
+          setLangs(l);
+          const { shown, stale } = inWorkShown(badge, l && typeof l.inWork === 'number' ? l : null);
+          setBusy(shown);
+          if (stale) void settleStale(id, badge);
+        });
+      }
     });
     void db.get<UsageTotals>('usage', 'totals').then((u) => setUsage(u ?? null));
   }, []);
@@ -470,3 +482,21 @@ function Popup() {
 
 void loadBundledFonts();
 createRoot(document.getElementById('root')!).render(<Popup />);
+
+/**
+ * Jobs counted on the badge while the page waits for none: drop them from the count, and note in
+ * the error log what the worker knows of them (for «Сообщить о проблеме»: where their end got lost).
+ */
+async function settleStale(tabId: number, badge: number): Promise<void> {
+  try {
+    const { ids } = ((await chrome.runtime.sendMessage({ type: 'settle-jobs', tabId })) ?? { ids: [] }) as { ids: string[] };
+    const states = ((await chrome.runtime.sendMessage({ target: 'offscreen', type: 'status', jobIds: ids }).catch(() => null)) ?? {}) as Record<string, { state?: string }>;
+    const count = new Map<string, number>();
+    for (const id of ids) count.set(states[id]?.state ?? 'no answer', (count.get(states[id]?.state ?? 'no answer') ?? 0) + 1);
+    const list = (await db.get<unknown[]>('kv', 'errors')) ?? [];
+    const entry = { at: new Date().toISOString(), code: 'STALE_JOBS', message: `${badge} job(s) counted «в работе» on a page with nothing waiting`, detail: [...count].map(([k, n]) => `${k}: ${n}`).join(', '), during: 'popup' };
+    await db.put('kv', 'errors', [entry, ...list].slice(0, 30));
+  } catch {
+    /* only bookkeeping */
+  }
+}

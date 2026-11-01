@@ -34,6 +34,7 @@ const A = readFileSync(join(ROOT, 'e2e/fixtures/page.png'));
 const B = readFileSync(join(ROOT, 'e2e/fixtures/tall.png'));
 const html = {
   '/img': `<!doctype html><title>img</title><body style="margin:0"><img id="p" src="/a.png" width="800" height="1100" style="display:block;margin:20px auto">`,
+  '/sleep': `<!doctype html><title>sleep</title><body style="margin:0"><img id="p" src="/a.png?sleep" width="800" height="1100" style="display:block;margin:20px auto">`,
   '/bg': `<!doctype html><title>bg</title><body style="margin:0"><div id="p" style="width:800px;height:1100px;margin:20px auto;background:url(/a.png) no-repeat;background-size:800px 1100px"></div>`,
   '/canvas': `<!doctype html><title>canvas</title><body style="margin:0"><canvas id="p" width="800" height="1100" style="display:block;margin:20px auto"></canvas>
 <script>const im=new Image();im.onload=()=>document.getElementById('p').getContext('2d').drawImage(im,0,0);im.src='/a.png';</script>`,
@@ -129,7 +130,7 @@ async function overlayState(p) {
 
 const visionCalls = () => calls.filter((c) => Array.isArray(c.messages?.at(-1)?.content)).length;
 const report = [];
-for (const kind of (process.env.KINDS ?? 'img,bg,canvas').split(',')) {
+for (const kind of (process.env.KINDS ?? 'img,bg,canvas').split(',').filter((k) => k !== 'sleep')) {
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:18081/${kind}`);
   await new Promise((r) => setTimeout(r, 1200));
@@ -171,6 +172,61 @@ for (const kind of (process.env.KINDS ?? 'img,bg,canvas').split(',')) {
   // Its own job: a model call, or the local check of the new picture saying it has no text.
   const ownJob = visionCalls() > afterSwap || st.texts.some((t) => /Текста не найдено|без текста/.test(t));
   check(`${kind}: page 16 got its own request after the swap`, ownJob, `vision calls ${afterSwap - before} → ${visionCalls() - before}, overlay ${JSON.stringify(st)}`);
+  await page.close();
+}
+// The browser stops the extension's background (service worker) after ~30 s without events; a
+// local model often works longer than that on a strip. The «done» that wakes it must still clear the
+// job: the popup (the badge) may not go on saying «в работе» for a page that is all translated.
+if (!process.env.KINDS || process.env.KINDS.includes('sleep')) {
+  const page = await browser.newPage();
+  await page.goto('http://127.0.0.1:18081/sleep');
+  await new Promise((r) => setTimeout(r, 1200));
+  const before = visionCalls();
+  await studio.evaluate(async () => {
+    const tabs = await chrome.tabs.query({ url: 'http://127.0.0.1:18081/sleep' });
+    await chrome.runtime.sendMessage({ type: 'popup-command', command: 'translate-page', tabId: tabs.at(-1).id });
+  });
+  await page.bringToFront();
+  const t0 = Date.now();
+  while (visionCalls() === before && Date.now() - t0 < 30000) await new Promise((r) => setTimeout(r, 100));
+  // The job is counted (and saved for a restart); now the background is stopped mid-job.
+  await new Promise((r) => setTimeout(r, 600));
+  const cdpb = await browser.target().createCDPSession();
+  const { targetInfos } = await cdpb.send('Target.getTargets');
+  const worker = targetInfos.find((t) => t.type === 'service_worker' && t.url.endsWith('background.js'));
+  if (worker) await cdpb.send('Target.closeTarget', { targetId: worker.targetId });
+  await cdpb.detach();
+  check('sleep: the background was stopped while the model worked', !!worker);
+  await new Promise((r) => setTimeout(r, DELAY * 2 + 6000));
+  const st = await overlayState(page);
+  const badge = await studio.evaluate(async () => {
+    const [t] = await chrome.tabs.query({ url: 'http://127.0.0.1:18081/sleep' });
+    return chrome.action.getBadgeText({ tabId: t.id });
+  });
+  check('sleep: the picture is translated after the background was stopped mid-job', st.tiles > 0 || st.imgsInShadow > 0, JSON.stringify(st));
+  check('sleep: then the popup shows no work in progress (badge empty)', badge === '', `badge=${JSON.stringify(badge)}`);
+  // The next picture on the same tab: when it is done, nothing may be left «в работе» either.
+  const before2 = visionCalls();
+  await page.evaluate(() => (document.getElementById('p').src = '/b.png?sleep2'));
+  const t1 = Date.now();
+  while (visionCalls() === before2 && Date.now() - t1 < 30000) await new Promise((r) => setTimeout(r, 100));
+  const during = await studio.evaluate(async () => {
+    const [t] = await chrome.tabs.query({ url: 'http://127.0.0.1:18081/sleep' });
+    return chrome.action.getBadgeText({ tabId: t.id });
+  });
+  // Until the picture is translated (a tall page: several model calls).
+  for (let i = 0; i < 120; i++) {
+    const o = await overlayState(page);
+    if (o.imgsInShadow > 0 && !o.texts.some((t) => /…|очеред|следующ/i.test(t))) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  await new Promise((r) => setTimeout(r, 1500));
+  const badge2 = await studio.evaluate(async () => {
+    const [t] = await chrome.tabs.query({ url: 'http://127.0.0.1:18081/sleep' });
+    return chrome.action.getBadgeText({ tabId: t.id });
+  });
+  const saved = await studio.evaluate(async () => JSON.stringify((await chrome.storage.session.get('running')).running ?? {}));
+  check('sleep: the next picture counts as one job and leaves nothing «в работе»', during === '1' && badge2 === '', `during=${JSON.stringify(during)} after=${JSON.stringify(badge2)} saved=${saved}`);
   await page.close();
 }
 await browser.close();

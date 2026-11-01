@@ -135,6 +135,14 @@ browser.on('targetcreated', (t) => void closeWelcome(t));
 
 browser.on('targetchanged', (t) => void closeWelcome(t));
 
+
+// What the popup shows as «в работе»: the tab's job count on the extension's badge.
+const badgeOf = (studio, url) =>
+  studio.evaluate(async (url) => {
+    const [t] = await chrome.tabs.query({ url });
+    return t ? chrome.action.getBadgeText({ tabId: t.id }) : 'no tab';
+  }, url);
+
 try {
   const helper = await browser.newPage();
   await helper.goto('http://127.0.0.1:18151/page.png');
@@ -232,6 +240,11 @@ try {
   const lo = shown.find((r) => r.h > 700);
   check('both pictures now hold the whole line, no halves', !!up && !!lo && up.texts.join() === 'ЦЕЛАЯ РЕПЛИКА' && lo.texts.join() === 'ЦЕЛАЯ РЕПЛИКА', JSON.stringify(shown));
   check('the seam is marked done', up?.seams === 1 && lo?.seams === 1);
+  {
+    let b = '';
+    for (let i = 0; i < 20 && (b = await badgeOf(studio, 'http://127.0.0.1:18151/')); i++) await new Promise((r) => setTimeout(r, 250));
+    check('everything translated: the popup shows no work in progress', b === '', `badge=${JSON.stringify(b)}`);
+  }
   await new Promise((r) => setTimeout(r, 1500));
   await tab.screenshot({ path: join(OUT, 'seam-done.png') });
 
@@ -262,6 +275,11 @@ try {
   check('both pictures got the whole line from it', both.sort((x, y) => x - y).join() === [CUT, FULL - CUT].sort((x, y) => x - y).join(), JSON.stringify(both));
   await new Promise((r) => setTimeout(r, 1000));
   check('no band read afterwards', calls.filter((c) => c.phase === 2).length === 1, `heights=${calls.filter((c) => c.phase === 2).map((c) => c.h).join(',')}`);
+  {
+    let b = '';
+    for (let i = 0; i < 20 && (b = await badgeOf(studio, 'http://127.0.0.1:18151/lazy')); i++) await new Promise((r) => setTimeout(r, 250));
+    check('everything translated: the popup shows no work in progress', b === '', `badge=${JSON.stringify(b)}`);
+  }
   await lazy.screenshot({ path: join(OUT, 'seam-ahead.png') });
 
   // A calm seam: the picture below is not translated with it and its «queued» mark goes away.

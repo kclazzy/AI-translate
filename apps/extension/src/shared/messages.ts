@@ -105,6 +105,8 @@ export interface PageLangs {
   target: string;
   showingOriginal: boolean;
   translated: number;
+  /** Pictures of the page sent for translation and not finished yet. */
+  inWork: number;
 }
 
 /** Where a job is. "unknown" means the worker has never heard of it (lost after a restart) or it just finished. */
@@ -161,5 +163,7 @@ export type UiToBackground =
   | { type: 'set-auto'; host: string; enabled: boolean; tabId: number }
   | { type: 'settings-changed' }
   | { type: 'cancel-all'; tabId?: number }
+  /** The popup saw a page with nothing waiting while jobs were still counted: drop them from the count. */
+  | { type: 'settle-jobs'; tabId: number }
   | { type: 'set-enabled'; enabled: boolean }
   | { type: 'result-changed'; key: string };
