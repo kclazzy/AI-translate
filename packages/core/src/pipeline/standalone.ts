@@ -1,3 +1,4 @@
+import { answerSchema } from '../translate/schemas';
 import { remembered } from './memo';
 import { familyFor } from '../llm/catalog';
 import { AppError } from '../errors';
@@ -307,6 +308,7 @@ async function readView(provider: LlmProvider, image: TiledImage, view: View, co
           system,
           messages: [{ role: 'user', content: [{ type: 'image', mime: 'image/jpeg', base64 }, { type: 'text', text: data ? `${data}\n\n${instruction}` : instruction }] }],
           json: true,
+          schema: answerSchema(collage ? (withTranslation ? 'collage' : 'collageRead') : withTranslation ? 'page' : 'pageRead'),
           signal,
           maxTokens,
           // Reading is transcription: as steady as possible (a temperature set by the user wins).

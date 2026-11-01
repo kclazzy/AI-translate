@@ -41,6 +41,8 @@ export interface CompletionRequest {
   system: string;
   messages: ChatMessage[];
   json?: boolean;
+  /** The answer's exact shape (translate/schemas.ts): servers that can keep the model to it do (Ollama). */
+  schema?: Record<string, unknown>;
   maxTokens?: number;
   temperature?: number;
   signal?: AbortSignal;

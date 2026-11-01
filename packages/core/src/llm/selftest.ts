@@ -1,3 +1,4 @@
+import { answerSchema } from '../translate/schemas';
 import { toAppError } from '../errors';
 import type { ImageBackend } from '../image/backend';
 import { languageName } from '../languages';
@@ -90,6 +91,7 @@ export async function checkVisionModel(cfg: ProviderConfig, opts: { backend: Ima
         },
       ],
       json: true,
+      schema: answerSchema('selftest'),
       maxTokens: 300,
       signal: opts.signal,
     });

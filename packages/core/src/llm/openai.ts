@@ -103,11 +103,19 @@ export class OpenAICompatibleProvider implements LlmProvider {
       // 8k tokens hold a page picture, the prompt and the answer; 16k only with plenty of video memory.
       options: { temperature: req.temperature ?? this.config.temperature ?? 0.2, num_predict: maxTokens, num_ctx: ollamaNumCtx(this.config) },
     };
-    if (req.json) body.format = 'json';
+    // The exact shape when asked (an Ollama too old for it was seen refusing: plain JSON there).
+    const schemaFor = req.json && req.schema && !NO_SCHEMA.has(this.config.baseUrl);
+    if (req.json) body.format = schemaFor ? req.schema : 'json';
     const { signal, dispose } = timeoutSignal(this.config.timeoutMs ?? 600_000, req.signal);
     try {
       const ask = async () => {
         const res = await safeFetch(this.fetchImpl, ollamaUrl(this.config.baseUrl, 'api/chat'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal }, this.config.label);
+        // Only a refusal of the schema itself (an old Ollama), not any bad request (a too long prompt).
+        if (!res.ok && body.format !== 'json' && body.format && res.status === 400 && /format|schema|grammar/i.test(await res.clone().text().catch(() => ''))) {
+          NO_SCHEMA.add(this.config.baseUrl);
+          body.format = 'json';
+          return ask();
+        }
         if (!res.ok) throw await httpError(res, this.config.label, this.config.baseUrl, this.config.model);
         return (await res.json()) as { message?: { content?: string }; prompt_eval_count?: number; eval_count?: number; eval_duration?: number; model?: string; done_reason?: string };
       };
@@ -130,6 +138,9 @@ export class OpenAICompatibleProvider implements LlmProvider {
     }
   }
 }
+
+/** Ollama servers that refused a JSON schema as the format (older than structured outputs). */
+const NO_SCHEMA = new Set<string>();
 
 export function isOllama(cfg: Pick<ProviderConfig, 'preset' | 'baseUrl'>): boolean {
   return cfg.preset === 'ollama' || /:11434(\/|$)/.test(cfg.baseUrl);

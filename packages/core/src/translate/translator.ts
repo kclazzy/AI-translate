@@ -1,3 +1,4 @@
+import { answerSchema } from './schemas';
 import { AppError } from '../errors';
 import { estimateCost } from '../llm/presets';
 import { isBrowserTranslator, translateWithBrowser } from '../llm/browserTranslator';
@@ -109,7 +110,7 @@ export async function translateBlocks(
   return withRetry(
     async (attempt) => {
       const last = attempt >= retries;
-      const sent = await completeFitted(win, room, inputAt, (l, maxTokens) => provider.complete({ system, messages: [{ role: 'user', content: userAt(l) }], json: true, signal: opts.signal, maxTokens, temperature }), { from: level });
+      const sent = await completeFitted(win, room, inputAt, (l, maxTokens) => provider.complete({ system, messages: [{ role: 'user', content: userAt(l) }], json: true, schema: answerSchema('translations'), signal: opts.signal, maxTokens, temperature }), { from: level });
       level = sent.level;
       const user = userAt(level);
       const messages: ChatMessage[] = [{ role: 'user', content: user }];
@@ -131,7 +132,7 @@ export async function translateBlocks(
       if (problems.length && repairFits) {
         messages.push({ role: 'assistant', content: first.text }, { role: 'user', content: repairInstruction(problems) });
         try {
-          const second = await provider.complete({ system, messages, json: true, signal: opts.signal, maxTokens: sent.maxTokens, temperature });
+          const second = await provider.complete({ system, messages, json: true, schema: answerSchema('translations'), signal: opts.signal, maxTokens: sent.maxTokens, temperature });
           usage.push(usageFrom(provider, second));
           const repaired = parseTranslationAnswer(second.text, blocks);
           const secondLow = !!(repaired.repaired || second.truncated);

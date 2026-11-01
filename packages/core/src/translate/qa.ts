@@ -1,3 +1,4 @@
+import { answerSchema } from './schemas';
 import { estimateTokens, MIN_ANSWER, SAFETY, windowOf } from './budget';
 import { languageName } from '../languages';
 import type { LlmProvider } from '../llm/types';
@@ -204,7 +205,7 @@ async function review(items: { id: string; b: TextBlock }[], provider: LlmProvid
   if (usable < 300) return [];
   let res;
   try {
-    res = await provider.complete({ system, messages: [{ role: 'user', content: user }], json: true, signal: opts.signal, maxTokens: Math.min(want, usable), temperature: provider.config.temperature ?? 0 });
+    res = await provider.complete({ system, messages: [{ role: 'user', content: user }], json: true, schema: answerSchema('reviews'), signal: opts.signal, maxTokens: Math.min(want, usable), temperature: provider.config.temperature ?? 0 });
   } catch (e) {
     if ((e as { code?: string }).code === 'CANCELLED') throw e;
     return []; // the review is a bonus: never fail the page because of it
