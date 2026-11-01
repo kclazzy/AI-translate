@@ -31,8 +31,11 @@ export function HistoryPanel({ onOpen, onOpenChapter }: { onOpen: (key: string) 
   const platform = usePlatform();
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [usage, setUsage] = useState<UsageTotals | null>(null);
+  // Pages still in the cache: «Очистить кэш» removes the pictures but keeps the history.
+  const [cached, setCached] = useState<Set<string> | null>(null);
   const load = () => {
     void platform.service.history(1000).then(setItems);
+    void platform.db.keys('results').then((k) => setCached(new Set(k)), () => setCached(null));
     void platform.service.usage().then(setUsage);
   };
   useEffect(load, [platform]);
@@ -73,16 +76,19 @@ export function HistoryPanel({ onOpen, onOpenChapter }: { onOpen: (key: string) 
             </summary>
             {s.chapters.map((c) => {
               let at = 0;
+              const has = (k: string) => !cached || cached.has(k);
+              const keys = c.keys.filter(has);
               return (
                 <details key={c.url || c.entries[0]?.key} className="ait-hist-chapter" data-testid="history-chapter">
                   <summary>
                     <span>{c.number !== undefined ? tr('Глава {0}', c.number) : c.title}</span> <small className="ait-muted">{tr('{0} стр.', c.pages)} · {day(c.last)}</small>{' '}
-                    {c.keys.length && onOpenChapter ? (
+                    {c.keys.length && !keys.length ? <small className="ait-muted" data-testid="history-gone">{tr('страницы удалены из кэша — переведите главу заново')}</small> : null}
+                    {keys.length && onOpenChapter ? (
                       <button
                         className="ait-btn small"
                         onClick={(e) => {
                           e.preventDefault();
-                          onOpenChapter(c.keys);
+                          onOpenChapter(keys);
                         }}
                       >
                         {tr('Открыть главу')}
@@ -102,7 +108,7 @@ export function HistoryPanel({ onOpen, onOpenChapter }: { onOpen: (key: string) 
                             <td>{h.targetLang}</td>
                             <td className="ait-muted">{h.model}</td>
                             <td>{h.status === 'done' ? <span className="ait-badge ok">{tr('готово')}</span> : <span className="ait-badge err">{h.error ?? tr('ошибка')}</span>}</td>
-                            <td style={{ width: 1 }}>{h.status === 'done' ? <button className="ait-btn small" onClick={() => onOpen(h.key)}>{tr('Открыть')}</button> : null}</td>
+                            <td style={{ width: 1 }}>{h.status === 'done' && !has(h.key) ? <small className="ait-muted">{tr('нет в кэше')}</small> : h.status === 'done' ? <button className="ait-btn small" onClick={() => onOpen(h.key)}>{tr('Открыть')}</button> : null}</td>
                           </tr>
                         );
                       })}

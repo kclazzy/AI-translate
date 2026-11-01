@@ -265,14 +265,37 @@ try {
     );
     await studio.screenshot({ path: join(OUT, 'history-folders.png'), fullPage: true });
     check('«История» groups pages into a manga folder with a chapter inside', tree.length >= 1 && tree[0].chapters.length >= 1 && tree[0].chapters[0] >= 1, JSON.stringify(tree));
-    const opened = await studio.evaluate(async () => {
+    const errors = [];
+    studio.on('pageerror', (e) => errors.push(String(e)));
+    studio.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+    await studio.evaluate(() => {
       const ch = document.querySelector('[data-testid="history-chapter"]');
-      const btn = [...(ch?.querySelectorAll('summary button') ?? [])][0];
-      btn?.click();
-      for (let i = 0; i < 50 && !location.search.includes('chapter=') && !document.querySelector('[data-testid="chapters-panel"], .ait-editor'); i++) await new Promise((r) => setTimeout(r, 100));
-      return !!btn && !document.querySelector('[data-testid="history-series"]');
+      [...(ch?.querySelectorAll('summary button') ?? [])][0]?.click();
     });
-    check('«Открыть главу» in the history opens the editor', opened);
+    await new Promise((r) => setTimeout(r, 3000));
+    const shown = await studio.evaluate(() => ({ text: document.body.innerText.slice(0, 400), pages: document.querySelectorAll('[data-testid="chapters-panel"] [data-key], .ait-chapters li').length }));
+    await studio.screenshot({ path: join(OUT, 'history-open-chapter.png') });
+    check('«Открыть главу» in the history opens the editor with the chapter, no error', !/Что-то пошло не так/.test(shown.text) && /редакт|Редакт/i.test(shown.text), JSON.stringify({ shown, errors: errors.slice(0, 5) }));
+    // «Очистить кэш» removes the pictures but keeps the history: a chapter whose pages are gone
+    // (some, then all) still opens, with what is left or a plain message — never the error screen.
+    for (const all of [false, true]) {
+      await studio.goto(`chrome-extension://${extId}/studio.html?view=history`);
+      await studio.evaluate(async (all) => {
+        const db = await new Promise((res) => { const r = indexedDB.open('ai-translate', 1); r.onsuccess = () => res(r.result); });
+        const keys = await new Promise((res) => { const g = db.transaction('results').objectStore('results').getAllKeys(); g.onsuccess = () => res(g.result); });
+        const tx = db.transaction('results', 'readwrite');
+        for (const k of all ? keys : keys.slice(0, 1)) tx.objectStore('results').delete(k);
+        await new Promise((r) => (tx.oncomplete = r));
+      }, all);
+      await studio.goto(`chrome-extension://${extId}/studio.html?view=history`);
+      await studio.waitForSelector('[data-testid="history-chapter"]', { timeout: 10000 }).catch(() => {});
+      const marked = await studio.evaluate(() => !!document.querySelector('[data-testid="history-gone"]'));
+      await studio.evaluate(() => [...(document.querySelector('[data-testid="history-chapter"]')?.querySelectorAll('summary button') ?? [])][0]?.click());
+      await new Promise((r) => setTimeout(r, 3000));
+      const gone = await studio.evaluate(() => document.body.innerText.slice(0, 300));
+      await studio.screenshot({ path: join(OUT, `history-open-chapter-cleared-${all ? 'all' : 'one'}.png`) });
+      check(all ? 'a chapter whose pages were all cleared from the cache says so in the history, no error' : 'a chapter with a page cleared from the cache still opens', !/Что-то пошло не так/.test(gone) && marked === all, JSON.stringify({ marked, gone, errors: errors.slice(0, 5) }));
+    }
   }
 } catch (e) {
   check('unexpected failure', false, String(e?.stack ?? e));

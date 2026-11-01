@@ -1414,5 +1414,8 @@
  "Открыть главу": "Kapitel öffnen",
  "Стр. {0}": "S. {0}",
  "Стр. {0}–{1}": "S. {0}–{1}",
- "глав: {0}": "Kapitel: {0}"
+ "глав: {0}": "Kapitel: {0}",
+ "Страницы этой главы удалены из кэша — переведите главу заново.": "Die Seiten dieses Kapitels wurden aus dem Cache entfernt — übersetzen Sie das Kapitel erneut.",
+ "нет в кэше": "nicht im Cache",
+ "страницы удалены из кэша — переведите главу заново": "Seiten aus dem Cache entfernt — Kapitel erneut übersetzen"
 }

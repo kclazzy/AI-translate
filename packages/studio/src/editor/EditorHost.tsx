@@ -51,6 +51,9 @@ export function stackMaxPixels(): number {
  * the one of `mainKey` (the page the user opened), so that page is always in the strip. The sizes
  * are read first and the pictures decoded one at a time, so a 300-page chapter never sits in memory.
  */
+/** None of the pages is in the cache any more («Очистить кэш» keeps the history, not the pictures). */
+class NotCached extends Error {}
+
 async function loadStack(platform: ReturnType<typeof usePlatform>, keys: string[], mainKey = keys[0]): Promise<Loaded & { segments: Segment[]; title: string; skipped: Skipped[] }> {
   type Meta = { key: string; n: number; width: number; height: number; pageId: string; usage: PageResult['usage']; title: string };
   const metas: Meta[] = [];
@@ -60,7 +63,7 @@ async function loadStack(platform: ReturnType<typeof usePlatform>, keys: string[
     if (r) metas.push({ key: r.key, n: i + 1, width: r.page.width, height: r.page.height, pageId: r.page.pageId, usage: r.page.usage, title: r.title || r.sourceUrl || '' });
     else skipped.push({ n: i + 1, why: 'missing' });
   }
-  if (!metas.length) throw new Error(tr('Перевод не найден в кэше — переведите страницу ещё раз'));
+  if (!metas.length) throw new NotCached(keys.length > 1 ? tr('Страницы этой главы удалены из кэша — переведите главу заново.') : tr('Перевод не найден в кэше — переведите страницу ещё раз'));
   const plan = planStack(metas, mainKey, stackMaxPixels());
   skipped.push(...plan.skipped);
   skipped.sort((a, b) => a.n - b.n);
@@ -155,6 +158,7 @@ export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose, on
       cancelled = true;
     };
   }, [platform, resultKey, chapterKeys, whole]);
+  if (error instanceof NotCached) return <p className="ait-notice" data-testid="editor-not-cached">{error.message}</p>;
   if (error) return <ErrorBox error={error} />;
   if (!data) return <p className="ait-muted">{tr('Загрузка страницы…')}</p>;
   const changed = async (key: string) => {
