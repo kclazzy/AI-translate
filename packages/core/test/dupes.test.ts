@@ -5,11 +5,11 @@ import { createCanvas } from '@napi-rs/canvas';
 import { describe, expect, it } from 'vitest';
 import { configFromPreset } from '../src/llm/presets';
 import type { PipelineConfig } from '../src/pipeline/config';
-import { dedupeReads, dropRepeatedParts, echoesContext, sameText } from '../src/pipeline/dupes';
+import { dedupeReads, dropRepeatedParts, echoesContext, repeatsKnown, sameText } from '../src/pipeline/dupes';
 import { mergeSharedBubbles, planViews, runStandalonePipeline, wanted } from '../src/pipeline/standalone';
 import { emptyContext, mergeContext } from '../src/translate/context';
 import { DEFAULT_PROFILES } from '../src/translate/profiles';
-import type { TextBlock } from '../src/types';
+import type { Box, TextBlock } from '../src/types';
 import { mockOpenAi, napiBackend, toNorm } from './helpers';
 
 function config(over: Partial<PipelineConfig> = {}): PipelineConfig {
@@ -193,5 +193,24 @@ describe('the page', () => {
     expect(wanted(c, 'NARRATION', 'こんにちは', 'text_free')).toBe(true);
     expect(wanted(c, 'DIALOGUE', 'Hello')).toBe(false);
     expect(wanted({ sourceLang: 'ja' }, 'SFX', 'ドン')).toBe(true);
+  });
+});
+
+describe('a re-read that only repeats a block already there is dropped', () => {
+  const blk = (id: string, original: string, translated: string, bbox: Box, bubble?: Box): TextBlock =>
+    ({ id, textType: 'DIALOGUE', originalText: original, translatedText: translated, confidence: 1, language: 'en', bbox, polygon: [], orientation: 0, writingDirection: 'ltr', fontSizeEstimate: 20, bubble: bubble ? { box: bubble, safeArea: bubble, shape: 'ellipse', fill: '#ffffff' } : null, translate: true }) as TextBlock;
+  // A spiky bubble cut by the seam: crops of its border also hold parts of its line.
+  const known = [blk('b1', "I DON'T THINK THIS IS FAIR AT ALL", 'Не думаю, что это вообще честно.', [246, 101, 414, 104], [173, 0, 567, 348])];
+  it('a piece of a known line, inside or beside its bubble («I DON» from «I DON\'T THINK…», «FAI»)', () => {
+    expect(repeatsKnown(blk('x0', 'I DON', 'Я НЕ', [66, 0, 222, 103]), known, [])).toBe(true);
+    expect(repeatsKnown(blk('x1', 'FAI', 'ЧЕСТ', [624, 0, 220, 106]), known, [])).toBe(true);
+  });
+  it('the same line read again where the first reading gave the translation instead of the original', () => {
+    const first = [blk('b1', 'Значит, я спасся через эту книгу?', 'Значит, я спасся через эту книгу?', [285, 262, 459, 99], [195, 133, 654, 373])];
+    expect(repeatsKnown(blk('x2', 'SO, WAS I SAVED THROUGH THIS BOOK?', 'Итак, я спасся через эту книгу?', [161, 394, 724, 204]), first, [])).toBe(true);
+  });
+  it('real new text is kept: other words, or the same short word far from the known line', () => {
+    expect(repeatsKnown(blk('x3', 'WAIT FOR ME', 'ПОДОЖДИ МЕНЯ', [60, 900, 300, 80]), known, [])).toBe(false);
+    expect(repeatsKnown(blk('x4', 'FAIR', 'ЧЕСТНО', [600, 1100, 120, 60]), known, [])).toBe(false);
   });
 });

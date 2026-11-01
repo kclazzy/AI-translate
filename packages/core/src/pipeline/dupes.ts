@@ -7,7 +7,7 @@
  * lines would also drop real repeats on a page. So a pair counts as one text only when the text
  * is the same (or one is part of the other) AND the boxes belong together.
  */
-import type { Box } from '../types';
+import type { Box, TextBlock } from '../types';
 
 /** Letters and digits only, lowercase: «Wait… WAIT!» → "waitwait". */
 export function normText(s: string): string {
@@ -131,4 +131,36 @@ export function echoesContext(text: string, previous: { src: string; dst?: strin
   if (normText(text).length < 4) return false;
   // Stricter than within a page: lines of one scene share phrases; an echo is the same line.
   return previous.some((l) => sameText(text, l.src, 0.9) || (!!l.dst && sameText(text, l.dst, 0.9)));
+}
+
+const touches = (a: Box, b: Box) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+const wordsOf = (t: string) => t.toLowerCase().split(/[^\p{L}\p{N}']+/u).filter(Boolean);
+const lettersOf = (t: string) => t.toUpperCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
+/**
+ * A text read again (left-over lettering, text the detector saw) that only repeats a block already
+ * on the page, or a line of an earlier page — not a new block:
+ * - the same words nearby or in its bubble, or the same words anywhere (strictly);
+ * - a scrap of a known line (the cut half of a bubble: «GOING MARRY THE SOMEDAY» beside
+ *   «I AM GOING TO MARRY THE PRINCE SOMEDAY…»): its words are mostly that line's;
+ * - a piece of a known line in or beside its bubble («I CAN» and «APPY» read from crops of a spiky
+ *   bubble's border that hold the ends of «I CAN'T SAY I'M HAPPY…»);
+ * - the same translation in or beside the bubble, where the first reading gave the translation in
+ *   place of the original (the two original texts are in different languages).
+ */
+export function repeatsKnown(nb: TextBlock, blocks: TextBlock[], previous: { src: string; dst?: string }[]): boolean {
+  const near = (o: TextBlock) => nearBoxes(o.bbox, nb.bbox) || (!!o.bubble && touches(o.bubble.box, nb.bbox));
+  const piece = lettersOf(nb.originalText);
+  return (
+    blocks.some((o) => {
+      if (sameText(o.originalText, nb.originalText) && near(o)) return true;
+      if (sameText(o.originalText, nb.originalText, 0.9)) return true;
+      const w = wordsOf(nb.originalText);
+      const known = new Set(wordsOf(o.originalText));
+      if (w.length >= 2 && known.size > w.length && w.filter((x) => known.has(x)).length >= w.length * 0.75) return true;
+      const whole = lettersOf(o.originalText);
+      if (piece.length >= 2 && whole.length > piece.length && whole.includes(piece) && near(o)) return true;
+      return !!nb.translatedText.trim() && sameText(o.translatedText, nb.translatedText, 0.7) && near(o);
+    }) || echoesContext(nb.originalText, previous)
+  );
 }

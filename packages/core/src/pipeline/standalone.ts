@@ -26,7 +26,7 @@ import { MAX_SIDE, pipelineHash, type PipelineConfig } from './config';
 import { checkForTextAsync, type TextCheck } from '../image/textcheck';
 import { EngineClient } from './engine';
 import { addStep, createDebug, recording } from './debug';
-import { dedupeReads, dropRepeatedParts, echoesContext, nearBoxes, normText, sameText } from './dupes';
+import { dedupeReads, dropRepeatedParts, echoesContext, nearBoxes, normText, repeatsKnown, sameText } from './dupes';
 import { backgroundUnder, colourFor } from './selfcheck';
 import { bubbleAround, detectedTextNear, detectorFindsText, detectPage, ellipseBubble, isTextKind, missedDetections, snapBlocksToDetections, type Detection, type DetectorStats, type TextDetector } from './detect';
 import { cascadeRoute, type ReadRoute } from './cascade';
@@ -1338,18 +1338,6 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
       const marks = findLetterClusters(original, b.bbox).filter((c) => intersects(c.box, b.bbox)).reduce((n, c) => n + c.count, 0);
       return marks >= Math.max(3, chars * 0.4) && marks <= chars * 3 + 6;
     };
-    /** A re-read that repeats a block already there (the same words nearby or in its bubble), or an earlier page. */
-    // A re-read of a scrap of a line already read (the cut half of a bubble: «GOING MARRY THE SOMEDAY
-    // BECOME» beside «I AM GOING TO MARRY THE PRINCE SOMEDAY…»): its words are mostly that line's.
-    const wordsOf = (t: string) => t.toLowerCase().split(/[^\p{L}\p{N}']+/u).filter(Boolean);
-    const scrapOf = (nb: TextBlock, o: TextBlock) => {
-      const w = wordsOf(nb.originalText);
-      const known = new Set(wordsOf(o.originalText));
-      return w.length >= 2 && known.size > w.length && w.filter((x) => known.has(x)).length >= w.length * 0.75;
-    };
-    const repeatsKnown = (nb: TextBlock): boolean =>
-      blocks.some((o) => (sameText(o.originalText, nb.originalText) && (nearBoxes(o.bbox, nb.bbox) || (!!o.bubble && intersects(o.bubble.box, nb.bbox)))) || sameText(o.originalText, nb.originalText, 0.9) || scrapOf(nb, o)) ||
-      echoesContext(nb.originalText, req.context?.recentLines ?? []);
     const groupsOf = new Map<string, { groups: Box[]; lettering?: Lettering }>();
     // Blocks that can never be taken for an echo of an earlier page (letters stand under them, or
     // the detector sees text there) are cleaned at once, while the translation is on its way; the
@@ -1464,7 +1452,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
             if (!nb.originalText.trim() || !nb.translatedText.trim() || blocks.some((o) => overlapRatio(o.bbox, nb.bbox) > 0.5)) continue;
             // The user's filters (with the detector's own word: text outside bubbles), and no second copy of a known text.
             if (!wanted(config, nb.textType, nb.originalText, from.kind) || (nb.textType === 'SFX' && !config.translateSfx)) continue;
-            if (repeatsKnown(nb)) {
+            if (repeatsKnown(nb, blocks, req.context?.recentLines ?? [])) {
               addStep(debug, `re-read ${nb.id} repeats a known text → skipped`);
               continue;
             }
