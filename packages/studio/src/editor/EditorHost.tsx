@@ -7,6 +7,7 @@ import { Editor } from './Editor';
 import { confirmLeave } from './guard';
 import { tr } from '@ait/core/i18n';
 import { planStack, type Skipped } from './stack';
+import { ChaptersPanel } from './ChaptersPanel';
 
 interface Loaded {
   page: PageResult;
@@ -116,12 +117,12 @@ function compactSkipped(list: Skipped[]): string {
  * With `chapterKeys` the whole chapter can be edited as one long page: a bubble that crosses
  * two pictures is one bubble here, and saving cuts the result back into the pictures.
  */
-export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose }: { resultKey: string; chapterKeys?: string[]; settings: AppSettings; onClose?: () => void }) {
+export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose, onOpenChapter, initialWhole }: { resultKey: string; chapterKeys?: string[]; settings: AppSettings; onClose?: () => void; /** «Главы»: open another chapter of the history here. */ onOpenChapter?: (keys: string[]) => void; initialWhole?: boolean }) {
   const platform = usePlatform();
   const [data, setData] = useState<(Loaded & { segments: Segment[]; skipped: Skipped[] }) | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [title, setTitle] = useState('');
-  const [whole, setWhole] = useState(false);
+  const [whole, setWhole] = useState(!!initialWhole && !!chapterKeys && chapterKeys.length > 1);
   /** The texts of each picture as last stored (whole chapter): unchanged pictures are not saved again. */
   const saved = useRef(new Map<string, string>());
   useEffect(() => {
@@ -192,7 +193,9 @@ export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose }: 
           : undefined
       }
       toolbarExtra={
-        chapterKeys && chapterKeys.length > 1 ? (
+        <>
+          {onOpenChapter ? <ChaptersPanel currentKey={resultKey} onOpen={onOpenChapter} /> : null}
+          {chapterKeys && chapterKeys.length > 1 ? (
           <>
             <button
               className={`ait-btn small ${whole ? 'active' : ''}`}
@@ -209,7 +212,8 @@ export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose }: 
               </span>
             ) : null}
           </>
-        ) : null
+          ) : null}
+        </>
       }
       onSave={async (page, cleaned, pixels, rows) => {
         for (const [i, s] of data.segments.entries()) {

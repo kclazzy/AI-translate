@@ -108,6 +108,8 @@ export interface HistoryEntry {
 export interface TranslateOptions {
   /** Settings for this call only, over the stored ones (the speed comparison tries other models). */
   settings?: Partial<AppSettings>;
+  /** Pictures in this one (a strip glued from several): the history counts them. */
+  pictures?: number;
   sourceUrl?: string;
   title?: string;
   seriesKey?: string;
@@ -398,13 +400,13 @@ export class TranslateService {
       void this.journal({ key, page, storeMs: Math.round(performance.now() - tStore), vision: config.vision, force: opts.force }).catch(() => undefined);
       if (out.reviewLater) this.queueReview({ key, seriesKey, config, context: out.context ?? context, blocks: structuredClone(page.blocks) }, out.reviewLater === 'now');
       await this.recordUsage(rendered.page.usage);
-      if (settings.saveHistory) await this.addHistory({ key, url: opts.sourceUrl, title: opts.title, date: now, pages: 1, targetLang: config.targetLang, model: (config.translator ?? config.vision)?.model ?? 'engine', status: 'done' });
+      if (settings.saveHistory) await this.addHistory({ key, url: opts.sourceUrl, title: opts.title, date: now, pages: opts.pictures ?? 1, targetLang: config.targetLang, model: (config.translator ?? config.vision)?.model ?? 'engine', status: 'done' });
       this.scheduleCompact(key);
       return { result, cached: false };
     } catch (e) {
       const err = toAppError(e);
       if (settings.saveHistory && err.code !== 'CANCELLED') {
-        await this.addHistory({ key, url: opts.sourceUrl, title: opts.title, date: new Date().toISOString(), pages: 1, targetLang: config.targetLang, model: (config.translator ?? config.vision)?.model ?? 'engine', status: 'error', error: err.code });
+        await this.addHistory({ key, url: opts.sourceUrl, title: opts.title, date: new Date().toISOString(), pages: opts.pictures ?? 1, targetLang: config.targetLang, model: (config.translator ?? config.vision)?.model ?? 'engine', status: 'error', error: err.code });
       }
       throw err;
     } finally {
@@ -754,7 +756,7 @@ export class TranslateService {
       const top = plan.spans[chunk[0]].y;
       const bytes = await next!;
       next = null;
-      const pending = this.translate(bytes, 'image/png', opts);
+      const pending = this.translate(bytes, 'image/png', { ...opts, pictures: chunk.length });
       if (c + 1 < chunks.length) {
         next = glue(chunks[c + 1]).then(async (b) => {
           await this.prefetch(b, 'image/png', opts);

@@ -1405,5 +1405,9 @@
  "модель читает картинку": "das Modell liest das Bild",
  "онлайн": "online",
  "прочитано неуверенно — читала модель": "unsicher gelesen – das Modell hat gelesen",
- "сначала распознавание": "zuerst Texterkennung"
+ "сначала распознавание": "zuerst Texterkennung",
+ "{0} стр.": "{0} S.",
+ "История пуста: переведённые главы появятся здесь.": "Der Verlauf ist leer: übersetzte Kapitel erscheinen hier.",
+ "Открытые в студии": "Im Studio geöffnet",
+ "Переведённые главы по сайтам: открыть другую, не выходя из редактора": "Übersetzte Kapitel nach Website: ein anderes öffnen, ohne den Editor zu verlassen"
 }

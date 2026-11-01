@@ -81,6 +81,8 @@ export function StudioApp({ platform: hostPlatform, initialView, resultKey, chap
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [view, setView] = useState<View>(initialView ?? (resultKey ? 'editor' : 'quick'));
   const [editKey, setEditKey] = useState<string | undefined>(resultKey);
+  /** A chapter opened from «Главы» in the editor: its pages, in order. */
+  const [opened, setOpened] = useState<string[] | undefined>();
   const [glossaryTab, setGlossaryTab] = useState<'glossary' | 'phrasebook'>(() => (new URLSearchParams(location.search).get('tab') === 'phrasebook' ? 'phrasebook' : 'glossary'));
   const saveChain = useRef<Promise<void>>(Promise.resolve());
   // Files shared into the app are handled once: coming back to the tab must not translate them again.
@@ -249,7 +251,7 @@ export function StudioApp({ platform: hostPlatform, initialView, resultKey, chap
             {view === 'settings' ? <SettingsPanel settings={settings} update={update} /> : null}
             {view === 'privacy' ? <PrivacyPanel settings={settings} /> : null}
             {view === 'history' ? <HistoryPanel onOpen={(k) => { setEditKey(k); setView('editor'); }} /> : null}
-            {view === 'editor' ? (editKey ? <CachedPageEditor resultKey={editKey} chapterKeys={editKey === resultKey ? chapterKeys : undefined} settings={settings} onClose={() => setView('quick')} /> : <p className="ait-muted">{tr('Откройте страницу из истории или переведите картинку.')}</p>) : null}
+            {view === 'editor' ? (editKey ? <CachedPageEditor key={`${editKey}|${opened?.join(',') ?? ''}`} resultKey={editKey} chapterKeys={opened?.includes(editKey) ? opened : editKey === resultKey ? chapterKeys : undefined} initialWhole={!!opened?.includes(editKey)} onOpenChapter={(keys) => { setOpened(keys); setEditKey(keys[0]); }} settings={settings} onClose={() => setView('quick')} /> : <p className="ait-muted">{tr('Откройте страницу из истории или переведите картинку.')}</p>) : null}
           </div>
         </main>
         <ToastHost />

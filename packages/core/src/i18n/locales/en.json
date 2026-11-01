@@ -1405,5 +1405,9 @@
  "модель читает картинку": "the model reads the picture",
  "онлайн": "online",
  "прочитано неуверенно — читала модель": "read unsurely — the model read it",
- "сначала распознавание": "recognition first"
+ "сначала распознавание": "recognition first",
+ "{0} стр.": "{0} pp.",
+ "История пуста: переведённые главы появятся здесь.": "The history is empty: translated chapters will appear here.",
+ "Открытые в студии": "Opened in the studio",
+ "Переведённые главы по сайтам: открыть другую, не выходя из редактора": "Translated chapters by site: open another without leaving the editor"
 }
