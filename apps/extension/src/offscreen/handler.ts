@@ -73,6 +73,13 @@ const WATCHDOG_LOCAL_MIN = 12;
 const WATCHDOG_CLOUD_MIN = 5;
 /** Keep the local model loaded this long while a chapter is still in the queue. */
 const CHAPTER_KEEP_ALIVE_MIN = 15;
+/** Seam repairs asked by the pages and how they ended (for «Для анализа»). */
+async function countSeam(how: 'repaired' | 'nothing' | 'failed'): Promise<void> {
+  const c = ((await db.get('kv', 'seamStats').catch(() => undefined)) as Record<string, number> | undefined) ?? {};
+  c[how] = (c[how] ?? 0) + 1;
+  await db.put('kv', 'seamStats', c).catch(() => undefined);
+}
+
 /** When the local model was last loaded ahead (once a minute at most). */
 let warmedAt = 0;
 
@@ -719,8 +726,11 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       });
       seamChain = run.catch(() => false);
       try {
-        return { ok: await run };
+        const ok = await run;
+        void countSeam(ok ? 'repaired' : 'nothing');
+        return { ok };
       } catch (e) {
+        void countSeam('failed');
         void logError(toAppError(e).toJSON(), 'seam');
         return { ok: false };
       }
@@ -779,6 +789,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
           backend: browserBackend,
           journal: await db.get('kv', 'journal'),
           activity: await activitySessions(),
+          seamStats: ((await db.get('kv', 'seamStats').catch(() => undefined)) as Record<string, number> | undefined) ?? {},
           errors: await db.get('kv', 'errors'),
         });
         const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/zip' }));

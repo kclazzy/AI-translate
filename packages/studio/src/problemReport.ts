@@ -210,6 +210,8 @@ export async function buildAnalysisPack(input: {
   /** Where the time of the last chapters went (the extension's activity sessions, newest last). */
   activity?: ActivitySession[];
   date?: Date;
+  /** Seam repairs since the extension started counting: repaired, nothing to do, failed. */
+  seamStats?: Record<string, number>;
 }): Promise<{ name: string; bytes: Uint8Array }> {
   const date = input.date ?? new Date();
   const zip = new JSZip();
@@ -242,6 +244,7 @@ export async function buildAnalysisPack(input: {
       `blocks: ${input.pages.reduce((n, p) => n + p.page.blocks.length, 0)}`,
       `seams: glued ${input.pages.filter((p) => p.joined === 'strip').length}, repaired ${input.pages.filter((p) => p.joined === 'seam').length}, alone ${input.pages.filter((p) => !p.joined).length}`,
       gapsLine(input.pages),
+      `seam repairs asked: repaired ${input.seamStats?.repaired ?? 0}, nothing to do ${input.seamStats?.nothing ?? 0}, failed ${input.seamStats?.failed ?? 0}`,
       'models:',
       ...[...models].map((m) => `  ${m}`),
       '',
