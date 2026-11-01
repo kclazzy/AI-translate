@@ -133,6 +133,8 @@ export interface AnalysisPage {
   rendered?: Tile[];
   /** Read the pictures only when the page is written (a long chapter never sits in memory at once). */
   load?: () => Promise<{ original?: { bytes: Uint8Array; mime?: string }; rendered: Tile[] }>;
+  /** How it was joined with its neighbours: glued into a strip, its seam translated as one band, or alone. */
+  joined?: 'strip' | 'seam';
 }
 
 const ANALYSIS_README = `Пакет для анализа главы — AI Translate
@@ -202,7 +204,7 @@ export async function buildAnalysisPack(input: {
     const pics = p.load ? await p.load() : { original: p.original, rendered: p.rendered ?? [] };
     if (pics.original?.bytes?.length) zip.file(`${dir}/original.${extOf(pics.original.bytes, pics.original.mime)}`, pics.original.bytes);
     await resultJpeg(zip, `${dir}/result`, pics.rendered, p.page.width, p.page.height, input.backend);
-    zip.file(`${dir}/page.json`, JSON.stringify(p.page, null, 2));
+    zip.file(`${dir}/page.json`, JSON.stringify(p.joined ? { ...p.page, joined: p.joined } : p.page, null, 2));
   }
   zip.file('texts.tsv', textsTable(input.pages.map((p, i) => ({ name: String(i + 1).padStart(3, '0'), blocks: p.page.blocks }))));
   if (input.settings) zip.file('settings.json', JSON.stringify(sanitizeSettings(input.settings), null, 2));
@@ -223,6 +225,7 @@ export async function buildAnalysisPack(input: {
       `date: ${date.toISOString()}`,
       `pictures: ${input.pages.length}`,
       `blocks: ${input.pages.reduce((n, p) => n + p.page.blocks.length, 0)}`,
+      `seams: glued ${input.pages.filter((p) => p.joined === 'strip').length}, repaired ${input.pages.filter((p) => p.joined === 'seam').length}, alone ${input.pages.filter((p) => !p.joined).length}`,
       'models:',
       ...[...models].map((m) => `  ${m}`),
       '',

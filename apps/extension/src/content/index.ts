@@ -4,6 +4,7 @@ import { pagesAhead } from '@ait/core/ahead';
 import type { SerializedError } from '@ait/core/errors';
 import { CANCELLED_ALL, PAGE_PORT, type BackgroundToContent, type ChapterFormat, type ContentToBackground, type ImageRef, type JobStatus, type PageLangs, type RenderedTile, type RenderedTiles, type UiStrings } from '../shared/messages';
 import { Overlay } from './overlay';
+import { stackedBelow } from './stack';
 import { asCandidate, candidateAt, chapterColumn, imgSrc, inlineData, lazySrc, markUi, scanPage, shownChanged, shownIdentity, viewportRect, withoutThumbnails, type Candidate } from './scanner';
 import { fmtNumber, fmtUsd, registerDictionary, setUiLang, tr } from '@ait/core/i18n';
 
@@ -247,8 +248,7 @@ function main() {
       if (o === it || o.status !== 'done' || !o.result || o.cand.kind !== 'img') continue;
       if (it.group?.includes(o.cand)) continue;
       const r1 = o.cand.el.getBoundingClientRect();
-      if (Math.abs(r0.left - r1.left) > 2 || Math.abs(r0.width - r1.width) > 2) continue;
-      const [upper, lower] = Math.abs(r1.top - r0.bottom) <= 6 ? [it, o] : Math.abs(r0.top - r1.bottom) <= 6 ? [o, it] : [null, null];
+      const [upper, lower] = stackedBelow(r0, r1) ? [it, o] : stackedBelow(r1, r0) ? [o, it] : [null, null];
       if (!upper || !lower) continue;
       const key = `${upper.result!.key}|${lower.result!.key}`;
       if (seamsAsked.has(key) || (!cutAt(upper.result!, 'bottom') && !cutAt(lower.result!, 'top'))) continue;
@@ -523,7 +523,7 @@ function main() {
   let strip: Pending[] = [];
   let stripTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** Pictures that touch one another in one column (same left edge and width, no gap). */
+  /** Pictures one under another in one column (see stackedBelow). */
   function stripGroups(list: Pending[]): Pending[][] {
     const at = (p: Pending) => {
       const r = p.item.cand.el.getBoundingClientRect();
@@ -533,7 +533,7 @@ function main() {
     const groups: Pending[][] = [];
     let prev: (typeof sorted)[number] | null = null;
     for (const cur of sorted) {
-      const joins = prev && Math.abs(prev.r.left - cur.r.left) <= 2 && Math.abs(prev.r.width - cur.r.width) <= 2 && Math.abs(cur.r.top - prev.r.bottom) <= 6 && cur.r.width > 0;
+      const joins = !!prev && stackedBelow(prev.r, cur.r);
       if (joins) groups[groups.length - 1].push(cur.p);
       else groups.push([cur.p]);
       prev = cur;
@@ -564,7 +564,7 @@ function main() {
       const r0 = cur;
       const next = col.find((c) => {
         const r = c.el.getBoundingClientRect();
-        return r.height > 0 && Math.abs(r.left - r0.left) <= 2 && Math.abs(r.width - r0.width) <= 2 && Math.abs(r.top - r0.bottom) <= 6;
+        return r.height > 0 && stackedBelow(r0, r);
       });
       if (!next) break;
       const known = byElement.get(next.el);

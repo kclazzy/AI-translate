@@ -761,6 +761,7 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
           // The pictures are read again when the page is written: one page in memory at a time.
           pages.push({
             page: r.page,
+            ...(r.strip ? { joined: 'strip' as const } : r.seams?.length ? { joined: 'seam' as const } : {}),
             load: async () => {
               const again = await service.getResult(key);
               return { original: again?.original, rendered: again?.rendered ?? [] };

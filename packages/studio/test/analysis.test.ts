@@ -26,4 +26,14 @@ describe('«Для анализа»: the chapter pack', () => {
     expect(rows[2].split('\t')[4]).toBe('yes');
     expect(await z.file('info.txt')!.async('string')).toContain('Ollama — qwen3.5:9b-q8_0');
   });
+
+  it('says how the pictures were joined at their seams (glued, seam repaired, alone) — to see cut bubbles', async () => {
+    const { bytes } = await buildAnalysisPack({
+      pages: [1, 2, 3, 4].map((n) => ({ page: page(n), joined: n <= 2 ? ('strip' as const) : n === 3 ? ('seam' as const) : undefined })),
+      settings: undefined, version: '1', platform: 'test', journal: [], errors: [],
+    });
+    const z = await JSZip.loadAsync(bytes);
+    expect(await z.file('info.txt')!.async('string')).toContain('seams: glued 2, repaired 1, alone 1');
+    expect(JSON.parse(await z.file('003/page.json')!.async('string')).joined).toBe('seam');
+  });
 });
