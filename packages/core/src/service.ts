@@ -17,7 +17,7 @@ import type { PageResult, StageEvent, TextBlock, Usage } from './types';
 import { sha256Hex, sniffImageMime } from './util/bytes';
 import { tr } from './i18n';
 import { preparePage, type Inpainter, type PipelineOutput, type PreparedPage } from './pipeline/standalone';
-import type { TextDetector } from './pipeline/detect';
+import { detectPage, type TextDetector } from './pipeline/detect';
 import type { TextReader } from './pipeline/standalone';
 import { QA_BATCH, qaPages } from './translate/qa';
 import { translateBlocks } from './translate/translator';
@@ -26,7 +26,7 @@ import { createProvider } from './llm/presets';
 import { assertPrivacy, isLocalProvider } from './llm/privacy';
 import { isOllama } from './llm/openai';
 import { ollamaLoaded, ollamaUnloadAll } from './llm/discover';
-import { cropRows, pageForSpan, planChunks, planStrip, shiftBlock, stitchChunk, type StripPart } from './image/strip';
+import { cropRows, pageForSpan, planChunksBy, planStrip, shiftBlock, stitchChunk, type StripPart, type StripPlan } from './image/strip';
 import { KeyedMutex } from './util/mutex';
 
 export interface StoredResult {
@@ -446,8 +446,13 @@ export class TranslateService {
       cutUp = up.page.blocks.filter((b) => touchesEdge(b, H - near, 'bottom'));
       cutLo = lo.page.blocks.filter((b) => touchesEdge(b, lo.page.height, 'top', near));
       if (!cutUp.length && !cutLo.length) return false;
-      const plan = await planStrip(this.backend, [up.original, lo.original]);
-      if (plan.calmAfter[0]) return false;
+      const pair = [up.original, lo.original];
+      const plan = await planStrip(this.backend, pair);
+      if (plan.calmAfter[0]) {
+        // Calm pixels, but the detector may still see a bubble across the seam (its white middle).
+        const { config: cfg } = await this.config(up.seriesKey ?? lo.seriesKey);
+        if (!cfg.detector || !this.detector || (await seamFree(this.backend, pair, plan, 0, this.detector))) return false;
+      }
     }
     // The band: from the top of what is cut in the upper picture to the bottom of what is cut in the
     // lower one (a third of the width on a side where nothing was read).
@@ -720,7 +725,9 @@ export class TranslateService {
     // a whole chapter is never held in memory at once.
     const todoParts = todo.map((i) => parts[i]);
     const plan = await planStrip(this.backend, todoParts);
-    const planned = planChunks(plan.spans.map((s) => s.h), plan.calmAfter);
+    // Where the strip may be cut: the pixels on the seam, and (with the detector) no bubble or text across it.
+    const detect = config.detector && !opts.generic ? this.detector : undefined;
+    const planned = await planChunksBy(plan.spans.map((s) => s.h), plan.calmAfter, detect ? (i) => seamFree(this.backend, todoParts, plan, i, detect) : undefined);
     // A chunk of neighbours only (their seam with the pictures asked for is calm): not now.
     const chunks = planned.filter((c) => c.some((j) => todo[j] < own));
     const skipped = planned.filter((c) => !chunks.includes(c)).flat().map((j) => todo[j]);
@@ -1399,6 +1406,31 @@ async function waitFor(p: Promise<unknown>, ms: number, signal?: AbortSignal): P
   } finally {
     clearTimeout(timer);
     if (onAbort) signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+/**
+ * Nothing crosses the seam after picture i (a bubble or text the detector sees across it)? The band
+ * around the seam is looked at — a third of the width on each side. A detector that fails says nothing.
+ */
+async function seamFree(backend: ImageBackend, parts: StripPart[], plan: StripPlan, i: number, detect: TextDetector): Promise<boolean> {
+  const glued = await stitchChunk(backend, parts, plan, [i, i + 1]);
+  try {
+    const seam = plan.spans[i + 1].y - plan.spans[i].y;
+    const side = Math.round(plan.width * 0.35);
+    const y0 = Math.max(0, seam - side);
+    const band = cropRows(glued, y0, Math.min(glued.height - y0, seam - y0 + side));
+    try {
+      const at = seam - y0;
+      const dets = await detectPage(band, detect, backend);
+      return !dets.some((d) => d.box[1] < at - 4 && d.box[1] + d.box[3] > at + 4);
+    } finally {
+      band.dispose();
+    }
+  } catch {
+    return true;
+  } finally {
+    glued.dispose();
   }
 }
 

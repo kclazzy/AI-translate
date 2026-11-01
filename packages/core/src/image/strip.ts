@@ -59,6 +59,43 @@ export function planChunks(heights: number[], calmAfter: boolean[], min = STRIP_
   return chunks;
 }
 
+/**
+ * planChunks with the seams' own word: `free(i)` says nothing (no bubble, no text) crosses the seam
+ * after picture i — a seam can look calm (the white middle of a bubble) and still cut a bubble.
+ * A cut needs a calm and free seam; a chunk grown past `max` is cut at its last free seam (where it
+ * reaches the limit only when no seam in it is free). Without `free` the pixels decide, as before.
+ */
+export async function planChunksBy(heights: number[], calmAfter: boolean[], free: ((i: number) => Promise<boolean>) | undefined, min = STRIP_MIN, max = STRIP_MAX): Promise<number[][]> {
+  if (!free) return planChunks(heights, calmAfter, min, max);
+  const known = new Map<number, boolean>();
+  const isFree = async (i: number) => {
+    if (!known.has(i)) known.set(i, await free(i));
+    return known.get(i)!;
+  };
+  const chunks: number[][] = [];
+  let cur: number[] = [];
+  let h = 0;
+  for (let i = 0; i < heights.length; i++) {
+    if (cur.length && h + heights[i] > max) {
+      let at = cur.length - 1;
+      while (at > 0 && !(await isFree(cur[at]))) at--;
+      if (at === 0 && !(await isFree(cur[0]))) at = cur.length - 1;
+      chunks.push(cur.slice(0, at + 1));
+      cur = cur.slice(at + 1);
+      h = cur.reduce((a, j) => a + heights[j], 0);
+    }
+    cur.push(i);
+    h += heights[i];
+    if (h >= min && calmAfter[i] !== false && (i === heights.length - 1 || (await isFree(i)))) {
+      chunks.push(cur);
+      cur = [];
+      h = 0;
+    }
+  }
+  if (cur.length) chunks.push(cur);
+  return chunks;
+}
+
 /** Is the seam between two pictures calm: the bottom rows of one and top rows of the next are plain. */
 export function calmSeam(bottom: Float32Array, top: Float32Array, threshold = 6): boolean {
   const mean = (a: Float32Array) => a.reduce((s, v) => s + v, 0) / Math.max(1, a.length);
