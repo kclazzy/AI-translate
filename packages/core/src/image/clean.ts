@@ -634,6 +634,34 @@ function outsideOf(region: Uint8Array, width: number, height: number, within: Bo
   return outside;
 }
 
+/**
+ * The median colour of a ring `w` px wide around `box` (inside the picture), letters (the extreme
+ * pixels, white or black) left out: the ground right around a text. With `w` = 0, of the box itself.
+ */
+function ringMedian(img: PixelData, box: Box, w: number): RGB | null {
+  const outer = clampBox(expandBox(box, w), img.width, img.height);
+  // w = 0: the box itself (its ground between the letters).
+  if (w === 0) box = [0, 0, 0, 0];
+  const rs: number[] = [];
+  const gs: number[] = [];
+  const bs: number[] = [];
+  for (let y = outer[1]; y < outer[1] + outer[3]; y++) {
+    const inY = y >= box[1] && y < box[1] + box[3];
+    for (let x = outer[0]; x < outer[0] + outer[2]; x++) {
+      if (inY && x >= box[0] && x < box[0] + box[2]) continue;
+      const p = (y * img.width + x) * 4;
+      const l = luminance(img.data[p], img.data[p + 1], img.data[p + 2]);
+      if (l > 232 || l < 20) continue;
+      rs.push(img.data[p]);
+      gs.push(img.data[p + 1]);
+      bs.push(img.data[p + 2]);
+    }
+  }
+  if (rs.length < 50) return null;
+  const mid = (a: number[]) => a.sort((x, y) => x - y)[a.length >> 1];
+  return [mid(rs), mid(gs), mid(bs)];
+}
+
 export interface CleanResult {
   bubble: BubbleInfo | null;
   /** Tight box around the text pixels that were found. */
@@ -1407,6 +1435,18 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
   bg = dom.color;
   flat = dom.share >= 0.45;
   {
+    // A big text box (a game window's list): the wide surroundings reach past the window onto the
+    // page, whose colour may win there. The letters' ground is what stands right around them — the
+    // window's own dark plate, not the light page (else its white letters would be taken for the
+    // ground and the window painted light).
+    const near = dominantColor(img, clampBox(expandBox(local, Math.max(6, Math.round(minDim * 0.08))), img.width, img.height));
+    const apart = Math.hypot(near.color[0] - bg[0], near.color[1] - bg[1], near.color[2] - bg[2]) > 90;
+    if (apart && near.share >= 0.5 && dom.share < 0.75) {
+      bg = near.color;
+      flat = true;
+    }
+  }
+  {
     // A model box reaching past a light bubble onto a dark page: the dark around it dominates, but
     // inside the box it is the bubble's light ground that dominates. That light shape is the bubble
     // (otherwise the dark page would be taken for one, the bubble's white for letters to erase,
@@ -1605,6 +1645,23 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     result = { bubble, textBox, method, closed, lettering, ...(artMask ? { redoMask: artMask } : {}), ...(groups ? { textGroups: groups.map((g) => [g[0] + region[0], g[1] + region[1], g[2], g[3]] as Box) } : {}) };
   } else {
     // Text over artwork: letters are the extreme pixels (white/black fill and outline).
+    // Their ground is right around them (a game window's see-through plate), not the wider
+    // surroundings, which may reach past the window onto a light page.
+    let onRing = false;
+    {
+      const w = Math.max(6, Math.round(minDim * 0.08));
+      const ring = ringMedian(img, local, w);
+      // …and the same ground inside the box, between the letters (a loose box reaching past a dark
+      // plate has the plate inside and the page in the ring: the plate stays the ground then).
+      const inner = ringMedian(img, clampBox(expandBox(local, -Math.max(2, Math.round(minDim * 0.1))), img.width, img.height), 0);
+      const same = !!ring && !!inner && Math.hypot(ring[0] - inner[0], ring[1] - inner[1], ring[2] - inner[2]) < 60;
+      if (ring && same && Math.hypot(ring[0] - bg[0], ring[1] - bg[1], ring[2] - bg[2]) > 90) {
+        bg = ring;
+        onRing = true;
+        // The letters are looked for on that ground only: past it lies the page, all of it «not ground».
+        search = clampBox(expandBox(local, w * 2), img.width, img.height);
+      }
+    }
     const bgLum = luminance(...bg);
     const cand = new Uint8Array(img.width * img.height);
     for (let y = search[1]; y < search[1] + search[3]; y++) {
@@ -1619,7 +1676,9 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     // Lettering lies inside the searched area; a "letter" spanning it from side to side is a piece
     // of the background (the sky around a bubble) and smearing it would wipe out the picture.
     const spansSearch = (b: Box | null) => !!b && b[2] >= search[2] - 2 && b[3] >= search[3] - 2;
-    let snap = snapToLettering(cand, img.width, search, local, img);
+    // On a ground found right around the box (see above) the search is that close neighbourhood:
+    // every mark standing out from it is lettering (whole lines, not only those touching the box).
+    let snap = onRing ? { mask: cand, box: maskBounds(cand, img.width, img.height) } : snapToLettering(cand, img.width, search, local, img);
     if (spansSearch(snap.box)) snap = { mask: new Uint8Array(cand.length), box: null };
     if (!snap.box) {
       // Colourful art (every stripe "far" from the average colour) hides the letters in one big
