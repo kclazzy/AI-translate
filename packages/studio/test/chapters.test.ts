@@ -31,3 +31,27 @@ describe('the editor\'s «Главы»: one folder per series, its chapters by n
     expect(g[2].chapters[0]).toMatchObject({ title: 'scan.png', keys: ['u1'] });
   });
 });
+
+describe('«История» as folders: manga → chapter → pages', () => {
+  const list = [
+    e('w1a', W(1), '2026-10-01T10:01:00Z', 'Mirror World: God-Tier Revenge - Episode 1 | WEBTOON'),
+    e('w1b', W(1), '2026-10-01T10:02:00Z', 'Mirror World: God-Tier Revenge - Episode 1 | WEBTOON'),
+    e('w1a', W(1), '2026-10-03T10:00:00Z', 'Mirror World: God-Tier Revenge - Episode 1 | WEBTOON'),
+    e('w1c', W(1), '2026-10-01T10:03:00Z', 'Mirror World: God-Tier Revenge - Episode 1 | WEBTOON', 'error'),
+    e('w2a', W(2), '2026-10-02T10:00:00Z', 'Mirror World: God-Tier Revenge - Episode 2 | WEBTOON', 'error'),
+  ];
+  it('each chapter lists its pages once, in reading order, with the latest record of each', () => {
+    const g = groupHistory(list, { failed: true });
+    const ep1 = g[0].chapters.find((c) => c.number === 1)!;
+    expect(ep1.entries.map((x) => [x.key, x.date])).toEqual([
+      ['w1a', '2026-10-03T10:00:00Z'],
+      ['w1b', '2026-10-01T10:02:00Z'],
+      ['w1c', '2026-10-01T10:03:00Z'],
+    ]);
+    expect(ep1.keys).toEqual(['w1a', 'w1b']);
+  });
+  it('with failed pages asked for, a chapter where everything failed still shows (to see the error)', () => {
+    expect(groupHistory(list, { failed: true })[0].chapters.map((c) => c.number)).toEqual([1, 2]);
+    expect(groupHistory(list)[0].chapters.map((c) => c.number)).toEqual([1]);
+  });
+});

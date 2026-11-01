@@ -253,6 +253,27 @@ try {
     const after = await editKeys();
     check('the editor gets every translated page of the chapter, also one the reader took out', !!before && before.length >= 3 && !!after && after.length === before.length && after.join() === before.join(), `before=${before?.length} after=${after?.length}`);
   }
+  // ---- «История»: folders manga → chapter → pages, and a chapter opens whole in the editor ---------
+  {
+    await studio.bringToFront();
+    await studio.goto(`chrome-extension://${extId}/studio.html?view=history`);
+    await studio.waitForSelector('[data-testid="history-series"]', { timeout: 10000 }).catch(() => {});
+    const tree = await studio.evaluate(() =>
+      [...document.querySelectorAll('[data-testid="history-series"]')].map((s) => ({
+        chapters: [...s.querySelectorAll('[data-testid="history-chapter"]')].map((c) => c.querySelectorAll('tbody tr').length),
+      })),
+    );
+    await studio.screenshot({ path: join(OUT, 'history-folders.png'), fullPage: true });
+    check('«История» groups pages into a manga folder with a chapter inside', tree.length >= 1 && tree[0].chapters.length >= 1 && tree[0].chapters[0] >= 1, JSON.stringify(tree));
+    const opened = await studio.evaluate(async () => {
+      const ch = document.querySelector('[data-testid="history-chapter"]');
+      const btn = [...(ch?.querySelectorAll('summary button') ?? [])][0];
+      btn?.click();
+      for (let i = 0; i < 50 && !location.search.includes('chapter=') && !document.querySelector('[data-testid="chapters-panel"], .ait-editor'); i++) await new Promise((r) => setTimeout(r, 100));
+      return !!btn && !document.querySelector('[data-testid="history-series"]');
+    });
+    check('«Открыть главу» in the history opens the editor', opened);
+  }
 } catch (e) {
   check('unexpected failure', false, String(e?.stack ?? e));
 } finally {

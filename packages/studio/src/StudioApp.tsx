@@ -250,7 +250,7 @@ export function StudioApp({ platform: hostPlatform, initialView, resultKey, chap
             ) : null}
             {view === 'settings' ? <SettingsPanel settings={settings} update={update} /> : null}
             {view === 'privacy' ? <PrivacyPanel settings={settings} /> : null}
-            {view === 'history' ? <HistoryPanel onOpen={(k) => { setEditKey(k); setView('editor'); }} /> : null}
+            {view === 'history' ? <HistoryPanel onOpen={(k) => { setOpened(undefined); setEditKey(k); setView('editor'); }} onOpenChapter={(keys) => { setOpened(keys); setEditKey(keys[0]); setView('editor'); }} /> : null}
             {view === 'editor' ? (editKey ? <CachedPageEditor key={`${editKey}|${opened?.join(',') ?? ''}`} resultKey={editKey} chapterKeys={opened?.includes(editKey) ? opened : editKey === resultKey ? chapterKeys : undefined} initialWhole={!!opened?.includes(editKey)} onOpenChapter={(keys) => { setOpened(keys); setEditKey(keys[0]); }} settings={settings} onClose={() => setView('quick')} /> : <p className="ait-muted">{tr('Откройте страницу из истории или переведите картинку.')}</p>) : null}
           </div>
         </main>

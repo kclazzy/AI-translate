@@ -1410,5 +1410,9 @@
  "История пуста: переведённые главы появятся здесь.": "Der Verlauf ist leer: übersetzte Kapitel erscheinen hier.",
  "Открытые в студии": "Im Studio geöffnet",
  "Глава {0}": "Kapitel {0}",
- "Переведённые главы по сериям: открыть другую, не выходя из редактора": "Übersetzte Kapitel nach Serie: ein anderes öffnen, ohne den Editor zu verlassen"
+ "Переведённые главы по сериям: открыть другую, не выходя из редактора": "Übersetzte Kapitel nach Serie: ein anderes öffnen, ohne den Editor zu verlassen",
+ "Открыть главу": "Kapitel öffnen",
+ "Стр. {0}": "S. {0}",
+ "Стр. {0}–{1}": "S. {0}–{1}",
+ "глав: {0}": "Kapitel: {0}"
 }

@@ -505,3 +505,19 @@ table.ait-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   font-weight: 700;
   color: var(--magenta);
 }
+
+/* «История» as folders: manga → chapter → pages. */
+.ait-hist-series {
+  margin: 10px 0;
+}
+.ait-hist-series > summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+.ait-hist-chapter {
+  margin: 4px 0 4px 18px;
+}
+.ait-hist-chapter > summary {
+  cursor: pointer;
+  padding: 2px 0;
+}

@@ -13,8 +13,10 @@ export interface ChapterFolder {
   title: string;
   /** The chapter's number on the site, when the address or the title gives it. */
   number?: number;
-  /** Result keys, in reading order. */
+  /** Result keys of the translated pages, in reading order. */
   keys: string[];
+  /** The latest history record of each page (failed ones too when asked for), in reading order. */
+  entries: HistoryEntry[];
   /** Pictures in it (a strip glued from several counts as all of them). */
   pages: number;
   /** When a page of it was last translated. */
@@ -32,10 +34,10 @@ export interface SeriesFolder {
 
 const STUDIO = '';
 
-export function groupHistory(entries: HistoryEntry[]): SeriesFolder[] {
-  const series = new Map<string, SeriesFolder & { byId: Map<string, ChapterFolder> }>();
-  const done = entries.filter((e) => e.status === 'done').sort((a, b) => a.date.localeCompare(b.date));
-  for (const e of done) {
+export function groupHistory(entries: HistoryEntry[], opts: { failed?: boolean } = {}): SeriesFolder[] {
+  const series = new Map<string, SeriesFolder & { byId: Map<string, ChapterFolder & { latest: Map<string, HistoryEntry> }> }>();
+  const taken = entries.filter((e) => e.status === 'done' || opts.failed).sort((a, b) => a.date.localeCompare(b.date));
+  for (const e of taken) {
     let url = '';
     let site = '';
     try {
@@ -52,9 +54,12 @@ export function groupHistory(entries: HistoryEntry[]): SeriesFolder[] {
     series.set(key, s);
     if (place?.name) s.name = place.name;
     const id = url || `key:${e.key}`;
-    const c = s.byId.get(id) ?? { url, title: '', number: place?.number, keys: [], pages: 0, last: e.date };
+    const c = s.byId.get(id) ?? { url, title: '', number: place?.number, keys: [], entries: [], latest: new Map<string, HistoryEntry>(), pages: 0, last: e.date };
     s.byId.set(id, c);
-    if (!c.keys.includes(e.key)) {
+    // Reading order: the order pages were first seen; each page shows its latest record.
+    if (!c.latest.has(e.key)) c.entries.push(e);
+    c.latest.set(e.key, e);
+    if (e.status === 'done' && !c.keys.includes(e.key)) {
       c.keys.push(e.key);
       c.pages += Math.max(1, e.pages || 1);
     }
@@ -67,7 +72,7 @@ export function groupHistory(entries: HistoryEntry[]): SeriesFolder[] {
     .map(({ byId, ...s }) => ({
       ...s,
       name: s.key === STUDIO ? tr('Открытые в студии') : s.name || s.site,
-      chapters: [...byId.values()].map((c) => ({ ...c, title: c.title || c.url.replace(/^https?:\/\//, '').replace(/\/$/, '') })).sort(byNumber),
+      chapters: [...byId.values()].map(({ latest, ...c }) => ({ ...c, entries: c.entries.map((x) => latest.get(x.key)!), title: c.title || c.url.replace(/^https?:\/\//, '').replace(/\/$/, '') })).sort(byNumber),
     }))
     .sort((a, b) => (a.key === STUDIO ? 1 : b.key === STUDIO ? -1 : b.last.localeCompare(a.last)));
 }

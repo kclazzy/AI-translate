@@ -1410,5 +1410,9 @@
  "История пуста: переведённые главы появятся здесь.": "The history is empty: translated chapters will appear here.",
  "Открытые в студии": "Opened in the studio",
  "Глава {0}": "Chapter {0}",
- "Переведённые главы по сериям: открыть другую, не выходя из редактора": "Translated chapters by series: open another without leaving the editor"
+ "Переведённые главы по сериям: открыть другую, не выходя из редактора": "Translated chapters by series: open another without leaving the editor",
+ "Открыть главу": "Open chapter",
+ "Стр. {0}": "P. {0}",
+ "Стр. {0}–{1}": "P. {0}–{1}",
+ "глав: {0}": "chapters: {0}"
 }
