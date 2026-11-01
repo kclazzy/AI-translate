@@ -1,3 +1,4 @@
+import { entityHints } from './context';
 import { answerSchema } from './schemas';
 import { AppError } from '../errors';
 import { estimateCost } from '../llm/presets';
@@ -82,6 +83,11 @@ export async function translateBlocks(
   }
   const hintStrings: Record<string, string[]> = {};
   for (const [id, hits] of hitsByBlock) hintStrings[id] = hits.map((h) => `${h.entry.source} → ${h.entry.target}`);
+  // The series' known names and terms in each line: one translation of a term on every page.
+  for (const b of blocks) {
+    const known = entityHints(b.text, input.context?.entities ?? []).filter((h) => !hintStrings[b.id]?.some((g) => g.toLowerCase().startsWith(h.split(' → ')[0].toLowerCase())));
+    if (known.length) hintStrings[b.id] = [...(hintStrings[b.id] ?? []), ...known];
+  }
 
   // Same system prompt for every page (cacheable prefix); this page's terms go into the message.
   const system = buildSystemPrompt(input);

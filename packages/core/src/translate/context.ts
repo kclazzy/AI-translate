@@ -162,3 +162,21 @@ export function withoutPage(ctx: TranslationContext, page: string): TranslationC
   if (!ctx.mergedPages?.includes(page)) return ctx;
   return { ...ctx, recentLines: ctx.recentLines.filter((l) => l.page !== page), ...(ctx.memory ? { memory: ctx.memory.filter((m) => m.page !== page) } : {}) };
 }
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The series' known names and terms found in a line, as hints «source → target» for it: the same
+ * term gets the same translation on every page (a small model forgets the list in <context>). Whole
+ * words only, any case, a plural «s» allowed; names shorter than 3 letters are left to the context.
+ */
+export function entityHints(text: string, entities: Pick<ContextEntity, 'source' | 'target'>[]): string[] {
+  const out: string[] = [];
+  for (const e of entities) {
+    const src = e.source.trim();
+    if (src.length < 3 || !e.target.trim()) continue;
+    const re = new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRe(src)}(e?s)?(?=$|[^\\p{L}\\p{N}])`, 'iu');
+    if (re.test(text)) out.push(`${src} → ${e.target.trim()}`);
+  }
+  return out;
+}
