@@ -1,3 +1,4 @@
+import { listLines } from '../translate/listText';
 import type { SfxStyle } from '../translate/profiles';
 import type { Box, TextBlock, TextStyle } from '../types';
 
@@ -57,7 +58,8 @@ export function resolveStyle(block: TextBlock, d: StyleDefaults = DEFAULT_STYLE_
     color: onLight ? d.textColor : '#ffffff',
     strokeColor: inBubble ? null : onLight ? '#ffffff' : '#000000',
     strokeWidth: inBubble ? 0 : 3,
-    alignment: 'center',
+    // A list (a game window, see listLines): items flush left, one per line.
+    alignment: listLines(block.originalText ?? '') && block.translatedText?.includes('\n') ? 'left' : 'center',
     vertical,
     opacity: 1,
     rotation: 0,

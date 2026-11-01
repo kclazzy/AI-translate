@@ -5,6 +5,7 @@ import { CONTEXT_LEVELS, type ContextLevel } from './budget';
 import type { GlossaryEntry, GlossaryHit } from './glossary';
 import type { PromptProfile } from './profiles';
 import { joinLines, jsonData, sanitizeLine } from './parse';
+import { listLines } from './listText';
 import type { LoadedBook } from './phrasebook/books';
 import { findPhrases, PHRASEBOOK_HEADER, PHRASEBOOK_HEADER_EARLIER, phrasebookSection, type PhrasebookSettings } from './phrasebook/match';
 
@@ -145,7 +146,7 @@ export function buildSystemPrompt(input: PromptInput): string {
     `Source language: ${source}. Target language: ${target}.`,
     securityRules(),
     'Translate meaning and tone, not words. Lines must be short enough to fit back into the same speech bubble.',
-    'Text broken over several lines in a bubble is one sentence: translate it as a whole, not line by line. Write every translation on one line, without "\\n" — the typesetter breaks the lines itself.',
+    'Text broken over several lines in a bubble is one sentence: translate it as a whole, not line by line. Write every translation on one line, without "\\n" — the typesetter breaks the lines itself. The one exception is a list from a game or status window (items one per line: «Name: …», «HP: 480», «ATK +10%»): keep one line per item, joined with "\\n".',
     grammarRules(input.targetLang),
     HONORIFICS[p.honorifics],
     NAMES[p.names],
@@ -271,15 +272,17 @@ export interface BlockForTranslation {
 export function textTranslateInstruction(blocks: BlockForTranslation[], hintsByBlock: Record<string, string[]>, context = '', phrasebook = '', glossary = '', names: string[] = [], sounds: string[] = []): string {
   // The speaker's name from the picture is a guess of the vision model (in one chapter it gave the
   // same girl's name to half of all lines): only the gender goes along.
+  // A list (a game window: «Name: …», «HP: 480»): its lines go as they are, each an item of its own.
   const data = blocks.map((b) => ({
     id: b.id,
     type: b.type,
-    text: joinLines(b.text),
+    ...((l) => (l ? { text: l.join('\n'), lines: l.length } : { text: joinLines(b.text) }))(listLines(b.text)),
     ...(b.gender && b.gender !== 'unknown' ? { speakerGender: b.gender } : {}),
     ...(b.joinsNext ? { continuesInNextBlock: true } : {}),
     ...(hintsByBlock[b.id]?.length ? { glossary: hintsByBlock[b.id] } : {}),
   }));
   const joined = blocks.some((b) => b.joinsNext);
+  const lists = data.some((d) => 'lines' in d);
   return [
     ...(glossary ? [glossary, ''] : []),
     ...(context ? [context, ''] : []),
@@ -288,6 +291,7 @@ export function textTranslateInstruction(blocks: BlockForTranslation[], hintsByB
     ...(names.length ? [`Names on this page (people and places): ${names.map((n) => sanitizeLine(n, 40)).join(', ')}. They are names, never words to translate by meaning: transliterate them (or use the spelling in <context>), the same way every time.`, ''] : []),
     'Translate the blocks below. They are listed in reading order and belong to one page: read them all first, as one scene, then translate each so the conversation stays coherent (a sentence may continue in the next bubble).',
     ...(joined ? ['A block marked "continuesInNextBlock" stops mid-sentence and the sentence goes on in the next block: translate the two parts as ONE sentence, then split your translation at a natural point so each block gets its own part, in the same order (never the whole sentence in one block and a repeat or nothing in the other).'] : []),
+    ...(lists ? ['A block with "lines": N is a list from a game or status window (one item per line, e.g. «Name: …», «HP: 480»): translate every line on its own and answer exactly N lines joined with "\\n", in the same order — never one sentence.'] : []),
     'Return JSON: {"translations":[{"id":"b1","text":"translation","type":"DIALOGUE"}],"entities":[],"summary":""} with exactly one entry per input id.',
     'You may correct "type" if it is clearly wrong. ' + TEXT_TYPE_HELP,
     ENTITY_HELP,

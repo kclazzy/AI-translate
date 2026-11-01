@@ -1,3 +1,4 @@
+import { listLines } from './listText';
 import { AppError } from '../errors';
 import type { TextType } from '../types';
 import { TEXT_TYPES } from '../types';
@@ -160,8 +161,10 @@ export function tameRuns(text: string): string {
  * breaks of the original into the text («ПРАВО\\nМЕСТО»), or break lines where the original did.
  * Bubble lines are laid out by the typesetter, so every break becomes a space.
  */
-export function cleanTranslation(value: unknown, maxLen = 1500): string {
+export function cleanTranslation(value: unknown, maxLen = 1500, keepLines = false): string {
   const t = sanitizeText(value, maxLen);
+  // A list (see listLines) keeps one line per item.
+  if (keepLines) return t.replace(/\\+[rn]/g, '\n').split(/\s*[\r\n]+\s*/).map((l) => l.replace(/\s{2,}/g, ' ').trim()).filter(Boolean).join('\n');
   return t.replace(/\\+[rn]/g, ' ').replace(/\s*[\r\n]+\s*/g, ' ').replace(/ {2,}/g, ' ').trim();
 }
 
@@ -282,7 +285,7 @@ export function parseVisionAnswer(raw: string, expectTranslation: boolean, repai
     if (x1 - x0 < 2 || y1 - y0 < 2) continue;
     const text = sanitizeText(b.text, 1000);
     if (!text) continue;
-    const translation = unquote(cleanTranslation(b.translation, 1500), text);
+    const translation = unquote(cleanTranslation(b.translation, 1500, !!listLines(text)), text);
     blocks.push({
       box: [x0, y0, x1, y1],
       text,
@@ -331,7 +334,7 @@ export function parseTranslationAnswer(raw: string, expected: { id: string; text
     if (!byId.has(id) || translations.has(id)) continue;
     // "translation" wins when both are given: a model mixing in the picture-reading format writes
     // the original into "text" and the translation into "translation".
-    const text = cleanTranslation(typeof t.translation === 'string' && t.translation.trim() ? t.translation : t.text, 1500);
+    const text = cleanTranslation(typeof t.translation === 'string' && t.translation.trim() ? t.translation : t.text, 1500, !!listLines(byId.get(id)!));
     if (!text) continue;
     translations.set(id, { text: limitLength(unquote(text, byId.get(id)!), byId.get(id)!), type: t.type ? normalizeType(t.type) : undefined });
   }

@@ -108,7 +108,11 @@ function byCharacter(text: string, lang?: string): boolean {
   return lang === 'ja' || lang === 'zh' || lang === 'zh-TW' || isCjkText(text);
 }
 
+/** Ends a line where the text has a line break of its own (the items of a list, see listLines). */
+const BREAK = '\n';
+
 function tokenize(text: string, lang?: string): string[] {
+  if (text.trim().includes(BREAK)) return text.trim().split(/\s*\n\s*/).flatMap((l, i) => [...(i ? [BREAK] : []), ...tokenize(l, lang)]);
   const clean = text.replace(/\s+/g, ' ').trim();
   if (!clean) return [];
   if (byCharacter(clean, lang)) {
@@ -169,6 +173,10 @@ function tryHorizontal(m: Measurer, input: LayoutInput, size: number, allowHyphe
       const avail = widths[i];
       let line = '';
       while (queue.length) {
+        if (queue[0] === BREAK) {
+          queue.shift();
+          break;
+        }
         const candidate = line ? line + joiner + queue[0] : queue[0];
         if (m.measure(candidate, font) <= avail) {
           line = candidate;

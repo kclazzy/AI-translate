@@ -1,3 +1,4 @@
+import { listLines } from '../translate/listText';
 import { answerSchema } from '../translate/schemas';
 import { remembered } from './memo';
 import { familyFor } from '../llm/catalog';
@@ -668,12 +669,15 @@ function shareOut<T>(items: T[], weights: number[], size: (t: T) => number): T[]
 
 export function splitByGroups(b: TextBlock, groups: Box[], lettering: Lettering | undefined, width: number, height: number): TextBlock[] {
   const weights = groups.map((g) => g[2] * g[3]);
-  let tr = sentences(b.translatedText);
+  // A list (a game window): whole items go to each group, in order, still one per line.
+  const items = listLines(b.originalText);
+  const lines = items && b.translatedText.includes('\n') ? b.translatedText.split('\n') : null;
+  let tr = lines ?? sentences(b.translatedText);
   if (tr.length < groups.length) tr = b.translatedText.split(/\s+/).filter(Boolean);
   if (tr.length < groups.length) return [b];
-  const join = (xs: string[]) => xs.join(' ');
+  const join = (xs: string[]) => xs.join(lines ? '\n' : ' ');
   const trParts = shareOut(tr, weights, (x) => x.length).map(join);
-  let orig = sentences(b.originalText);
+  let orig = lines && items ? items : sentences(b.originalText);
   if (orig.length < groups.length) orig = b.originalText.split(/\s+/).filter(Boolean);
   const origParts = orig.length >= groups.length ? shareOut(orig, weights, (x) => x.length).map(join) : groups.map(() => b.originalText);
   return groups.map((g, i) => {
