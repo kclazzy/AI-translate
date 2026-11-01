@@ -1,5 +1,6 @@
 import { errorMessage } from '@ait/core/errors';
 import { dominantLanguage, nativeName } from '@ait/core/languages';
+import { pagesAhead } from '@ait/core/ahead';
 import type { SerializedError } from '@ait/core/errors';
 import { CANCELLED_ALL, PAGE_PORT, type BackgroundToContent, type ChapterFormat, type ContentToBackground, type ImageRef, type JobStatus, type PageLangs, type RenderedTile, type RenderedTiles, type UiStrings } from '../shared/messages';
 import { Overlay } from './overlay';
@@ -148,6 +149,9 @@ function main() {
     return out;
   }
 
+  /** How long the model took for the last pictures of this page (not from the cache): how far to translate ahead. */
+  const recentMs: number[] = [];
+
   function showResult(it: Item, result: RenderedTiles) {
     if (result.tilesOmitted) {
       it.status = 'working';
@@ -163,6 +167,10 @@ function main() {
     }
     it.status = 'done';
     it.tileCount = result.tiles.length;
+    if (!result.cached && result.page.timings?.totalMs) {
+      recentMs.push(result.page.timings.totalMs);
+      if (recentMs.length > 10) recentMs.shift();
+    }
     it.overlay.setTiles(result.tiles, langsOf(result));
     if (!it.docRect) far.observe(it.cand.el);
     // The overlay keeps its own copies of the pictures; holding the base64 tiles too would
@@ -1267,8 +1275,37 @@ ${chapterStats(list)}`;
           if (r.bottom > -innerHeight && r.top < innerHeight * 2.5) void translate(c);
         }
       }
+      if (!pageMode) translateAhead();
     }, 250);
   }
+
+  // ---- translate ahead: the next pictures below the screen, by how long the model takes ---------
+  // The observer above starts the pictures within 1.5 screens; with a slow (local) model the reader
+  // catches up anyway. The next few pictures of the chapter's column below the screen are queued
+  // too (far ones get a low priority, so what comes on screen goes first).
+  let aheadTimer: ReturnType<typeof setTimeout> | null = null;
+  function translateAhead() {
+    if (aheadTimer) return;
+    aheadTimer = setTimeout(() => {
+      aheadTimer = null;
+      if (!autoTranslate || pageMode || !enabled || dead || document.hidden) return;
+      const found = withoutThumbnails([...document.images].flatMap((el) => {
+        const c = dismissed.has(el) ? null : asCandidate(el, minSize);
+        return c ? [c] : [];
+      }));
+      const below = chapterColumn(found)
+        .map((c) => ({ c, top: c.el.getBoundingClientRect().top }))
+        .filter((x) => x.top >= innerHeight)
+        .sort((a, b) => a.top - b.top);
+      let n = pagesAhead(recentMs);
+      for (const { c } of below) {
+        if (n-- <= 0) break;
+        const id = byElement.get(c.el);
+        if (!id || !items.has(id)) void translate(c);
+      }
+    }, 700);
+  }
+  addEventListener('scroll', translateAhead, { passive: true });
 
   // Back in front: the pictures in view that waited get their turn.
   document.addEventListener('visibilitychange', () => {
