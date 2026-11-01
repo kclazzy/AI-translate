@@ -133,16 +133,8 @@ export const JOURNAL_MAX = 600;
 export const RECENT_KEEP_MS = 12 * 3_600_000;
 
 /** Series key used to share a translation context between pages of the same manga. */
-export function seriesKeyFromUrl(url: string | undefined): string | undefined {
-  if (!url) return undefined;
-  try {
-    const u = new URL(url);
-    const parts = u.pathname.split('/').filter(Boolean).slice(0, 2);
-    return `${u.hostname}/${parts.join('/')}`;
-  } catch {
-    return undefined;
-  }
-}
+export { seriesKeyFromUrl } from './series';
+import { seriesKeyFromUrl } from './series';
 
 /**
  * Glue between settings, secrets, cache, history and the pipeline. Both the
