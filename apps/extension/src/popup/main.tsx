@@ -3,7 +3,7 @@ import '@ait/core/i18n/all';
 let saving: Promise<unknown> = Promise.resolve();
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { aiModesAvailable, applyAiMode, applyOcrTranslator, translatorLang, translatorPairs, BROWSER_TRANSLATOR_ID, browserTranslateSupported, applyPreset, checkReadiness, EngineClient, gpuShare, isOllama, LANGUAGES, modelTiers, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, profilesForLanguage, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
+import { aiModesAvailable, applyAiMode, applyOcrTranslator, translatorLang, translatorPairs, BROWSER_TRANSLATOR_ID, browserTranslateSupported, applyPreset, checkReadiness, EngineClient, gpuShare, isOllama, modelTiers, nativeName, providerById as pById, ollamaLoaded, ollamaUnloadAll, providerById, type AppSettings, type LoadedModel, type UsageTotals } from '@ait/core';
 import '@ait/studio/styles.css';
 import { loadBundledFonts } from '@ait/studio/fonts';
 import { ModelCheckCard, ModelPicker, UpdateCheck } from '@ait/studio/model-picker';
@@ -414,19 +414,6 @@ function Popup() {
       ) : null}
 
       <div className="pp-grid">
-        <label className="ait-field">
-          <span>{tr('Язык перевода')}</span>
-          <select className="ait-select" value={s.targetLang} onChange={(e) => update({ targetLang: e.target.value, profiles: profilesForLanguage(s.profiles, s.targetLang, e.target.value) })}>
-            {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
-          </select>
-        </label>
-        <label className="ait-field">
-          <span>{tr('Исходный')}</span>
-          <select className="ait-select" value={s.sourceLang} onChange={(e) => update({ sourceLang: e.target.value })}>
-            <option value="auto">{tr('Авто')}</option>
-            {LANGUAGES.filter((l) => ['ja', 'ko', 'zh', 'zh-TW', 'en'].includes(l.code)).map((l) => <option key={l.code} value={l.code}>{l.native}</option>)}
-          </select>
-        </label>
         <label className="ait-field">
           <span>{tr('Профиль')}</span>
           <select className="ait-select" value={s.activeProfileId} onChange={(e) => update({ activeProfileId: e.target.value })}>
