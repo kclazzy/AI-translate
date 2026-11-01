@@ -100,6 +100,9 @@ const CASES: { name: string; s: Spec; box?: 'tight' | 'loose' | 'bubble' | 'art'
   { name: 'cut by the bottom edge, box = whole bubble', s: { W: 507, H: 340, cx: 255, cy: 300, rx: 250, ry: 160, lines: ['WHAT OVERWATCH DID FOR', 'ME WHEN I FIRST', 'CAME TO EARTH.'], textTop: 200, size: 24 }, box: 'bubble' },
   { name: 'model box reaching into the art above', s: { W: 507, H: 340, cx: 255, cy: 300, rx: 250, ry: 160, lines: ['WHAT OVERWATCH DID FOR', 'ME WHEN I FIRST', 'CAME TO EARTH.'], textTop: 200, size: 24 }, box: 'art' },
   { name: 'bubble crossing the bottom of a tall strip piece', s: { W: 700, H: 1300, cx: 350, cy: 1230, rx: 300, ry: 170, lines: ['WHAT OVERWATCH DID FOR', 'ME WHEN I FIRST', 'CAME TO EARTH.'], textTop: 1120, size: 28 } },
+  // The site's cut runs through a line of lettering: only the top half of its letters is in this picture.
+  { name: 'a line of letters cut in half by the bottom edge', s: { W: 507, H: 340, cx: 255, cy: 300, rx: 250, ry: 160, lines: ['WHAT OVERWATCH DID FOR', 'ME WHEN I FIRST', 'CAME TO EARTH.'], textTop: 268, size: 24 } },
+  { name: 'a line of letters cut in half by the bottom edge, loose model box', s: { W: 507, H: 340, cx: 255, cy: 300, rx: 250, ry: 160, lines: ['WHAT OVERWATCH DID FOR', 'ME WHEN I FIRST', 'CAME TO EARTH.'], textTop: 268, size: 24 }, box: 'loose' },
   // The lower half of a bubble the site cut: the top edge of the picture closes it.
   { name: 'cut by the top edge, loose model box', s: { W: 507, H: 340, cx: 255, cy: 30, rx: 250, ry: 160, lines: ['WHAT OVERWATCH DID FOR', 'ME WHEN I FIRST', 'CAME TO EARTH.'], textTop: 20, size: 24 }, box: 'loose' },
 ];
@@ -110,7 +113,7 @@ describe('round bubble cut by the edge of the picture over colourful art', () =>
       const s = c.s;
       const tb = page(s).textBox;
       const box: [number, number, number, number] =
-        c.box === 'loose' ? [tb[0] - 30, tb[1] - 40, tb[2] + 60, tb[3] + 60] : c.box === 'art' ? [tb[0] - 30, 60, tb[2] + 60, tb[1] + tb[3] + 10 - 60] : c.box === 'bubble' ? [s.cx - s.rx + 10, s.cy - s.ry + 10, s.rx * 2 - 20, s.H - (s.cy - s.ry) - 10] : [tb[0] - 4, tb[1] - 4, tb[2] + 8, tb[3] + 8];
+        c.box === 'loose' ? [tb[0] - 30, tb[1] - 40, tb[2] + 60, Math.min(tb[3] + 60, s.H - tb[1] + 40)] : c.box === 'art' ? [tb[0] - 30, 60, tb[2] + 60, tb[1] + tb[3] + 10 - 60] : c.box === 'bubble' ? [s.cx - s.rx + 10, s.cy - s.ry + 10, s.rx * 2 - 20, s.H - (s.cy - s.ry) - 10] : [tb[0] - 4, tb[1] - 4, tb[2] + 8, tb[3] + 8];
       const { p, out } = await run(s, box);
       const after = out.cleaned.getRegion(0, 0, s.W, s.H).data;
       const slug = c.name.replace(/[^a-z]+/gi, '-');
@@ -127,7 +130,7 @@ describe('round bubble cut by the edge of the picture over colourful art', () =>
       expect(artChanged(s, p.data, after)).toBeLessThan(150);
       // The lettering is gone.
       let dark = 0;
-      for (let y = tb[1]; y < tb[1] + tb[3]; y++) for (let x = tb[0]; x < tb[0] + tb[2]; x++) if (luminance(after[(y * s.W + x) * 4], after[(y * s.W + x) * 4 + 1], after[(y * s.W + x) * 4 + 2]) < 90) dark++;
+      for (let y = tb[1]; y < Math.min(s.H, tb[1] + tb[3]); y++) for (let x = tb[0]; x < tb[0] + tb[2]; x++) if (luminance(after[(y * s.W + x) * 4], after[(y * s.W + x) * 4 + 1], after[(y * s.W + x) * 4 + 2]) < 90) dark++;
       expect(dark).toBeLessThan(20);
       // Dark letters on the white bubble: the translation is dark, without a thick light/dark outline.
       const b = out.page.blocks[0];

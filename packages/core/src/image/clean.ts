@@ -571,10 +571,21 @@ export function cropMask(mask: Uint8Array, width: number, box: Box): Uint8Array 
   return out;
 }
 
-/** Pixels not in `region` that are fully enclosed by it (the glyphs inside a bubble). */
-export function enclosedHoles(region: Uint8Array, width: number, height: number, within: Box): Uint8Array {
+/** The sides of `within` that are the picture's own edge cutting a bubble: they close it like its outline. */
+export interface Walls {
+  top?: boolean;
+  bottom?: boolean;
+  left?: boolean;
+  right?: boolean;
+}
+
+/**
+ * Pixels not in `region` that are fully enclosed by it (the glyphs inside a bubble). A side in
+ * `walls` closes the region too: letters cut in half by the picture's edge are glyphs as well.
+ */
+export function enclosedHoles(region: Uint8Array, width: number, height: number, within: Box, walls: Walls = {}): Uint8Array {
   const [bx, by, bw, bh] = within;
-  const outside = outsideOf(region, width, height, within);
+  const outside = outsideOf(region, width, height, within, walls);
   const holes = new Uint8Array(width * height);
   for (let y = by; y < by + bh; y++) {
     for (let p = y * width + bx, end = p + bw; p < end; p++) if (!region[p] && !outside[p]) holes[p] = 1;
@@ -583,14 +594,20 @@ export function enclosedHoles(region: Uint8Array, width: number, height: number,
 }
 
 /** Pixels not in `region` reached from the border of `within` without crossing it (4-connected). */
-function outsideOf(region: Uint8Array, width: number, height: number, within: Box): Uint8Array {
+function outsideOf(region: Uint8Array, width: number, height: number, within: Box, walls: Walls = {}): Uint8Array {
   const [bx, by, bw, bh] = within;
   const outside = new Uint8Array(width * height);
   const open = (p: number) => !region[p] && !outside[p];
   // Scanline fill of the outside from the border of `within` (4-connected, inside `within` only).
   const seeds: number[] = [];
-  for (let x = bx; x < bx + bw; x++) seeds.push(by * width + x, (by + bh - 1) * width + x);
-  for (let y = by; y < by + bh; y++) seeds.push(y * width + bx, y * width + bx + bw - 1);
+  for (let x = bx; x < bx + bw; x++) {
+    if (!walls.top) seeds.push(by * width + x);
+    if (!walls.bottom) seeds.push((by + bh - 1) * width + x);
+  }
+  for (let y = by; y < by + bh; y++) {
+    if (!walls.left) seeds.push(y * width + bx);
+    if (!walls.right) seeds.push(y * width + bx + bw - 1);
+  }
   while (seeds.length) {
     const p = seeds.pop()!;
     if (!open(p)) continue;
@@ -1461,7 +1478,19 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
     let closedHoles: Uint8Array | null = null;
     if (closed) {
       // Everything enclosed by the bubble interior is lettering.
-      const holes = enclosedHoles(flood!.mask, img.width, img.height, clampBox(expandBox(flood!.box, 1), img.width, img.height));
+      // The picture's own edge cutting the bubble (a site's cut through a line of letters) closes it.
+      const inside = clampBox(expandBox(flood!.box, 1), img.width, img.height);
+      const fb = flood!.box;
+      const walls: Walls = {
+        top: fb[1] === 0 && region[1] === 0,
+        bottom: fb[1] + fb[3] === img.height && region[1] + img.height >= image.height,
+        left: fb[0] === 0 && region[0] === 0,
+        right: fb[0] + fb[2] === img.width && region[0] + img.width >= image.width,
+      };
+      const holes = enclosedHoles(flood!.mask, img.width, img.height, inside);
+      // Letters cut in half by that edge: erased with the rest, but not lettering of this block
+      // (their line belongs to the neighbour picture's text too; the seam is read as one band).
+      const cut = walls.top || walls.bottom || walls.left || walls.right ? enclosedHoles(flood!.mask, img.width, img.height, inside, walls) : null;
       closedHoles = holes;
       mask = holes.slice();
       const near = clampBox(expandBox(local, 3), img.width, img.height);
@@ -1488,9 +1517,11 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       }
       tb = maskBounds(mask, iw, ih);
       letterMask = mask.slice();
-      mask = dilateIn(mask, iw, ih, 2, tb && expandBox(tb, 2));
+      if (cut) for (let i = 0; i < mask.length; i++) if (cut[i] && !holes[i]) mask[i] = 1;
+      const all = cut ? maskBounds(mask, iw, ih) : tb;
+      mask = dilateIn(mask, iw, ih, 2, all && expandBox(all, 2));
       // Never paint outside the bubble interior (keeps the outline intact).
-      for (let i = 0; i < mask.length; i++) if (mask[i] && !holes[i] && !interior(i)) mask[i] = 0;
+      for (let i = 0; i < mask.length; i++) if (mask[i] && !holes[i] && !cut?.[i] && !interior(i)) mask[i] = 0;
     } else {
       // Open flat space (white gutter, narration box): erase the letters around the box.
       // Letters sit in the bubble's white: keep only components lying (almost) entirely next to
