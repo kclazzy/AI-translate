@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { tr, uiLocale } from '@ait/core/i18n';
 import { usePlatform } from '../platform';
-import { groupHistory, type SiteFolder } from './chapters';
+import { groupHistory, type SeriesFolder } from './chapters';
 import { confirmLeave } from './guard';
 
 /**
@@ -11,14 +11,14 @@ import { confirmLeave } from './guard';
 export function ChaptersPanel({ currentKey, onOpen }: { currentKey: string; onOpen: (keys: string[]) => void }) {
   const platform = usePlatform();
   const [open, setOpen] = useState(false);
-  const [sites, setSites] = useState<SiteFolder[] | null>(null);
+  const [sites, setSites] = useState<SeriesFolder[] | null>(null);
   useEffect(() => {
     if (open) void platform.service.history(1000).then((h) => setSites(groupHistory(h)));
   }, [open, platform]);
   const mine = sites?.find((s) => s.chapters.some((c) => c.keys.includes(currentKey)));
   return (
     <span style={{ position: 'relative' }}>
-      <button className={`ait-btn small ${open ? 'active' : ''}`} aria-expanded={open} onClick={() => setOpen(!open)} data-testid="chapters-button" title={tr('Переведённые главы по сайтам: открыть другую, не выходя из редактора')}>
+      <button className={`ait-btn small ${open ? 'active' : ''}`} aria-expanded={open} onClick={() => setOpen(!open)} data-testid="chapters-button" title={tr('Переведённые главы по сериям: открыть другую, не выходя из редактора')}>
         {tr('Главы')}
       </button>
       {open ? (
@@ -26,9 +26,9 @@ export function ChaptersPanel({ currentKey, onOpen }: { currentKey: string; onOp
           {!sites ? <p className="ait-muted">{tr('Загрузка…')}</p> : null}
           {sites && !sites.length ? <p className="ait-muted">{tr('История пуста: переведённые главы появятся здесь.')}</p> : null}
           {sites?.map((s) => (
-            <details key={s.site} open={s === mine || sites.length === 1}>
+            <details key={s.key} open={s === mine || sites.length === 1}>
               <summary>
-                <b>{s.site || tr('Открытые в студии')}</b> <small className="ait-muted">({s.chapters.length})</small>
+                <b>{s.name}</b> <small className="ait-muted">{s.site ? `${s.site} · ` : ''}({s.chapters.length})</small>
               </summary>
               <ul>
                 {s.chapters.map((c) => {
@@ -39,7 +39,7 @@ export function ChaptersPanel({ currentKey, onOpen }: { currentKey: string; onOp
                         className={`pp-link ${here ? 'current' : ''}`}
                         aria-current={here ? 'page' : undefined}
                         disabled={here}
-                        title={c.url}
+                        title={c.title || c.url}
                         onClick={() =>
                           void confirmLeave().then((ok) => {
                             if (!ok) return;
@@ -48,7 +48,7 @@ export function ChaptersPanel({ currentKey, onOpen }: { currentKey: string; onOp
                           })
                         }
                       >
-                        {c.title}
+                        {c.number !== undefined ? tr('Глава {0}', c.number) : c.title}
                       </button>{' '}
                       <small className="ait-muted">
                         {tr('{0} стр.', c.pages)} · {new Date(c.last).toLocaleDateString(uiLocale())}

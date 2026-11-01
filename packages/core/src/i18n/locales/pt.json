@@ -1409,5 +1409,6 @@
  "{0} стр.": "{0} pág.",
  "История пуста: переведённые главы появятся здесь.": "O histórico está vazio: os capítulos traduzidos aparecerão aqui.",
  "Открытые в студии": "Abertos no estúdio",
- "Переведённые главы по сайтам: открыть другую, не выходя из редактора": "Capítulos traduzidos por site: abra outro sem sair do editor"
+ "Глава {0}": "Capítulo {0}",
+ "Переведённые главы по сериям: открыть другую, не выходя из редактора": "Capítulos traduzidos por série: abra outro sem sair do editor"
 }
