@@ -568,7 +568,15 @@ function main() {
       });
       if (!next) break;
       const known = byElement.get(next.el);
-      if (known && items.has(known)) break;
+      const k = known ? items.get(known) : undefined;
+      if (k) {
+        // Sent on its own and still waiting: it goes along with this one (its own job is called off).
+        const p = await takeAlong(k, priority);
+        if (!p) break;
+        out.push(p);
+        cur = next.el.getBoundingClientRect();
+        continue;
+      }
       const id = idFor(next.el);
       const overlay = makeOverlay(next, id);
       const item: Item = { id, req: `${id}~${(reqSeq++).toString(36)}`, cand: next, src: next.src, status: 'queued', overlay, shown: shownIdentity(next) };
@@ -589,6 +597,40 @@ function main() {
     return out;
   }
 
+  /**
+   * A picture sent on its own that has not started yet, taken into the job being sent now (its own
+   * job is called off): the two go to the model glued where a bubble crosses their seam, instead of
+   * each half alone and a repair afterwards. Not one in work, done, or part of another group.
+   */
+  async function takeAlong(k: Item, priority: number): Promise<Pending | null> {
+    if (k.status !== 'queued' || !k.sentAt || k.group || k.docRect || k.cand.kind !== 'img' || dead) return null;
+    const old = k.req ?? k.id;
+    try {
+      const req = `${k.id}~${(reqSeq++).toString(36)}`;
+      const image: ImageRef = { id: req, kind: k.cand.kind, src: k.cand.src, dataUrl: await inlineData(k.cand), rect: viewportRect(k.cand.el), dpr: devicePixelRatio };
+      if (image.dataUrl) image.src = undefined;
+      // Started meanwhile (a stage came in): leave it.
+      if (k.status !== 'queued') return null;
+      void send({ type: 'cancel', id: old }).catch(() => undefined);
+      k.req = req;
+      k.sentAt = undefined;
+      return { item: k, image, priority };
+    } catch {
+      return null;
+    }
+  }
+
+  /** The picture right above `first` in its column, sent on its own and still waiting: taken along. */
+  async function neighbourAbove(first: Candidate, priority: number): Promise<Pending | null> {
+    const r0 = first.el.getBoundingClientRect();
+    for (const it of items.values()) {
+      if (it.docRect || it.cand.kind !== 'img' || it.cand.el === first.el) continue;
+      const r = it.cand.el.getBoundingClientRect();
+      if (r.height > 0 && stackedBelow(r, r0)) return takeAlong(it, priority);
+    }
+    return null;
+  }
+
   async function flushStrip() {
     stripTimer = null;
     const list = strip.filter((p) => items.get(p.item.id) === p.item);
@@ -597,8 +639,9 @@ function main() {
       const priority = Math.min(...own.map((p) => p.priority));
       const force = own.some((p) => p.force);
       const redraw = own.every((p) => p.redraw) || undefined;
+      const above = redraw ? null : await neighbourAbove(own[0].item.cand, priority);
       const ahead = redraw ? [] : await neighboursBelow(own[own.length - 1].item.cand, priority);
-      const g = [...own, ...ahead];
+      const g = [...(above ? [above] : []), ...own, ...ahead];
       const msg: ContentToBackground =
         g.length > 1
           ? { type: 'translate-strip', images: g.map((p) => p.image), pageUrl: location.href, title: document.title, priority, force, redraw, ...(ahead.length ? { ahead: ahead.length } : {}) }
