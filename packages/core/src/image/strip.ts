@@ -19,6 +19,9 @@ export interface StripPart {
 export interface PartSpan {
   y: number;
   h: number;
+  /** A picture narrower than the strip, centred in it: where it starts and its own width. */
+  x?: number;
+  w?: number;
 }
 
 /** A chunk is cut here at the latest, and preferably once it is this tall at a calm seam. */
@@ -145,28 +148,28 @@ export async function stitchParts(backend: ImageBackend, parts: StripPart[]): Pr
   return { image, spans: plan.spans, calmAfter: plan.calmAfter };
 }
 
-/** Cut a horizontal band out of a tiled image. */
-export function cropRows(image: TiledImage, y: number, h: number): TiledImage {
-  const out = new TiledImage(image.backend, image.width, h);
+/** Cut a horizontal band out of a tiled image (and, for a narrower picture in it, its columns). */
+export function cropRows(image: TiledImage, y: number, h: number, x = 0, w = image.width): TiledImage {
+  const out = new TiledImage(image.backend, w, h);
   for (const t of out.tiles) {
     const ctx = t.canvas.getContext('2d');
     for (const s of image.tiles) {
       if (s.y + s.h <= y + t.y || s.y >= y + t.y + t.h) continue;
-      ctx.drawImage(s.canvas, 0, s.y - y - t.y);
+      ctx.drawImage(s.canvas, -x, s.y - y - t.y);
     }
   }
   return out;
 }
 
-const shiftBox = (b: Box, dy: number): Box => [b[0], b[1] - dy, b[2], b[3]];
+const shiftBox = (b: Box, dy: number, dx: number): Box => [b[0] - dx, b[1] - dy, b[2], b[3]];
 
-/** Move a block up by `dy` pixels (into the coordinates of one picture). */
-export function shiftBlock(b: TextBlock, dy: number): TextBlock {
-  const out: TextBlock = { ...b, bbox: shiftBox(b.bbox, dy), polygon: b.polygon.map(([x, y]) => [x, y - dy] as [number, number]) };
-  if (b.textBox) out.textBox = shiftBox(b.textBox, dy);
+/** Move a block up by `dy` (and left by `dx`) pixels: into the coordinates of one picture. */
+export function shiftBlock(b: TextBlock, dy: number, dx = 0): TextBlock {
+  const out: TextBlock = { ...b, bbox: shiftBox(b.bbox, dy, dx), polygon: b.polygon.map(([x, y]) => [x - dx, y - dy] as [number, number]) };
+  if (b.textBox) out.textBox = shiftBox(b.textBox, dy, dx);
   if (b.bubble) {
-    out.bubble = { ...b.bubble, box: shiftBox(b.bubble.box, dy), safeArea: shiftBox(b.bubble.safeArea, dy) };
-    if (b.bubble.rows) out.bubble.rows = { ...b.bubble.rows, y: b.bubble.rows.y - dy };
+    out.bubble = { ...b.bubble, box: shiftBox(b.bubble.box, dy, dx), safeArea: shiftBox(b.bubble.safeArea, dy, dx) };
+    if (b.bubble.rows) out.bubble.rows = { ...b.bubble.rows, y: b.bubble.rows.y - dy, l: b.bubble.rows.l.map((v) => v - dx), r: b.bubble.rows.r.map((v) => v - dx) };
   }
   return out;
 }
@@ -190,7 +193,7 @@ export function pageForSpan(page: PageResult, span: PartSpan, index: number): Pa
     const reaches = box[1] < span.y + span.h && box[1] + box[3] > span.y;
     if (!own && !reaches) continue;
     const { continued: _continued, ...rest } = b;
-    blocks.push(shiftBlock(own ? rest : { ...rest, continued: true }, span.y));
+    blocks.push(shiftBlock(own ? rest : { ...rest, continued: true }, span.y, span.x ?? 0));
   }
-  return { ...page, stripLang: dominantLanguage(page.blocks.map((b) => b.language)), pageId: `${page.pageId}~${index}`, height: span.h, blocks, usage: index === 0 ? page.usage : [] };
+  return { ...page, stripLang: dominantLanguage(page.blocks.map((b) => b.language)), pageId: `${page.pageId}~${index}`, width: span.w ?? page.width, height: span.h, blocks, usage: index === 0 ? page.usage : [] };
 }

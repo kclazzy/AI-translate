@@ -6,6 +6,7 @@ import { ErrorBox } from '../ui';
 import { Editor } from './Editor';
 import { confirmLeave } from './guard';
 import { tr } from '@ait/core/i18n';
+import { planStack, type Skipped } from './stack';
 
 interface Loaded {
   page: PageResult;
@@ -17,6 +18,9 @@ interface Segment {
   key: string;
   y: number;
   h: number;
+  /** A narrower picture is centred in the strip: where it starts, and its own width. */
+  x: number;
+  w: number;
   pageId: string;
   usage: PageResult['usage'];
 }
@@ -27,12 +31,7 @@ async function editableKey(service: ReturnType<typeof usePlatform>['service'], k
   return r?.strip?.parent ?? key;
 }
 
-/** A picture of the chapter that is not in the whole-chapter strip, and why. */
-export interface Skipped {
-  /** Its number in the chapter (1-based). */
-  n: number;
-  why: 'missing' | 'width' | 'window';
-}
+export type { Skipped };
 
 /**
  * Pixels of one whole-chapter strip (original + cleaned copies are held, ≈ 8 bytes a pixel): about
@@ -61,37 +60,21 @@ async function loadStack(platform: ReturnType<typeof usePlatform>, keys: string[
     else skipped.push({ n: i + 1, why: 'missing' });
   }
   if (!metas.length) throw new Error(tr('Перевод не найден в кэше — переведите страницу ещё раз'));
-  const mainAt = Math.max(0, metas.findIndex((x) => x.key === mainKey));
-  const width = metas[mainAt].width;
-  for (const x of metas) if (x.width !== width) skipped.push({ n: x.n, why: 'width' });
-  // The pages of this width, the opened one and its neighbours while they fit.
-  const same = metas.filter((x) => x.width === width);
-  let lo = same.findIndex((x) => x.key === metas[mainAt].key);
-  let hi = lo;
-  let px = width * same[lo].height;
-  const limit = stackMaxPixels();
-  for (let grew = true; grew; ) {
-    grew = false;
-    for (const side of [1, -1]) {
-      const j = side > 0 ? hi + 1 : lo - 1;
-      if (j < 0 || j >= same.length || px + width * same[j].height > limit) continue;
-      px += width * same[j].height;
-      if (side > 0) hi = j;
-      else lo = j;
-      grew = true;
-    }
-  }
-  for (const [j, x] of same.entries()) if (j < lo || j > hi) skipped.push({ n: x.n, why: 'window' });
+  const plan = planStack(metas, mainKey, stackMaxPixels());
+  skipped.push(...plan.skipped);
   skipped.sort((a, b) => a.n - b.n);
-  const chosen = same.slice(lo, hi + 1);
-  const segments: Segment[] = [];
-  let y = 0;
-  for (const m of chosen) {
-    segments.push({ key: m.key, y, h: m.height, pageId: m.pageId, usage: m.usage });
-    y += m.height;
-  }
+  const { width, chosen } = plan;
+  const segments: Segment[] = chosen.map((m) => ({ key: m.key, y: m.y, h: m.height, x: m.x, w: m.width, pageId: m.pageId, usage: m.usage }));
+  const y = chosen.reduce((a, m) => a + m.height, 0);
   const original = new TiledImage(platform.backend, width, y);
   const cleaned = new TiledImage(platform.backend, width, y);
+  // Beside a narrower picture: neutral grey (not part of any page; cut off when saved).
+  if (chosen.some((m) => m.x > 0))
+    for (const t of [...original.tiles, ...cleaned.tiles]) {
+      const ctx = t.canvas.getContext('2d');
+      ctx.fillStyle = '#808080';
+      ctx.fillRect(0, 0, width, t.h);
+    }
   const blocks = [];
   let first: PageResult | undefined;
   for (const [i, m] of chosen.entries()) {
@@ -100,18 +83,18 @@ async function loadStack(platform: ReturnType<typeof usePlatform>, keys: string[
     if (!r) continue;
     first ??= r.page;
     const o = await platform.backend.decode(r.original.bytes, r.original.mime);
-    for (const t of original.tiles) if (t.y < s.y + s.h && t.y + t.h > s.y) t.canvas.getContext('2d').drawImage(o.source, 0, 0, o.width, o.height, 0, s.y - t.y, width, s.h);
+    for (const t of original.tiles) if (t.y < s.y + s.h && t.y + t.h > s.y) t.canvas.getContext('2d').drawImage(o.source, 0, 0, o.width, o.height, s.x, s.y - t.y, s.w, s.h);
     o.close?.();
     for (const c of r.cleaned) {
       const img = await platform.backend.decode(c.bytes, 'image/png');
-      for (const t of cleaned.tiles) if (t.y < s.y + c.y + c.h && t.y + t.h > s.y + c.y) t.canvas.getContext('2d').drawImage(img.source, 0, s.y + c.y - t.y);
+      for (const t of cleaned.tiles) if (t.y < s.y + c.y + c.h && t.y + t.h > s.y + c.y) t.canvas.getContext('2d').drawImage(img.source, s.x, s.y + c.y - t.y);
       img.close?.();
     }
     // A block repeated in this picture only because its text crosses the seam belongs to its neighbour:
     // in the strip the neighbour's own block is there, so the copy is left out.
-    blocks.push(...r.page.blocks.filter((b) => chosen.length === 1 || !(b as TextBlock & { continued?: boolean }).continued).map((b) => ({ ...shiftBlock(b, -s.y), id: `${i}:${b.id}` })));
+    blocks.push(...r.page.blocks.filter((b) => chosen.length === 1 || !(b as TextBlock & { continued?: boolean }).continued).map((b) => ({ ...shiftBlock(b, -s.y, -s.x), id: `${i}:${b.id}` })));
   }
-  const page: PageResult = { ...first!, height: y, blocks, usage: chosen.flatMap((m) => m.usage) };
+  const page: PageResult = { ...first!, width, height: y, blocks, usage: chosen.flatMap((m) => m.usage) };
   return { page, original, cleaned, segments, skipped, title: chosen[0].title };
 }
 
@@ -237,7 +220,7 @@ export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose }: 
           const touched = !!pixels && (!rows || rows.some(([a, b]) => a < s.y + s.h && b > s.y));
           const sig = JSON.stringify(own.blocks);
           if (data.segments.length > 1 && !touched && saved.current.get(s.key) === sig) continue;
-          await platform.service.saveEdited(s.key, own, touched ? cropRows(cleaned, s.y, s.h) : undefined);
+          await platform.service.saveEdited(s.key, own, touched ? cropRows(cleaned, s.y, s.h, s.x, s.w) : undefined);
           saved.current.set(s.key, sig);
           await changed(s.key);
         }

@@ -178,4 +178,30 @@ describe('strip pieces', () => {
     expect(bottom.blocks.map((b) => [b.id, !!b.continued])).toEqual([['a', false]]);
     expect(bottom.blocks[0].textBox).toEqual([100, -60, 200, 200]);
   });
+
+  it('a narrower picture centred in a wider strip gets its blocks back in its own coordinates and width', () => {
+    const p = page([block('a', [140, 1100, 200, 80])]);
+    const part = pageForSpan(p, { y: 1000, h: 1000, x: 40, w: 720 }, 1);
+    expect(part.width).toBe(720);
+    expect(part.blocks[0].bbox).toEqual([100, 100, 200, 80]);
+  });
+
+  it('the narrower picture’s own pixels are cut out of the strip (the grey beside it is not saved)', async () => {
+    const { TiledImage } = await import('../src/image/tiled');
+    const { cropRows } = await import('../src/image/strip');
+    const { napiBackend } = await import('./helpers');
+    const strip = new TiledImage(napiBackend, 800, 300);
+    for (const t of strip.tiles) {
+      const ctx = t.canvas.getContext('2d');
+      ctx.fillStyle = '#808080';
+      ctx.fillRect(0, 0, 800, t.h);
+      ctx.fillStyle = '#ff0000';
+      ctx.fillRect(40, 0, 720, t.h);
+    }
+    const part = cropRows(strip, 100, 100, 40, 720);
+    expect([part.width, part.height]).toEqual([720, 100]);
+    const px = part.getRegion(0, 0, 720, 1).data;
+    expect([px[0], px[1], px[2]]).toEqual([255, 0, 0]);
+    expect([px[719 * 4], px[719 * 4 + 1]]).toEqual([255, 0]);
+  });
 });
