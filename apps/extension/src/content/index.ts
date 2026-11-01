@@ -533,7 +533,7 @@ function main() {
     const groups: Pending[][] = [];
     let prev: (typeof sorted)[number] | null = null;
     for (const cur of sorted) {
-      const joins = !!prev && stackedBelow(prev.r, cur.r);
+      const joins = !!prev && stackedBelow(prev.r, cur.r, 'touching');
       if (joins) groups[groups.length - 1].push(cur.p);
       else groups.push([cur.p]);
       prev = cur;
@@ -1079,7 +1079,15 @@ function main() {
     // Finish only after the whole chapter was scrolled through (its last pages load late).
     if (list.length && ((pending === 0 && c.loaded) || stalled)) {
       clearInterval(c.timer);
-      const keys = list.filter((it) => it.status === 'done' && it.result).map((it) => it.result!.key);
+      const doneItems = list.filter((it) => it.status === 'done' && it.result);
+      const keys = doneItems.map((it) => it.result!.key);
+      // How the pictures stand on the site (for the analysis pack: are the slices of a strip touching?).
+      const layout = doneItems.map((it, i) => {
+        if (i === 0 || it.docRect || doneItems[i - 1].docRect) return null;
+        const a = doneItems[i - 1].cand.el.getBoundingClientRect();
+        const b = it.cand.el.getBoundingClientRect();
+        return { gap: Math.round(b.top - a.bottom), sameColumn: Math.abs(a.left - b.left) <= 2 && Math.abs(a.width - b.width) <= 2 };
+      });
       if (!keys.length) {
         c.text.textContent = tr('Ни одна картинка не переведена — файл не создан.');
         chapter = null;
@@ -1088,7 +1096,7 @@ function main() {
       }
       c.text.textContent = tr('Собираю {0}: {1} стр.…', label, keys.length);
       try {
-        const r = await send<{ ok: boolean; name: string; pages: number; error?: { detail?: string } }>({ type: 'build-download', keys, title: document.title, format: c.format });
+        const r = await send<{ ok: boolean; name: string; pages: number; error?: { detail?: string } }>({ type: 'build-download', keys, title: document.title, format: c.format, ...(c.format === 'analysis' ? { layout } : {}) });
         if (!r?.ok) throw new Error(r?.error?.detail ?? tr('не удалось собрать файл'));
         c.text.textContent = `${tr('Скачано: {0}{1}', r.name, failed ? tr(' (без {0} непереведённых картинок)', failed) : '')}
 ${tr('Затрачено времени: {0}', fmtElapsed(Date.now() - c.startedAt))}

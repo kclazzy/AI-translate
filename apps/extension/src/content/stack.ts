@@ -1,9 +1,10 @@
 /**
- * Is `lower` the next slice of the same strip under `upper` (same column, same width, right below)?
- * Sites cut a webtoon into slices and often leave a small gap between them (margins, the line
- * height under inline pictures): up to 32 px or 4 % of the width counts as touching. Whether a
- * bubble really crosses the seam is decided from the pixels later (the strip's calm seams).
- * One rule for gluing the pictures sent together and for repairing a seam afterwards.
+ * Is `lower` right under `upper` in the same column (same left edge and width)?
+ * - `touching` (gap up to 6 px): pictures sent together are glued into one strip job;
+ * - `near` (gap up to 32 px or 4 % of the width): sites cut a webtoon into slices and often leave
+ *   margins between them — a bubble cut by such a seam is repaired afterwards (the band across the
+ *   seam translated once). Pages of a manga with margins stay separate jobs (each its own place in
+ *   the queue); whether anything crosses a seam is decided from the pixels.
  */
 export interface Rect {
   left: number;
@@ -12,9 +13,9 @@ export interface Rect {
   bottom: number;
 }
 
-export function stackedBelow(upper: Rect, lower: Rect): boolean {
+export function stackedBelow(upper: Rect, lower: Rect, how: 'touching' | 'near' = 'near'): boolean {
   if (upper.width <= 0 || lower.width <= 0) return false;
   if (Math.abs(upper.left - lower.left) > 2 || Math.abs(upper.width - lower.width) > 2) return false;
   const gap = lower.top - upper.bottom;
-  return gap >= -6 && gap <= Math.max(32, upper.width * 0.04);
+  return gap >= -6 && gap <= (how === 'touching' ? 6 : Math.max(32, upper.width * 0.04));
 }

@@ -29,11 +29,13 @@ describe('«Для анализа»: the chapter pack', () => {
 
   it('says how the pictures were joined at their seams (glued, seam repaired, alone) — to see cut bubbles', async () => {
     const { bytes } = await buildAnalysisPack({
-      pages: [1, 2, 3, 4].map((n) => ({ page: page(n), joined: n <= 2 ? ('strip' as const) : n === 3 ? ('seam' as const) : undefined })),
+      pages: [1, 2, 3, 4].map((n) => ({ page: page(n), joined: n <= 2 ? ('strip' as const) : n === 3 ? ('seam' as const) : undefined, ...(n > 1 ? { gapAbove: { gap: n === 4 ? 0 : 20, sameColumn: true } } : {}) })),
       settings: undefined, version: '1', platform: 'test', journal: [], errors: [],
     });
     const z = await JSZip.loadAsync(bytes);
-    expect(await z.file('info.txt')!.async('string')).toContain('seams: glued 2, repaired 1, alone 1');
+    const info = await z.file('info.txt')!.async('string');
+    expect(info).toContain('seams: glued 2, repaired 1, alone 1');
+    expect(info).toContain('gaps under the picture before (px): 20 ×2, 0 ×1');
     expect(JSON.parse(await z.file('003/page.json')!.async('string')).joined).toBe('seam');
   });
 });

@@ -36,6 +36,9 @@ export interface RenderedTile {
 }
 
 // content → background
+/** How a picture stands under the one before it on the site (null: the first, or a screen area). */
+export type PictureGap = { gap: number; sameColumn: boolean } | null;
+
 export type ContentToBackground =
   | { type: 'translate'; image: ImageRef; pageUrl: string; title: string; priority: number; force?: boolean; redraw?: boolean }
   /** `ahead`: the last pictures are only neighbours sent along to look at the seam (see translateStrip). */
@@ -58,7 +61,7 @@ export type ContentToBackground =
   | { type: 'get-tile'; key: string; index: number }
   /** Pictures waiting in the queue came on screen (or went far): their new priorities. */
   | { type: 'set-priority'; jobs: { id: string; priority: number }[] }
-  | { type: 'build-download'; keys: string[]; title: string; format: ChapterFormat }
+  | { type: 'build-download'; keys: string[]; title: string; format: ChapterFormat; layout?: PictureGap[] }
   /** «Сообщить о проблеме» on a page's ⓘ: a zip to reproduce it (page address only when ticked). */
   | { type: 'problem-report'; key: string; comment?: string; pageUrl?: string };
 
@@ -122,7 +125,7 @@ export type ToOffscreen =
   /** Stop every job of a tab (or of one page shown in it: `doc`), or of all tabs. */
   | { target: 'offscreen'; type: 'cancel-tab'; tabId?: number; doc?: string }
   | { target: 'offscreen'; type: 'status'; jobIds: string[] }
-  | { target: 'offscreen'; type: 'build-file'; keys: string[]; title: string; format: ChapterFormat; lang: string; version?: string }
+  | { target: 'offscreen'; type: 'build-file'; keys: string[]; title: string; format: ChapterFormat; lang: string; version?: string; layout?: PictureGap[] }
   | { target: 'offscreen'; type: 'build-problem-report'; key: string; comment?: string; pageUrl?: string; version: string }
   | { target: 'offscreen'; type: 'get-result'; key: string }
   | { target: 'offscreen'; type: 'repair-seam'; upper: string; lower: string }

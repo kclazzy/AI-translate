@@ -135,6 +135,21 @@ export interface AnalysisPage {
   load?: () => Promise<{ original?: { bytes: Uint8Array; mime?: string }; rendered: Tile[] }>;
   /** How it was joined with its neighbours: glued into a strip, its seam translated as one band, or alone. */
   joined?: 'strip' | 'seam';
+  /** How it stands under the picture before it on the site: the gap in px, and whether in the same column. */
+  gapAbove?: { gap: number; sameColumn: boolean };
+}
+
+/** «gaps under the picture before (px): 0 ×120, 20 ×40; other column ×2» — are the slices of a strip touching? */
+function gapsLine(pages: AnalysisPage[]): string {
+  const counts = new Map<number, number>();
+  let other = 0;
+  for (const p of pages) {
+    if (!p.gapAbove) continue;
+    if (!p.gapAbove.sameColumn) other++;
+    else counts.set(p.gapAbove.gap, (counts.get(p.gapAbove.gap) ?? 0) + 1);
+  }
+  const list = [...counts].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([g, n]) => `${g} ×${n}`);
+  return `gaps under the picture before (px): ${list.join(', ') || '—'}${other ? `; other column ×${other}` : ''}`;
 }
 
 const ANALYSIS_README = `Пакет для анализа главы — AI Translate
@@ -204,7 +219,7 @@ export async function buildAnalysisPack(input: {
     const pics = p.load ? await p.load() : { original: p.original, rendered: p.rendered ?? [] };
     if (pics.original?.bytes?.length) zip.file(`${dir}/original.${extOf(pics.original.bytes, pics.original.mime)}`, pics.original.bytes);
     await resultJpeg(zip, `${dir}/result`, pics.rendered, p.page.width, p.page.height, input.backend);
-    zip.file(`${dir}/page.json`, JSON.stringify(p.joined ? { ...p.page, joined: p.joined } : p.page, null, 2));
+    zip.file(`${dir}/page.json`, JSON.stringify({ ...p.page, ...(p.joined ? { joined: p.joined } : {}), ...(p.gapAbove ? { gapAbove: p.gapAbove } : {}) }, null, 2));
   }
   zip.file('texts.tsv', textsTable(input.pages.map((p, i) => ({ name: String(i + 1).padStart(3, '0'), blocks: p.page.blocks }))));
   if (input.settings) zip.file('settings.json', JSON.stringify(sanitizeSettings(input.settings), null, 2));
@@ -226,6 +241,7 @@ export async function buildAnalysisPack(input: {
       `pictures: ${input.pages.length}`,
       `blocks: ${input.pages.reduce((n, p) => n + p.page.blocks.length, 0)}`,
       `seams: glued ${input.pages.filter((p) => p.joined === 'strip').length}, repaired ${input.pages.filter((p) => p.joined === 'seam').length}, alone ${input.pages.filter((p) => !p.joined).length}`,
+      gapsLine(input.pages),
       'models:',
       ...[...models].map((m) => `  ${m}`),
       '',

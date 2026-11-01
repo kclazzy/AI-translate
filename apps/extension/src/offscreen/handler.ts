@@ -755,13 +755,14 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
       if (msg.format === 'analysis') {
         // «Для анализа»: originals, the current look and the data of every picture, plus all texts in a table.
         const pages: AnalysisPage[] = [];
-        for (const key of msg.keys) {
+        for (const [ki, key] of msg.keys.entries()) {
           const r = await service.getResult(key);
           if (!r) continue;
           // The pictures are read again when the page is written: one page in memory at a time.
           pages.push({
             page: r.page,
             ...(r.strip ? { joined: 'strip' as const } : r.seams?.length ? { joined: 'seam' as const } : {}),
+            ...(msg.layout?.[ki] ? { gapAbove: msg.layout[ki]! } : {}),
             load: async () => {
               const again = await service.getResult(key);
               return { original: again?.original, rendered: again?.rendered ?? [] };

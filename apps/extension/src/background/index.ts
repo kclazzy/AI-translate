@@ -586,7 +586,7 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
     }
     case 'build-download': {
       const s = await loadSettings();
-      const r = await toOffscreen<{ url: string; name: string; pages: number; size: number }>({ target: 'offscreen', type: 'build-file', keys: msg.keys, title: msg.title, format: msg.format, lang: s.targetLang, version: chrome.runtime.getManifest().version });
+      const r = await toOffscreen<{ url: string; name: string; pages: number; size: number }>({ target: 'offscreen', type: 'build-file', keys: msg.keys, title: msg.title, format: msg.format, lang: s.targetLang, version: chrome.runtime.getManifest().version, ...(msg.layout ? { layout: msg.layout } : {}) });
       if (!r?.url) throw new AppError('UNKNOWN', { retryable: false, detail: 'build failed' });
       let id: number;
       try {
