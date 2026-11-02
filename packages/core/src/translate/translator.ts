@@ -63,6 +63,9 @@ export async function translateBlocks(
     const translations = new Map(blocks.map((b, i) => [b.id, { text: exact.get(b.text.trim().toLowerCase()) ?? out[i] }]));
     return { translations, entities: [], summary: '', usage: [{ provider: provider.config.label, model: 'browser', inputTokens: 0, outputTokens: 0, costUsd: 0 }] };
   }
+  // Narration and captions are the main character's («I got to claim all the XP»): his or her gender, when set for the series.
+  const narrator = input.context?.narrator;
+  if (narrator) blocks = blocks.map((b) => (b.type === 'NARRATION' && (!b.gender || b.gender === 'unknown') ? { ...b, gender: narrator } : b));
   // A line that goes on in the next speech block: translated as one sentence (continuesNext).
   blocks = blocks.map((b, i) => {
     const next = blocks[i + 1];

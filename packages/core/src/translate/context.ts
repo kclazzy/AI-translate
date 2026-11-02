@@ -26,6 +26,11 @@ export interface TranslationContext {
   /** Longer lines and signs already translated in the series: the same text gets the same translation (see rememberedTranslation). */
   memory?: { src: string; dst: string; type?: string; page?: string }[];
   styleNotes: string;
+  /**
+   * The main character's gender, set by the user for the series: the «I» of narration and thoughts
+   * and the one others speak to (Russian past tense and adjectives agree with it).
+   */
+  narrator?: 'male' | 'female';
   pagesSeen: number;
   /** Pages already merged (image hash prefixes, newest last): a page translated again adds no second summary or lines. */
   mergedPages?: string[];

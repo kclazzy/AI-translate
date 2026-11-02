@@ -117,6 +117,15 @@ export function ContextEditor({ context, onChange }: { context: TranslationConte
           </button>
         </div>
       </div>
+      <label className="ait-field" style={{ marginTop: 12, maxWidth: 360 }} data-testid="narrator-gender">
+        <span>{tr('Главный герой (рассказчик «я»)')}</span>
+        <select className="ait-select" value={context.narrator ?? ''} onChange={(e) => onChange({ ...context, narrator: (e.target.value || undefined) as 'male' | 'female' | undefined })}>
+          <option value="">{tr('Не задан')}</option>
+          <option value="male">{tr('Мужчина')}</option>
+          <option value="female">{tr('Женщина')}</option>
+        </select>
+        <small className="ait-muted">{tr('Мысли, подписи и обращения к герою будут в этом роде («я пришёл» / «я пришла»).')}</small>
+      </label>
       <h3>{tr('Заметки о стиле серии')}</h3>
       <textarea className="ait-textarea" value={context.styleNotes} onChange={(e) => onChange({ ...context, styleNotes: e.target.value })} placeholder={tr('Например: главный герой говорит коротко и грубо')} />
       {context.summaries.length ? (
