@@ -32,6 +32,8 @@ import { loadUserFonts, registerUserFont, saveUserFont } from '../fonts';
 import { exportChapterTexts, exportTexts, importTexts } from './texts';
 import { EditHistory, type HistoryItem } from './history';
 import { confirmLeave, setActiveEditor, type EditorGuard } from './guard';
+import { duplicateBlocks } from './blocks';
+import { PRESETS_KEY, presetStyle, removePreset, savePreset, type StylePreset } from './presets';
 import { exportPsd, psdTooBig } from '../psd';
 import { editorReportParts, ProblemReportButton } from '../ProblemReportButton';
 import { usePlatform, useUpdateSettings } from '../platform';
@@ -114,6 +116,15 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   /** Blocks selected together with `selected` (Ctrl/Shift+click): style changes apply to all of them. */
   const [multi, setMulti] = useState<Set<string>>(new Set());
   const [styleClip, setStyleClip] = useState<Partial<TextStyle> | null>(null);
+  // «Наборы стилей»: named looks kept for every page and project.
+  const [presets, setPresets] = useState<StylePreset[]>([]);
+  useEffect(() => {
+    void platform.db.get<StylePreset[]>('kv', PRESETS_KEY).then((p) => setPresets(p ?? []), () => undefined);
+  }, [platform]);
+  const keepPresets = (next: StylePreset[]) => {
+    setPresets(next);
+    void platform.db.put('kv', PRESETS_KEY, next);
+  };
   const [fontQuery, setFontQuery] = useState('');
   const updateSettings = useUpdateSettings();
   /** ◍ redraws with LaMa when it runs here and the model is downloaded; otherwise a simple fill. */
@@ -334,6 +345,20 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   const updateBlock = (id: string, patch: Partial<TextBlock>) => commitWith((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch, edited: true } : b)));
   /** The selected block and the others picked with Ctrl/Shift+click. */
   const targets = selected ? new Set([selected, ...multi]) : new Set(multi);
+  /** «Дублировать» (Ctrl+D): copies of the chosen blocks, chosen in their place. */
+  const duplicate = () => {
+    const ids = targets;
+    let made: string[] = [];
+    commitWith((prev) => {
+      const r = duplicateBlocks(prev, ids, page, () => `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`);
+      made = r.added;
+      return r.blocks;
+    });
+    if (made.length) {
+      setSelected(made[0]);
+      setMulti(new Set(made.slice(1)));
+    }
+  };
   const updateStyle = (id: string, patch: Partial<TextStyle>) => {
     const ids = id === selected ? targets : new Set([id]);
     commitWith((prev) => prev.map((b) => (ids.has(b.id) ? { ...b, style: { ...(b.style ?? {}), ...patch }, edited: true } : b)));
@@ -533,6 +558,9 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
         e.preventDefault();
         setSelected(blocks[0]?.id ?? null);
         setMulti(new Set(blocks.slice(1).map((b) => b.id)));
+      } else if (mod && key === 'd' && !e.altKey && targets.size) {
+        e.preventDefault();
+        duplicate();
       } else if (mod || e.altKey) {
         // Browser and system shortcuts (Ctrl+C, Ctrl+E…) are not tool keys.
       } else if (e.key === 'Escape') {
@@ -1321,6 +1349,46 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                   {tr('Стиль ко всем {0}', sel.textType)}
                 </button>
               </div>
+              <div className="ait-row" style={{ marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }} data-testid="style-presets">
+                <select
+                  className="ait-select"
+                  style={{ flex: '1 1 140px' }}
+                  value=""
+                  aria-label={tr('Наборы стилей')}
+                  onChange={(e) => {
+                    const p = presets.find((x) => x.name === e.target.value);
+                    if (p) commitWith((prev) => prev.map((b) => (targets.has(b.id) ? { ...b, style: { ...(b.style ?? {}), ...p.style }, edited: true } : b)));
+                  }}
+                >
+                  <option value="">{presets.length ? tr('Применить набор стилей…') : tr('Наборов стилей пока нет')}</option>
+                  {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+                </select>
+                <button
+                  className="ait-btn small"
+                  title={tr('Сохранить шрифт, цвета, обводку и эффекты этого блока как набор: его можно применить к любому тексту в любом проекте')}
+                  onClick={() => {
+                    const name = prompt(tr('Название набора стилей'), '');
+                    if (name?.trim()) {
+                      keepPresets(savePreset(presets, name, presetStyle(sel.style ?? {})));
+                      toast(tr('Набор «{0}» сохранён', name.trim()));
+                    }
+                  }}
+                >
+                  {tr('Сохранить набор')}
+                </button>
+                {presets.length ? (
+                  <button
+                    className="ait-btn small ghost"
+                    title={tr('Удалить набор стилей')}
+                    onClick={() => {
+                      const name = prompt(tr('Какой набор удалить? ({0})', presets.map((p) => p.name).join(', ')), presets[0].name);
+                      if (name && presets.some((p) => p.name === name.trim())) keepPresets(removePreset(presets, name.trim()));
+                    }}
+                  >
+                    🗑
+                  </button>
+                ) : null}
+              </div>
               <ErrorBox error={retr.error} />
               {overflow.has(sel.id) ? <p className="ait-notice" style={{ marginTop: 8 }}>{tr('Текст не помещается: уменьшите кегль, сократите перевод или растяните рамку.')}</p> : null}
               <div className="ait-grid2" style={{ marginTop: 10, gridTemplateColumns: '1fr 1fr' }}>
@@ -1401,9 +1469,14 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
                 </Field>
                 <Switch checked={sel.translate} onChange={(v) => updateBlock(sel.id, { translate: v })} label={tr('Показывать перевод')} />
               </div>
-              <button className="ait-btn small danger" style={{ marginTop: 12 }} onClick={() => { const id = sel.id; commitWith((prev) => prev.filter((b) => b.id !== id)); setSelected(null); setMulti(new Set()); }}>
-                {tr('Удалить блок')}
-              </button>
+              <div className="ait-row" style={{ marginTop: 12, flexWrap: 'wrap' }}>
+                <button className="ait-btn small" data-testid="duplicate-blocks" title={tr('Копия выбранных блоков рядом (Ctrl+D)')} onClick={duplicate}>
+                  {tr('Дублировать')}
+                </button>
+                <button className="ait-btn small danger" onClick={() => { const ids = targets; commitWith((prev) => prev.filter((b) => !ids.has(b.id))); setSelected(null); setMulti(new Set()); }}>
+                  {targets.size > 1 ? tr('Удалить блоки ({0})', targets.size) : tr('Удалить блок')}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="ait-panel ait-muted">{tr('Выберите блок текста на странице или в списке ниже. Инструмент «Ручной OCR» добавляет пропущенный текст: обведите его рамкой.')}</div>
