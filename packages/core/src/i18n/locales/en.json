@@ -1417,5 +1417,6 @@
  "глав: {0}": "chapters: {0}",
  "Страницы этой главы удалены из кэша — переведите главу заново.": "The pages of this chapter were removed from the cache — translate the chapter again.",
  "нет в кэше": "not in cache",
- "страницы удалены из кэша — переведите главу заново": "pages removed from the cache — translate the chapter again"
+ "страницы удалены из кэша — переведите главу заново": "pages removed from the cache — translate the chapter again",
+ "PSD (Photoshop)": "PSD (Photoshop)"
 }

@@ -1,5 +1,6 @@
 import { writePsdUint8Array, type Layer } from 'ag-psd';
-import { ctxMeasurer, drawBlock, layoutBlock, resolveStyle, shouldDraw, targetBox, type ImageBackend, type PageResult, type StyleDefaults, type TiledImage } from '@ait/core';
+import JSZip from 'jszip';
+import { ctxMeasurer, drawBlock, layoutBlock, resolveStyle, shouldDraw, targetBox, TiledImage, type ImageBackend, type PageResult, type StyleDefaults } from '@ait/core';
 
 /** Photoshop does not open files longer or wider than this. */
 export const PSD_MAX_SIDE = 30000;
@@ -83,4 +84,49 @@ export function exportPsd(backend: ImageBackend, page: PageResult, original: Til
     ],
   };
   return writePsdUint8Array(psd, { generateThumbnail: false, invalidateTextLayers: true, noBackground: true });
+}
+
+/** What a chapter's picture needs for its PSD: the page and its pictures as stored (see StoredResult). */
+export interface PsdSource {
+  page: PageResult;
+  original: { bytes: Uint8Array; mime: string };
+  cleaned: { y: number; h: number; bytes: Uint8Array }[];
+}
+
+/**
+ * A chapter for Photoshop: a ZIP with one layered PSD per picture (see exportPsd), named in reading
+ * order. Pictures are loaded and written one at a time, so a long chapter never sits in memory; one
+ * gone from the cache or too big for a PSD is left out (`skipped` names it).
+ */
+export async function exportPsdChapter(backend: ImageBackend, pictures: { name: string; load: () => Promise<PsdSource | undefined> }[], d: StyleDefaults): Promise<{ bytes: Uint8Array; pages: number; skipped: string[] }> {
+  const zip = new JSZip();
+  const skipped: string[] = [];
+  let pages = 0;
+  for (const pic of pictures) {
+    const r = await pic.load();
+    if (!r || psdTooBig(r.page.width, r.page.height)) {
+      skipped.push(pic.name);
+      continue;
+    }
+    const { width: W, height: H } = r.page;
+    const original = new TiledImage(backend, W, H);
+    const cleaned = new TiledImage(backend, W, H);
+    try {
+      const o = await backend.decode(r.original.bytes, r.original.mime);
+      for (const t of original.tiles) t.canvas.getContext('2d').drawImage(o.source, 0, 0, o.width, o.height, 0, -t.y, W, H);
+      o.close?.();
+      for (const c of r.cleaned) {
+        const img = await backend.decode(c.bytes, 'image/png');
+        for (const t of cleaned.tiles) if (t.y < c.y + c.h && t.y + t.h > c.y) t.canvas.getContext('2d').drawImage(img.source, 0, c.y - t.y);
+        img.close?.();
+      }
+      zip.file(`${pic.name}.psd`, exportPsd(backend, r.page, original, cleaned, d));
+      pages++;
+    } finally {
+      original.dispose();
+      cleaned.dispose();
+    }
+  }
+  const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+  return { bytes, pages, skipped };
 }

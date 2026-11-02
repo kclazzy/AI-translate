@@ -112,7 +112,7 @@ function Popup() {
   const [unloaded, setUnloaded] = useState<string[] | null>(null);
   const [langs, setLangs] = useState<PageLangs | null>(null);
   const [preflight, setPreflight] = useState(false);
-  const [fmt, setFmt] = useState<'pdf' | 'cbz' | 'zip' | 'epub' | 'analysis'>('pdf');
+  const [fmt, setFmt] = useState<'pdf' | 'cbz' | 'zip' | 'epub' | 'analysis' | 'psd'>('pdf');
 
   useEffect(() => {
     void loadSettings().then((x) => {
@@ -305,13 +305,14 @@ function Popup() {
           <option value="cbz">CBZ</option>
           <option value="epub">EPUB</option>
           <option value="zip">ZIP</option>
+          <option value="psd">{tr('PSD (Photoshop)')}</option>
           <option value="analysis">{tr('Для анализа')}</option>
         </select>
         <select
           className="ait-select"
           style={{ flex: '0 0 112px' }}
           value={s.exportPageLength ?? 'normal'}
-          disabled={fmt === 'zip' || fmt === 'analysis'}
+          disabled={fmt === 'zip' || fmt === 'analysis' || fmt === 'psd'}
           onChange={(e) => update({ exportPageLength: e.target.value as AppSettings['exportPageLength'] })}
           aria-label={tr('Длина страницы')}
           title={tr('Как резать длинную ленту вебтуна на страницы')}

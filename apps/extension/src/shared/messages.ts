@@ -75,8 +75,11 @@ export interface SpeedStats {
 }
 
 /** File formats for «Перевести и скачать». */
-/** 'analysis': originals + the current translation + data of every picture, for finding problems. */
-export type ChapterFormat = 'pdf' | 'cbz' | 'zip' | 'epub' | 'analysis';
+/**
+ * 'analysis': originals + the current translation + data of every picture, for finding problems.
+ * 'psd': a ZIP with one layered Photoshop file per picture (original, cleaned picture, text layers).
+ */
+export type ChapterFormat = 'pdf' | 'cbz' | 'zip' | 'epub' | 'analysis' | 'psd';
 
 // background → content
 export type BackgroundToContent =

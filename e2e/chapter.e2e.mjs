@@ -222,6 +222,36 @@ try {
   check('the pack says where the chapter time went: the model, its idle time and why', /Модель занята: \d+%/.test(activity) && /Простой модели: \d+%/.test(activity) && /страниц: [1-9]/.test(activity), activity.slice(0, 600));
   check('«Для анализа» downloads originals, the current translation and all texts in one table', packNames.includes('texts.tsv') && packNames.some((n) => /^001\/original\./.test(n)) && packNames.includes('001/result.jpg') && packNames.includes('001/page.json') && packNames.includes('journal.json') && tsv.includes('page\tblock\ttype'), `${pack} ${packNames.filter((n) => !n.startsWith("0")).join(', ')} rows=${tsv.split('\n').length}`);
 
+  // «PSD (Photoshop)»: the same chapter as one layered PSD per picture, in a ZIP.
+  {
+    const before = new Set(readdirSync(DL));
+    await studio.evaluate(async () => {
+      const [t] = await chrome.tabs.query({ url: 'http://127.0.0.1:18111/*' });
+      await chrome.runtime.sendMessage({ type: 'popup-command', command: 'download-chapter', format: 'psd', tabId: t.id });
+    });
+    await tab.bringToFront();
+    let file = null;
+    for (let i = 0; i < 120 && !file; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      file = readdirSync(DL).find((f) => !before.has(f) && f.endsWith('.zip'));
+    }
+    let names = [];
+    let layers = [];
+    if (file) {
+      await new Promise((r) => setTimeout(r, 500));
+      const req = createRequire(join(ROOT, 'packages/studio/package.json'));
+      const z = await req('jszip').loadAsync(readFileSync(join(DL, file)));
+      names = Object.keys(z.files).sort();
+      const { readPsd } = req('ag-psd');
+      for (const n of names) {
+        const psd = readPsd(await z.file(n).async('uint8array'), { skipCompositeImageData: true, skipThumbnail: true, skipLayerImageData: true });
+        layers.push((psd.children ?? []).map((c) => `${c.name}:${c.children?.length ?? 0}`).join('/'));
+      }
+    }
+    // (This chapter's pictures hold no text for the mock model: the text layers are checked in studio's psd.test.)
+    check('«PSD (Photoshop)» downloads a ZIP with a layered PSD per picture: original, cleaned, the texts', names.length >= 3 && names.every((n) => /^\d{3}\.psd$/.test(n)) && layers.every((l) => /^Оригинал:0\/Очищено:0\/Перевод:\d+$/.test(l)), `${file} ${names.join(',')} ${layers.join(' ')}`);
+  }
+
   // ---- The editor gets the whole chapter, also the pages the reader took out of the page -----------
   {
     const editKeys = async () => {

@@ -1417,5 +1417,6 @@
  "глав: {0}": "chapitres : {0}",
  "Страницы этой главы удалены из кэша — переведите главу заново.": "Les pages de ce chapitre ont été supprimées du cache — traduisez à nouveau le chapitre.",
  "нет в кэше": "absent du cache",
- "страницы удалены из кэша — переведите главу заново": "pages supprimées du cache — retraduisez le chapitre"
+ "страницы удалены из кэша — переведите главу заново": "pages supprimées du cache — retraduisez le chapitre",
+ "PSD (Photoshop)": "PSD (Photoshop)"
 }

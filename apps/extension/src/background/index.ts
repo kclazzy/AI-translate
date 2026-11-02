@@ -600,7 +600,7 @@ async function handleContent(msg: ContentToBackground, sender: chrome.runtime.Me
           if (!r.name) throw new Error('empty');
           id = await chrome.downloads.download({ url: r.url, filename: r.name, saveAs: false, conflictAction: 'uniquify' });
         } catch {
-          r.name = `AI Translate ${new Date().toISOString().slice(0, 10)}.${msg.format === 'analysis' ? 'zip' : msg.format}`;
+          r.name = `AI Translate ${new Date().toISOString().slice(0, 10)}.${msg.format === 'analysis' || msg.format === 'psd' ? 'zip' : msg.format}`;
           id = await chrome.downloads.download({ url: r.url, filename: r.name, saveAs: false, conflictAction: 'uniquify' });
         }
       }

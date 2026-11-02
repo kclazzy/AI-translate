@@ -1,7 +1,8 @@
-import { AppError, bytesCost, encodeAtOnce, fitsInMemory, forgetRemembered, isMemoryError, MemoryBackoff, PageWorkers, pagesInFlight, readHardware, TYPICAL_PAGE_COST, tilesToImage, isLocalProvider, ollamaWarm, pipelineConfigFromSettings, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
+import { AppError, bytesCost, encodeAtOnce, fitsInMemory, forgetRemembered, isMemoryError, MemoryBackoff, PageWorkers, pagesInFlight, readHardware, TYPICAL_PAGE_COST, tilesToImage, isLocalProvider, ollamaWarm, pipelineConfigFromSettings, styleDefaultsFor, browserBackend, bytesToDataUrl, dataUrlToBytes, TaskQueue, toAppError, TranslateService, type FetchLike, type StoredResult } from '@ait/core';
 import { loadBundledFonts, loadUserFonts } from '@ait/studio/fonts';
 import { exportCbz, exportEpub, exportPdf, exportZip, type ExportPage } from '@ait/studio/files';
 import { buildAnalysisPack, buildProblemReport, type AnalysisPage } from '@ait/studio/problem-report';
+import { exportPsdChapter } from '@ait/studio/psd';
 import type { StageEvent } from '@ait/core';
 import { CANCELLED_ALL, type FromOffscreen, type JobStatus, type RenderedTiles, type SpeedStats, type ToOffscreen } from '../shared/messages';
 import { deleteJobBytes, getJobBytes, pruneJobBytes } from '../shared/jobstore';
@@ -795,6 +796,18 @@ export async function handleOffscreen(msg: ToOffscreen, emit: (m: FromOffscreen)
         const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/zip' }));
         setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
         return { url, name, pages: pages.length, size: bytes.length };
+      }
+      if (msg.format === 'psd') {
+        // For Photoshop: one layered PSD per picture (original, cleaned, the texts as text layers), in a ZIP.
+        const s = await loadSettings();
+        setUiLang(s.interfaceLang, false);
+        const d = styleDefaultsFor(pipelineConfigFromSettings(s), s.fonts);
+        const { bytes, pages } = await exportPsdChapter(browserBackend, msg.keys.map((key, i) => ({ name: String(i + 1).padStart(3, '0'), load: () => service.getResult(key) })), d);
+        if (!pages) throw new AppError('UNKNOWN', { retryable: false, message: tr('Нет переведённых страниц') });
+        const safe = (msg.title || tr('Глава')).replace(/[^\p{L}\p{N} ._,()\-]+/gu, ' ').replace(/\s+/g, ' ').replace(/^[ .]+|[ .]+$/g, '').slice(0, 100) || tr('Глава');
+        const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/zip' }));
+        setTimeout(() => URL.revokeObjectURL(url), 10 * 60_000);
+        return { url, name: `${safe} (PSD).zip`, pages, size: bytes.length };
       }
       // Assemble the translated pages of a chapter into one file and hand back a blob URL.
       // Only the small page records first; each page's pictures are read when it is written into
