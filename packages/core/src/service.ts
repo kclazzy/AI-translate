@@ -424,8 +424,9 @@ export class TranslateService {
     const groupOf = async (r: StoredResult): Promise<StoredResult[] | null> => {
       if (!r.strip) return [r];
       const parent = await this.getResult(r.strip.parent);
-      // Pictures glued because they arrived together are left as they are; seam groups grow.
-      if (!parent?.seamGroup || !parent.parts) return null;
+      // A picture of a glued strip (pictures that came together, or a seam group): the whole strip
+      // goes into the new group, so its other pictures keep what they have and stay one strip.
+      if (!parent?.parts) return null;
       const all = await Promise.all(parent.parts.map((k) => this.getResult(k)));
       return all.every(Boolean) ? (all as StoredResult[]) : null;
     };

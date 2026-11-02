@@ -666,6 +666,48 @@ describe('the picture below goes along to look at the seam', () => {
     expect((await svc.getResult(b.result.key))!.page.blocks.map((x) => x.translatedText)).toEqual(['ЦЕЛАЯ ФРАЗА']);
   });
 
+  it('the upper picture is the last of a glued strip: its seam with the next one is still repaired', async () => {
+    // Webtoons (user's chapter, 1.1.54): pictures 17 and 18 glued (art across their seam), 19 alone;
+    // the bubble cut by the seam 18|19 was left in halves — a strip's pictures were never repaired.
+    const [top, bottom] = await bubblePage([{ y: 420, text: 'WAR OF FAIRIES' }, { y: 500, text: 'THE FAIRY WAR' }, { y: 580, text: 'MAKES RAYMOND' }], 500);
+    const c = createCanvas(800, 500);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 800, 500);
+    // Art running into the next picture: the seam above «top» is not calm, the two are glued.
+    for (let x = 0; x < 800; x += 16) {
+      ctx.fillStyle = x % 32 ? '#202020' : '#8a5a2a';
+      ctx.fillRect(x, 440, 9, 60);
+    }
+    const above = new Uint8Array(await c.encode('png'));
+    // Each step's first request gets its text; extra reads (left-over lettering) find nothing new.
+    let phase = 1;
+    let first = true;
+    const empty = JSON.stringify({ blocks: [], entities: [], summary: '' });
+    const m = mock((body) => {
+      if (!first) return empty;
+      first = false;
+      const h = heightAsked(body);
+      if (phase === 1) return JSON.stringify({ blocks: [{ box: toNorm([270, 895, 260, 50], 800, h), text: 'WAR OF FAIRIES', translation: 'ВОЙНА ФЕЙ', type: 'DIALOGUE' }], entities: [], summary: '' });
+      if (phase === 2) return JSON.stringify({ blocks: [{ box: toNorm([260, 58, 280, 50], 800, 500), text: 'MAKES RAYMOND', translation: 'ЗАСТАВЛЯЕТ РЕЙМУНДА', type: 'DIALOGUE' }], entities: [], summary: '' });
+      return JSON.stringify({ blocks: [{ box: [300, 50, 700, 950], text: 'WAR OF FAIRIES THE FAIRY WAR MAKES RAYMOND', translation: 'ЦЕЛАЯ ФРАЗА', type: 'DIALOGUE' }], entities: [], summary: '' });
+    });
+    const step = (p: number) => ((phase = p), (first = true));
+    const svc = new TranslateService(memoryDb(), secrets, napiBackend, async () => settingsWith({ skipEmptyPages: false }), m.fetchImpl);
+    svc.compactTiles = false;
+    const parts: StoredResult[] = [];
+    await svc.translateStrip([{ bytes: above, mime: 'image/png' }, { bytes: top, mime: 'image/png' }], { onPart: (i, r) => (parts[i] = r) });
+    expect(parts[1].strip).toBeDefined();
+    step(2);
+    const b = await svc.translate(bottom, 'image/png', { noSkip: true });
+    step(3);
+    expect(await svc.repairSeam(parts[1].key, b.result.key)).toBe(true);
+    expect((await svc.getResult(parts[1].key))!.page.blocks.map((x) => x.translatedText)).toEqual(['ЦЕЛАЯ ФРАЗА']);
+    expect((await svc.getResult(b.result.key))!.page.blocks.map((x) => x.translatedText)).toEqual(['ЦЕЛАЯ ФРАЗА']);
+    // The picture above keeps its own (nothing of it changed).
+    expect((await svc.getResult(parts[0].key))!.page.blocks).toEqual([]);
+  });
+
   it('text near a calm seam is not a cut', async () => {
     const [top, bottom] = await bubblePage([{ y: 420, text: 'ABOVE' }], 350);
     const [, lower] = await bubblePage([{ y: 580, text: 'BELOW' }], 650);
