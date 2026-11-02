@@ -726,3 +726,24 @@ describe('the picture below goes along to look at the seam', () => {
     expect(m.calls).toHaveLength(2);
   });
 });
+
+describe('deleting translated chapters (editor / history)', () => {
+  const answer = () => JSON.stringify({ blocks: [{ box: [100, 100, 400, 200], text: 'HELLO', translation: 'ПРИВЕТ', type: 'DIALOGUE' }], entities: [], summary: '' });
+  it('removes the pages, the strips made only of them and their history; other pages stay', async () => {
+    const m = mock(answer);
+    const db = memoryDb();
+    const svc = new TranslateService(db, secrets, napiBackend, async () => settingsWith({ saveHistory: true, skipEmptyPages: false }), m.fetchImpl);
+    svc.compactTiles = false;
+    const a = await svc.translate((await makeMangaPage(800, 600)).bytes, 'image/png', { noSkip: true, sourceUrl: 'https://site/s/ch-1' });
+    const parts: StoredResult[] = [];
+    const [p1, p2] = [(await makeMangaPage(800, 500, [{ cx: 400, cy: 250, rx: 200, ry: 120, text: 'ONE' }])).bytes, (await makeMangaPage(800, 500, [{ cx: 400, cy: 250, rx: 200, ry: 120, text: 'TWO' }])).bytes];
+    await svc.translateStrip([{ bytes: p1, mime: 'image/png' }, { bytes: p2, mime: 'image/png' }], { sourceUrl: 'https://site/s/ch-2', force: true, onPart: (i, r) => (parts[i] = r) });
+    const kept = await svc.translate((await makeMangaPage(700, 500)).bytes, 'image/png', { noSkip: true, sourceUrl: 'https://site/s/ch-3' });
+    const parent = parts[0].strip?.parent;
+    const removed = await svc.forgetPages([a.result.key, ...parts.map((p) => p.key)]);
+    expect(removed).toBe(3);
+    for (const k of [a.result.key, ...parts.map((p) => p.key), ...(parent ? [parent] : [])]) expect(await svc.getResult(k)).toBeUndefined();
+    expect(await svc.getResult(kept.result.key)).toBeDefined();
+    expect((await svc.history(100)).map((h) => h.key)).toEqual([kept.result.key]);
+  });
+});

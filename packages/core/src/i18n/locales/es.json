@@ -1418,5 +1418,12 @@
  "Страницы этой главы удалены из кэша — переведите главу заново.": "Las páginas de este capítulo se eliminaron de la caché: traduzca el capítulo de nuevo.",
  "нет в кэше": "no está en caché",
  "страницы удалены из кэша — переведите главу заново": "páginas eliminadas de la caché: traduzca el capítulo de nuevo",
- "PSD (Photoshop)": "PSD (Photoshop)"
+ "PSD (Photoshop)": "PSD (Photoshop)",
+ "Удалено страниц: {0}": "Páginas eliminadas: {0}",
+ "Удалить {0}? Переведённые страницы и их история будут удалены из программы. Это нельзя отменить.": "¿Eliminar {0}? Las páginas traducidas y su historial se quitarán del programa. No se puede deshacer.",
+ "Удалить главу": "Eliminar capítulo",
+ "Удалить мангу: все её переведённые главы": "Eliminar manga: todos sus capítulos traducidos",
+ "главу {0}": "el capítulo {0}",
+ "главу «{0}»": "el capítulo «{0}»",
+ "мангу «{0}»": "el manga «{0}»"
 }

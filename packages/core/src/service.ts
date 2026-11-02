@@ -1199,6 +1199,35 @@ export class TranslateService {
     return metas;
   }
 
+  /**
+   * Delete translated pages (the user deletes a chapter or a whole series): their results, a glued
+   * strip of them (a key may be the strip itself: its pictures go too; a strip goes once none of its
+   * pictures is left) and their history. Returns how many pictures were removed.
+   */
+  async forgetPages(keys: string[]): Promise<number> {
+    const gone = new Set(keys);
+    // A strip asked for: its pictures go with it.
+    for (const k of [...gone]) for (const part of (await this.getResult(k))?.parts ?? []) gone.add(part);
+    const parents = new Set<string>();
+    let n = 0;
+    for (const k of gone) {
+      const r = await this.getResult(k);
+      if (!r) continue;
+      if (r.strip?.parent) parents.add(r.strip.parent);
+      if (!r.parts) n++;
+      await this.dropResult(k);
+    }
+    for (const p of parents) {
+      const pr = await this.getResult(p);
+      if (pr && (!pr.parts || pr.parts.every((k) => gone.has(k)))) {
+        await this.dropResult(p);
+        gone.add(p);
+      } else if (!pr) gone.add(p);
+    }
+    for (const [id, e] of await this.db.entries<HistoryEntry>('history')) if (gone.has(e.key)) await this.db.delete('history', id);
+    return n;
+  }
+
   private async dropResult(key: string): Promise<void> {
     await this.db.delete('results', key);
     await this.db.delete('kv', `${META}${key}`);

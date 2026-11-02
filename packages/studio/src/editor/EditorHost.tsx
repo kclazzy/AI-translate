@@ -198,7 +198,7 @@ export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose, on
       }
       toolbarExtra={
         <>
-          {onOpenChapter ? <ChaptersPanel currentKey={resultKey} onOpen={onOpenChapter} /> : null}
+          {onOpenChapter ? <ChaptersPanel currentKey={resultKey} onOpen={onOpenChapter} onGone={onClose} /> : null}
           {chapterKeys && chapterKeys.length > 1 ? (
           <>
             <button

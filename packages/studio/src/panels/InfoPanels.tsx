@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { describeRoute, providerById, type AppSettings, type HistoryEntry, type UsageTotals } from '@ait/core';
 import { usePlatform } from '../platform';
 import { groupHistory } from '../editor/chapters';
+import { forgetFolder } from '../editor/forget';
 import { toast } from '../ui';
 import { tr, uiLocale } from '@ait/core/i18n';
 
@@ -72,7 +73,10 @@ export function HistoryPanel({ onOpen, onOpenChapter }: { onOpen: (key: string) 
         {series.map((s, i) => (
           <details key={s.key} className="ait-hist-series" open={i === 0} data-testid="history-series">
             <summary>
-              <b>{s.name}</b> <small className="ait-muted">{s.site ? `${s.site} · ` : ''}{tr('глав: {0}', s.chapters.length)}</small>
+              <b>{s.name}</b> <small className="ait-muted">{s.site ? `${s.site} · ` : ''}{tr('глав: {0}', s.chapters.length)}</small>{' '}
+              <button className="ait-btn small ghost" data-testid="history-forget-series" title={tr('Удалить мангу: все её переведённые главы')} onClick={(e) => { e.preventDefault(); void forgetFolder(platform, s.chapters.flatMap((c) => c.entries.map((x) => x.key)), tr('мангу «{0}»', s.name)).then((ok) => ok && load()); }}>
+                🗑
+              </button>
             </summary>
             {s.chapters.map((c) => {
               let at = 0;
@@ -86,6 +90,7 @@ export function HistoryPanel({ onOpen, onOpenChapter }: { onOpen: (key: string) 
                     {keys.length && onOpenChapter ? (
                       <button
                         className="ait-btn small"
+                        data-testid="history-open-chapter"
                         onClick={(e) => {
                           e.preventDefault();
                           onOpenChapter(keys);
@@ -93,7 +98,10 @@ export function HistoryPanel({ onOpen, onOpenChapter }: { onOpen: (key: string) 
                       >
                         {tr('Открыть главу')}
                       </button>
-                    ) : null}
+                    ) : null}{' '}
+                    <button className="ait-btn small ghost" data-testid="history-forget-chapter" title={tr('Удалить главу')} onClick={(e) => { e.preventDefault(); void forgetFolder(platform, c.entries.map((x) => x.key), c.number !== undefined ? tr('главу {0}', c.number) : tr('главу «{0}»', c.title)).then((ok) => ok && load()); }}>
+                      🗑
+                    </button>
                   </summary>
                   <table className="ait-table" style={{ marginTop: 6 }}>
                     <tbody>

@@ -299,8 +299,7 @@ try {
     studio.on('pageerror', (e) => errors.push(String(e)));
     studio.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
     await studio.evaluate(() => {
-      const ch = document.querySelector('[data-testid="history-chapter"]');
-      [...(ch?.querySelectorAll('summary button') ?? [])][0]?.click();
+      document.querySelector('[data-testid="history-chapter"] [data-testid="history-open-chapter"]')?.click();
     });
     await new Promise((r) => setTimeout(r, 3000));
     const shown = await studio.evaluate(() => ({ text: document.body.innerText.slice(0, 400), pages: document.querySelectorAll('[data-testid="chapters-panel"] [data-key], .ait-chapters li').length }));
@@ -320,13 +319,35 @@ try {
       await studio.goto(`chrome-extension://${extId}/studio.html?view=history`);
       await studio.waitForSelector('[data-testid="history-chapter"]', { timeout: 10000 }).catch(() => {});
       const marked = await studio.evaluate(() => !!document.querySelector('[data-testid="history-gone"]'));
-      await studio.evaluate(() => [...(document.querySelector('[data-testid="history-chapter"]')?.querySelectorAll('summary button') ?? [])][0]?.click());
+      await studio.evaluate(() => document.querySelector('[data-testid="history-chapter"] [data-testid="history-open-chapter"]')?.click());
       await new Promise((r) => setTimeout(r, 3000));
       const gone = await studio.evaluate(() => document.body.innerText.slice(0, 300));
       await studio.screenshot({ path: join(OUT, `history-open-chapter-cleared-${all ? 'all' : 'one'}.png`) });
       check(all ? 'a chapter whose pages were all cleared from the cache says so in the history, no error' : 'a chapter with a page cleared from the cache still opens', !/Что-то пошло не так/.test(gone) && marked === all, JSON.stringify({ marked, gone, errors: errors.slice(0, 5) }));
     }
   }
+  // ---- «История»: a whole manga deleted (asked first): its pages and history are gone -----------------
+  {
+    const del = await browser.newPage();
+    del.on('dialog', (d) => void d.accept());
+    await del.goto(`chrome-extension://${extId}/studio.html?view=history`);
+    await del.waitForSelector('[data-testid="history-forget-series"]', { timeout: 10000 }).catch(() => {});
+    const before = await del.evaluate(async () => {
+      const db = await new Promise((res) => { const r = indexedDB.open('ai-translate', 1); r.onsuccess = () => res(r.result); });
+      // (The pictures were cleared from the cache above; the history of the chapter is still there.)
+      return new Promise((res) => { const g = db.transaction('history').objectStore('history').count(); g.onsuccess = () => res(g.result); });
+    });
+    await del.click('[data-testid="history-forget-series"]').catch(() => {});
+    await new Promise((r) => setTimeout(r, 2500));
+    const after = await del.evaluate(async () => {
+      const db = await new Promise((res) => { const r = indexedDB.open('ai-translate', 1); r.onsuccess = () => res(r.result); });
+      const count = (s) => new Promise((res) => { const g = db.transaction(s).objectStore(s).count(); g.onsuccess = () => res(g.result); });
+      return { results: await count('results'), history: await count('history'), folders: document.querySelectorAll('[data-testid="history-series"]').length };
+    });
+    check('«Удалить мангу» in the history removes its translated pages and their history', before > 0 && after.results === 0 && after.history === 0 && after.folders === 0, JSON.stringify({ before, after }));
+    await del.close();
+  }
+
 } catch (e) {
   check('unexpected failure', false, String(e?.stack ?? e));
 } finally {
