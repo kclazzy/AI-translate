@@ -772,6 +772,11 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
               <input type="range" min={0.6} max={1.5} step={0.05} value={s.fonts.scale ?? 1} onChange={(e) => update({ fonts: { ...s.fonts, scale: Number(e.target.value) } })} aria-label={tr('Размер текста перевода')} />
               <SetHint text={tr('Меньше 100% — текст мельче, чем помещается в бабл; больше — крупнее, пока помещается. Размер, заданный в редакторе вручную, не меняется.')} />
             </label>
+            <label className="ait-field" data-testid="bubble-fill">
+              <span>{tr('Заполнение бабла: {0}%', Math.round((s.fonts.fill ?? 1) * 100))}</span>
+              <input type="range" min={0.7} max={1.15} step={0.05} value={s.fonts.fill ?? 1} onChange={(e) => update({ fonts: { ...s.fonts, fill: Number(e.target.value) === 1 ? undefined : Number(e.target.value) } })} aria-label={tr('Заполнение бабла')} />
+              <SetHint text={tr('Насколько плотно текст заполняет бабл: меньше 100% — больше воздуха до края бабла, больше — текст занимает больше места (не выходя за бабл). Уже переведённые страницы перерисуются без нового перевода.')} />
+            </label>
             <label className="ait-field" data-testid="font-min">
               <span>{s.fonts.minSize ? tr('Минимальный размер текста: {0} px', s.fonts.minSize) : tr('Минимальный размер текста: авто')}</span>
               <input type="range" min={0} max={30} step={1} value={s.fonts.minSize ?? 0} onChange={(e) => update({ fonts: { ...s.fonts, minSize: Number(e.target.value) || undefined } })} aria-label={tr('Минимальный размер текста')} />

@@ -101,7 +101,8 @@ export interface AppSettings {
   debug: boolean;
   /** Fonts by text type; `scale` makes all automatic sizes bigger or smaller (1 = as fits). */
   /** minSize: the smallest text size, px (absent: automatic, 1.6 % of the picture's width). */
-  fonts: { dialogue: string; narration: string; sfx: string; scale?: number; minSize?: number };
+  /** fill: «Заполнение бабла» (see StyleDefaults.bubbleFill). */
+  fonts: { dialogue: string; narration: string; sfx: string; scale?: number; minSize?: number; fill?: number };
   cacheDays: number;
   /** First-run setup finished (mobile app shows a setup screen until then). */
   onboarded?: boolean;

@@ -146,3 +146,34 @@ describe('a line typed as a sound effect', () => {
     expect(sound).toBeGreaterThan(phrase * 1.5);
   });
 });
+
+describe('bubble fill («Заполнение бабла»)', () => {
+  it('less fill keeps the text further from the bubble edge; more uses more of it, never past the bubble', async () => {
+    const { ctxMeasurer, layoutBlock, DEFAULT_STYLE_DEFAULTS } = await import('../src');
+    const { createCanvas } = await import('@napi-rs/canvas');
+    const m = ctxMeasurer(createCanvas(8, 8).getContext('2d') as any);
+    const b: any = { id: 'b', textType: 'DIALOGUE', originalText: 'x', translatedText: 'Привет, как у тебя дела сегодня?', confidence: 1, language: 'en', bbox: [100, 100, 300, 160], polygon: [], orientation: 0, writingDirection: 'ltr', fontSizeEstimate: 30, translate: true, bubble: { box: [60, 60, 380, 240], fill: '#ffffff', safeArea: [100, 100, 300, 160], shape: 'rect' } };
+    const width = (l: any) => Math.max(...l.lines.map((x: any) => x.width));
+    const normal = layoutBlock(m, b, DEFAULT_STYLE_DEFAULTS);
+    const loose = layoutBlock(m, b, { ...DEFAULT_STYLE_DEFAULTS, bubbleFill: 0.7 });
+    const dense = layoutBlock(m, b, { ...DEFAULT_STYLE_DEFAULTS, bubbleFill: 1.15 });
+    expect(width(loose)).toBeLessThan(width(normal) * 0.85);
+    expect(dense.fontSize).toBeGreaterThanOrEqual(normal.fontSize);
+    const box = dense.box ?? b.bubble.safeArea;
+    expect(box[0]).toBeGreaterThanOrEqual(60);
+    expect(box[0] + box[2]).toBeLessThanOrEqual(440);
+  });
+
+  it('a new fill redraws the cached page without asking the model again', async () => {
+    const { bytes, bubbles } = await makeMangaPage();
+    const mock = mockOpenAi(() => JSON.stringify({ blocks: bubbles.map((b) => ({ box: toNorm(b.textBox, 800, 1100), text: b.text, translation: 'ПОДОЖДИ МЕНЯ', type: 'DIALOGUE', vertical: false })), entities: [], summary: '' }));
+    const settings = { ...defaultSettings(), providers: [{ ...configFromPreset('lmstudio', 'vlm'), id: 'v', vision: true }], visionProviderId: 'v', twoStepTranslation: false, qaMode: 'off' } as any;
+    const svc = new TranslateService(memoryDb(), { get: async () => undefined } as any, napiBackend, async () => settings, mock.fetchImpl);
+    const first = await svc.translate(bytes, 'image/png', { generic: true });
+    settings.fonts = { ...settings.fonts, fill: 0.7 };
+    const second = await svc.translate(bytes, 'image/png', { generic: true });
+    expect(mock.calls.length).toBe(1);
+    expect(second.result.key).toBe(first.result.key);
+    expect(second.result.rendered[0].bytes).not.toEqual(first.result.rendered[0].bytes);
+  });
+});

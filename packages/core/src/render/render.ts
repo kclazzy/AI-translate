@@ -74,7 +74,7 @@ function layoutBlockRaw(measurer: Measurer, block: TextBlock, d: StyleDefaults, 
   const scale = Math.max(0.5, Math.min(2, d.fontScale ?? 1));
   // A size the user set, sound effects and vertical text keep their own rules.
   const min = fixed || block.textType === 'SFX' || resolveStyle(block, d).vertical ? 0 : minReadable * Math.min(1, scale);
-  let best = layoutBlockIn(measurer, block, d, targetBox(block, d), block.textBox ? 'rect' : block.bubble?.shape ?? 'rect', undefined, min);
+  let best = layoutBlockIn(measurer, block, d, filled(targetBox(block, d), block, d), block.textBox ? 'rect' : block.bubble?.shape ?? 'rect', undefined, min);
   if (best.overflow && !block.textBox && block.bubble && !fixed) {
     // Does not fit the safe area: use the whole bubble (as a box, a little inside its edge) and
     // smaller letters, rather than letting the text run out of the bubble.
@@ -95,6 +95,23 @@ function layoutBlockRaw(measurer: Measurer, block: TextBlock, d: StyleDefaults, 
   }
   // Still smaller than readable: the place truly cannot hold the text — flag it for the editor.
   return best.fontSize < min ? { ...best, overflow: true } : best;
+}
+
+/** The place for the text scaled by «Заполнение бабла» around its middle, never past the bubble (sound effects keep theirs). */
+function filled(box: Box, block: TextBlock, d: StyleDefaults): Box {
+  const f = Math.max(0.5, Math.min(1.3, d.bubbleFill ?? 1));
+  if (f === 1 || block.textType === 'SFX') return box;
+  const [x, y, w, h] = box;
+  let out: Box = [x + (w * (1 - f)) / 2, y + (h * (1 - f)) / 2, w * f, h * f];
+  const bb = block.bubble?.box;
+  if (bb && f > 1) {
+    const x0 = Math.max(out[0], bb[0] + bb[2] * 0.04);
+    const y0 = Math.max(out[1], bb[1] + bb[3] * 0.04);
+    const x1 = Math.min(out[0] + out[2], bb[0] + bb[2] * 0.96);
+    const y1 = Math.min(out[1] + out[3], bb[1] + bb[3] * 0.96);
+    out = x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : box;
+  }
+  return out;
 }
 
 /** Free span of a bubble's real outline for a band of rows of `box`, a little inside its edge. */

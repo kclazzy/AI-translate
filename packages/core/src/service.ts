@@ -55,6 +55,8 @@ export interface StoredResult {
   seamGroup?: boolean;
   /** Text size scale the picture was drawn with (settings → fonts.scale). */
   fontScale?: number;
+  /** «Заполнение бабла» the page was drawn with (see drawnLike). */
+  bubbleFill?: number;
   /**
    * Made with lighter settings after the model ran out of video memory (smaller context / picture):
    * stored under its own key, so the full-quality key is tried again next time.
@@ -88,9 +90,15 @@ export interface CacheUsage {
 }
 
 /** Fonts that change the cached result: the text size scale only re-draws, so it is left out. */
-function lookOf(fonts: AppSettings['fonts']): Omit<AppSettings['fonts'], 'scale'> {
-  const { scale: _scale, ...rest } = fonts;
+function lookOf(fonts: AppSettings['fonts']): Omit<AppSettings['fonts'], 'scale' | 'fill'> {
+  // Text size and bubble fill only redraw a cached page (see drawnLike); the rest is part of its key.
+  const { scale: _scale, fill: _fill, ...rest } = fonts;
   return rest;
+}
+
+/** Is the stored page drawn with these settings' text size and bubble fill? Else it is drawn again. */
+function drawnLike(r: { fontScale?: number; bubbleFill?: number }, fonts: AppSettings['fonts']): boolean {
+  return (r.fontScale ?? 1) === (fonts.scale ?? 1) && (r.bubbleFill ?? 1) === (fonts.fill ?? 1);
 }
 
 export interface HistoryEntry {
@@ -226,7 +234,7 @@ export class TranslateService {
   async cachedResult(bytes: Uint8Array, opts: { sourceUrl?: string; seriesKey?: string; generic?: boolean } = {}): Promise<StoredResult | undefined> {
     const { settings, config } = await this.config(opts.seriesKey ?? seriesKeyFromUrl(opts.sourceUrl));
     const hit = await this.db.get<StoredResult>('results', await this.cacheKey(bytes, config, { generic: opts.generic, fonts: lookOf(settings.fonts) }));
-    if (!hit || (hit.fontScale ?? 1) !== (settings.fonts.scale ?? 1)) return undefined;
+    if (!hit || !drawnLike(hit, settings.fonts)) return undefined;
     return hit;
   }
 
@@ -237,7 +245,7 @@ export class TranslateService {
     for (const p of parts) {
       const ref = await this.db.get<string>('kv', `strip:${await this.cacheKey(p.bytes, config, { generic: opts.generic, fonts: lookOf(settings.fonts) })}`);
       const r = ref ? await this.getResult(ref) : undefined;
-      if (!r || (r.fontScale ?? 1) !== (settings.fonts.scale ?? 1)) return undefined;
+      if (!r || !drawnLike(r, settings.fonts)) return undefined;
       out.push(r);
     }
     return out;
@@ -296,7 +304,7 @@ export class TranslateService {
         // A cached page never waits for a picture prepared ahead (detector windows it does not need).
         this.ahead.delete(aheadId);
         // Only the text size changed in the settings: draw the text again, no model needed.
-        if ((hit.fontScale ?? 1) !== (settings.fonts.scale ?? 1) && !hit.strip) {
+        if (!drawnLike(hit, settings.fonts) && !hit.strip) {
           const again = await this.saveEdited(baseKey, hit.page);
           opts.onStage?.({ stage: 'done', progress: 1, message: 'cache' });
           return { result: again, cached: true };
@@ -383,7 +391,7 @@ export class TranslateService {
         seriesKey,
         createdAt: now,
         lastHitAt: now,
-        fontScale: settings.fonts.scale,
+        fontScale: settings.fonts.scale, bubbleFill: settings.fonts.fill,
         ...(lighter ? { degraded: true } : {}),
         ...(opts.generic ? { generic: true } : {}),
       };
@@ -544,7 +552,7 @@ export class TranslateService {
         seriesKey,
         createdAt: now,
         lastHitAt: now,
-        fontScale: settings.fonts.scale,
+        fontScale: settings.fonts.scale, bubbleFill: settings.fonts.fill,
         parts: members.map((m) => m.key),
         seamGroup: true,
       };
@@ -709,7 +717,7 @@ export class TranslateService {
     // Text size changed since: draw the strips again (each parent once), then take the pieces.
     const redrawn = new Set<string>();
     for (const [i, r] of known.entries()) {
-      if (!r?.strip || (r.fontScale ?? 1) === (settings.fonts.scale ?? 1)) continue;
+      if (!r?.strip || drawnLike(r, settings.fonts)) continue;
       const parent = r.strip.parent;
       if (!redrawn.has(parent)) {
         const pr = await this.getResult(parent);
@@ -947,7 +955,7 @@ export class TranslateService {
     if (!image) image = await tilesToImage(this.backend, stored.page.width, stored.page.height, stored.cleaned);
     const rendered = await renderOutput(this.backend, { page, cleaned: image }, styleDefaultsFor({ targetLang: page.targetLang, sfxStyle: settings.sfxStyle }, settings.fonts));
     const cleanedTiles = cleaned ? await Promise.all(cleaned.tiles.map(async (t) => ({ y: t.y, h: t.h, bytes: await this.backend.encode(t.canvas, 'image/png') }))) : stored.cleaned;
-    const next: StoredResult = { ...stored, page: rendered.page, rendered: rendered.tiles, cleaned: cleanedTiles, lastHitAt: new Date().toISOString(), fontScale: settings.fonts.scale };
+    const next: StoredResult = { ...stored, page: rendered.page, rendered: rendered.tiles, cleaned: cleanedTiles, lastHitAt: new Date().toISOString(), fontScale: settings.fonts.scale, bubbleFill: settings.fonts.fill };
     // Drawing took a while: a background change (the review) that was based on the copy read above
     // is dropped when someone (the editor, maybe in another tab) saved meanwhile.
     let conflict = false;

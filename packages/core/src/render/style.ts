@@ -24,6 +24,11 @@ export interface StyleDefaults {
   fontScale?: number;
   /** Never smaller than this, px (the user's setting; 0 / absent = the automatic readable size). */
   minFontSize?: number;
+  /**
+   * «Заполнение бабла»: how much of its place the text takes (1 = as usual; 0.7 = more air to the
+   * bubble's edge; up to 1.15 = more of the bubble, never past it).
+   */
+  bubbleFill?: number;
 }
 
 export const DEFAULT_STYLE_DEFAULTS: StyleDefaults = {
