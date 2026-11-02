@@ -37,3 +37,27 @@ describe('duplicating blocks', () => {
     expect(edge.bbox[0] + edge.bbox[2]).toBeLessThanOrEqual(1000);
   });
 });
+
+describe('brush / eraser shapes', () => {
+  it('a rectangle, an ellipse and a lasso fill their own area of the page', async () => {
+    const { shapeMask } = await import('../src/editor/shapes');
+    const page = { width: 200, height: 200 };
+    const at = (r: { box: number[]; mask: Uint8Array }, x: number, y: number) => r.mask[(y - r.box[1]) * r.box[2] + (x - r.box[0])];
+    const rect = shapeMask('rect', [[20, 30], [60, 40], [100, 90]], page)!;
+    expect(rect.box).toEqual([20, 30, 80, 60]);
+    expect(rect.mask.every((v) => v === 1)).toBe(true);
+    const ell = shapeMask('ellipse', [[20, 30], [100, 90]], page)!;
+    expect(at(ell, 60, 60)).toBe(1);
+    expect(at(ell, 21, 31)).toBe(0); // the corner of the frame is outside the ellipse
+    const share = ell.mask.reduce((a, v) => a + v, 0) / ell.mask.length;
+    expect(share).toBeGreaterThan(0.74);
+    expect(share).toBeLessThan(0.82); // π/4 of the frame
+    // A triangle drawn freehand: inside filled, the other half of its box not.
+    const lasso = shapeMask('lasso', [[10, 10], [110, 10], [10, 110]], page)!;
+    expect(at(lasso, 30, 30)).toBe(1);
+    expect(at(lasso, 100, 100)).toBe(0);
+    // Kept on the page; nothing for a frame of no size.
+    expect(shapeMask('rect', [[150, 150], [260, 300]], page)!.box).toEqual([150, 150, 50, 50]);
+    expect(shapeMask('rect', [[10, 10], [10, 10]], page)).toBeNull();
+  });
+});

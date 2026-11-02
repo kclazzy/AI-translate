@@ -33,6 +33,7 @@ import { exportChapterTexts, exportTexts, importTexts } from './texts';
 import { EditHistory, type HistoryItem } from './history';
 import { confirmLeave, setActiveEditor, type EditorGuard } from './guard';
 import { duplicateBlocks } from './blocks';
+import { shapeMask, type BrushShape } from './shapes';
 import { PRESETS_KEY, presetStyle, removePreset, savePreset, type StylePreset } from './presets';
 import { exportPsd, psdTooBig } from '../psd';
 import { editorReportParts, ProblemReportButton } from '../ProblemReportButton';
@@ -116,6 +117,8 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
   /** Blocks selected together with `selected` (Ctrl/Shift+click): style changes apply to all of them. */
   const [multi, setMulti] = useState<Set<string>>(new Set());
   const [styleClip, setStyleClip] = useState<Partial<TextStyle> | null>(null);
+  /** The brush, eraser and ◍ paint along the stroke or a whole shape (rectangle, ellipse, lasso). */
+  const [brushShape, setBrushShape] = useState<BrushShape>('free');
   // «Наборы стилей»: named looks kept for every page and project.
   const [presets, setPresets] = useState<StylePreset[]>([]);
   useEffect(() => {
@@ -704,6 +707,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     e.preventDefault();
     const gestureTool = tool;
     const frameTool = gestureTool === 'ocr' || gestureTool === 'crop';
+    const gestureShape: BrushShape = frameTool ? 'free' : brushShape;
     const pts: [number, number][] = [toPage(e.clientX, e.clientY)];
     // The preview of a stroke is drawn in screen pixels over the visible part of the stage, one new
     // segment per move: no page-sized canvas, no redrawing the whole path.
@@ -713,6 +717,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     let octx: CanvasRenderingContext2D | null = null;
     let origin: [number, number] = [0, 0];
     let last: [number, number] = [0, 0];
+    let start: [number, number] = [0, 0];
     if (!frameTool && overlay && stage && wrap) {
       const sr = stage.getBoundingClientRect();
       const wr = wrap.getBoundingClientRect();
@@ -731,10 +736,13 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       if (octx) {
         octx.setTransform(dpr, 0, 0, dpr, 0, 0);
         octx.strokeStyle = gestureTool === 'brush' ? brushColor : OVERLAY_COLORS[gestureTool as 'eraser' | 'inpaint'];
-        octx.lineWidth = Math.max(1, brush * zoomRef.current);
+        octx.fillStyle = octx.strokeStyle;
+        // A lasso is outlined with a thin line (its inside is painted when it closes).
+        octx.lineWidth = gestureShape === 'lasso' ? 2 : Math.max(1, brush * zoomRef.current);
         octx.lineCap = 'round';
         octx.lineJoin = 'round';
         last = [e.clientX - origin[0], e.clientY - origin[1]];
+        start = last;
         octx.beginPath();
         octx.moveTo(last[0], last[1]);
         octx.lineTo(last[0] + 0.1, last[1]);
@@ -755,6 +763,16 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
       }
       if (!octx) return;
       const cur: [number, number] = [ev.clientX - origin[0], ev.clientY - origin[1]];
+      if (gestureShape === 'rect' || gestureShape === 'ellipse') {
+        // The whole shape, drawn again from the first point to here.
+        octx.clearRect(0, 0, overlay!.width, overlay!.height);
+        const [sx, sy] = start;
+        octx.beginPath();
+        if (gestureShape === 'rect') octx.rect(Math.min(sx, cur[0]), Math.min(sy, cur[1]), Math.abs(cur[0] - sx), Math.abs(cur[1] - sy));
+        else octx.ellipse((sx + cur[0]) / 2, (sy + cur[1]) / 2, Math.abs(cur[0] - sx) / 2, Math.abs(cur[1] - sy) / 2, 0, 0, Math.PI * 2);
+        octx.fill();
+        return;
+      }
       octx.beginPath();
       octx.moveTo(last[0], last[1]);
       octx.lineTo(cur[0], cur[1]);
@@ -785,7 +803,7 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
         if (rect[2] > 8 && rect[3] > 8) void ocr.run(rect);
         return;
       }
-      applyStroke(pts, gestureTool);
+      applyStroke(pts, gestureTool, gestureShape);
     };
     // Esc: nothing is painted, no frame is taken.
     cancelGesture.current = finish;
@@ -793,7 +811,13 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     window.addEventListener('pointerup', up);
   };
 
-  const applyStroke = (pts: [number, number][], strokeTool: Tool) => {
+  const applyStroke = (pts: [number, number][], strokeTool: Tool, shape: BrushShape = 'free') => {
+    if (shape !== 'free') {
+      // A whole shape at once: its own area (see shapes.ts).
+      const s = shapeMask(shape, pts, cleaned);
+      if (s) applyMask(s.box, s.mask, strokeTool);
+      return;
+    }
     const r = brush / 2;
     const xs = pts.map((p) => p[0]);
     const ys = pts.map((p) => p[1]);
@@ -813,6 +837,11 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
     const md = mctx.getImageData(0, 0, box[2], box[3]).data as Uint8ClampedArray;
     const mask = new Uint8Array(box[2] * box[3]);
     for (let i = 0; i < mask.length; i++) mask[i] = md[i * 4 + 3] > 40 ? 1 : 0;
+    applyMask(box, mask, strokeTool);
+  };
+
+  /** Paint, erase (back to the original) or redraw (◍) the pixels of `mask` over `box`, as one undo step. */
+  const applyMask = (box: Box, mask: Uint8Array, strokeTool: Tool) => {
     if (strokeTool === 'inpaint' && lamaReady) {
       void redrawWithLama(box, mask);
       return;
@@ -1099,6 +1128,15 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
           {toolBtn('picker', '⊙', tr('Пипетка: взять цвет для кисти с картинки (Alt+щелчок кистью)'), 'I')}
           <input className="ait-pal-color" type="color" value={brushColor} onChange={(e) => setBrushColor(e.target.value)} aria-label={tr('Цвет кисти')} title={tr('Цвет кисти')} data-testid="brush-color" />
           {painting ? (
+            <div className="ait-pal-group" role="group" aria-label={tr('Форма')} data-testid="brush-shape">
+              {([['free', '✎', tr('Мазок кистью')], ['rect', '▭', tr('Прямоугольник')], ['ellipse', '◯', tr('Эллипс')], ['lasso', '➰', tr('Лассо: обведите область')]] as const).map(([k, icon, label]) => (
+                <button key={k} className={`ait-pal-btn ${brushShape === k ? 'active' : ''}`} aria-pressed={brushShape === k} title={label} aria-label={label} onClick={() => setBrushShape(k)}>
+                  {icon}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {painting && brushShape === 'free' ? (
             <div className="ait-pal-group" aria-label={tr('Размер кисти')}>
               <button className="ait-pal-btn" onClick={() => setBrush((b) => Math.min(200, b + 4))} title={tr('Больше ( ] ). Или зажмите правую кнопку мыши и тяните')} aria-label={tr('Кисть больше')}>+</button>
               <input className="ait-pal-range" type="range" min={1} max={200} value={brush} onChange={(e) => setBrush(Number(e.target.value))} aria-label={tr('Размер кисти')} />

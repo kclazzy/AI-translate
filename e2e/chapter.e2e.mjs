@@ -305,6 +305,28 @@ try {
     const shown = await studio.evaluate(() => ({ text: document.body.innerText.slice(0, 400), pages: document.querySelectorAll('[data-testid="chapters-panel"] [data-key], .ait-chapters li').length }));
     await studio.screenshot({ path: join(OUT, 'history-open-chapter.png') });
     check('«Открыть главу» in the history opens the editor with the chapter, no error', !/Что-то пошло не так/.test(shown.text) && /редакт|Редакт/i.test(shown.text), JSON.stringify({ shown, errors: errors.slice(0, 5) }));
+    // The editor's brush as a shape: a rectangle drawn with the brush paints that area (one undo step).
+    {
+      await studio.keyboard.press('b');
+      await studio.click('[data-testid="brush-shape"] button[aria-pressed="false"][title="Прямоугольник"]').catch(() => {});
+      const box = await studio.$eval('.ait-stage-inner', (el) => { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }).catch(() => null);
+      const undoBefore = await studio.$eval('button[aria-label="Отменить"]', (b) => b.disabled).catch(() => null);
+      if (box) {
+        await studio.mouse.move(box.x + box.w * 0.2, box.y + 40);
+        await studio.mouse.down();
+        await studio.mouse.move(box.x + box.w * 0.5, box.y + 120, { steps: 6 });
+        await studio.mouse.up();
+        await new Promise((r) => setTimeout(r, 600));
+      }
+      const undoAfter = await studio.$eval('button[aria-label="Отменить"]', (b) => b.disabled).catch(() => null);
+      await studio.screenshot({ path: join(OUT, 'editor-rect-brush.png') });
+      check('the brush as a rectangle paints its area in one step (undo becomes possible)', !!box && undoBefore === true && undoAfter === false, JSON.stringify({ box, undoBefore, undoAfter }));
+      // Undone, and leaving the page without saving is allowed (the next steps open other pages here).
+      await studio.keyboard.down('Control');
+      await studio.keyboard.press('z');
+      await studio.keyboard.up('Control');
+      studio.on('dialog', (d) => void d.accept().catch(() => {}));
+    }
     // «Очистить кэш» removes the pictures but keeps the history: a chapter whose pages are gone
     // (some, then all) still opens, with what is left or a plain message — never the error screen.
     for (const all of [false, true]) {
