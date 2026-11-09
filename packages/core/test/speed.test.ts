@@ -708,6 +708,38 @@ describe('the picture below goes along to look at the seam', () => {
     expect((await svc.getResult(parts[0].key))!.page.blocks).toEqual([]);
   });
 
+  it('asked by the user («Объединить через стык» in the editor), the band is read even when no cut was seen, again later, and inside a strip', async () => {
+    // The text on the seam was read on neither side (left in English between the pages): no block
+    // touches the edge, the pixels are calm — the program alone sees nothing to repair.
+    const [top, bottom] = await bubblePage([{ y: 470, text: 'WHO ARE' }, { y: 530, text: 'YOU?' }], 500);
+    let phase = 1;
+    let first = true;
+    const empty = JSON.stringify({ blocks: [], entities: [], summary: '' });
+    const m = mock(() => {
+      if (!first) return empty;
+      first = false;
+      if (phase === 1) return empty;
+      return JSON.stringify({ blocks: [{ box: [400, 300, 600, 700], text: 'WHO ARE YOU?', translation: phase === 2 ? 'КТО ТЫ?' : 'ТЫ КТО?', type: 'DIALOGUE' }], entities: [], summary: '' });
+    });
+    const step = (p: number) => ((phase = p), (first = true));
+    const svc = new TranslateService(memoryDb(), secrets, napiBackend, async () => settingsWith({ skipEmptyPages: false }), m.fetchImpl);
+    svc.compactTiles = false;
+    const a = await svc.translate(top, 'image/png', { noSkip: true });
+    step(1);
+    const b = await svc.translate(bottom, 'image/png', { noSkip: true });
+    expect(await svc.repairSeam(a.result.key, b.result.key)).toBe(false);
+    step(2);
+    expect(await svc.repairSeam(a.result.key, b.result.key, { force: true })).toBe(true);
+    const texts = async (k: string) => (await svc.getResult(k))!.page.blocks.map((x) => x.translatedText);
+    expect(await texts(a.result.key)).toEqual(['КТО ТЫ?']);
+    expect(await texts(b.result.key)).toEqual(['КТО ТЫ?']);
+    // Again (the pictures are one seam group now): read anew, the new reading replaces the old.
+    step(3);
+    expect(await svc.repairSeam(a.result.key, b.result.key, { force: true })).toBe(true);
+    expect(await texts(a.result.key)).toEqual(['ТЫ КТО?']);
+    expect(await texts(b.result.key)).toEqual(['ТЫ КТО?']);
+  });
+
   it('text near a calm seam is not a cut', async () => {
     const [top, bottom] = await bubblePage([{ y: 420, text: 'ABOVE' }], 350);
     const [, lower] = await bubblePage([{ y: 580, text: 'BELOW' }], 650);

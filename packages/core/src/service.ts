@@ -423,12 +423,16 @@ export class TranslateService {
    * arrived together: the band's text goes in once, is drawn once across the seam, and each picture
    * shows its part. A picture already joined at its other seam brings its whole group along.
    * Returns false when there is nothing to do (no cut, done before, a strip of another kind, other widths).
+   * `force` (the user's «Объединить через стык» in the editor): the band is read even when no cut is
+   * seen (text on the seam read on neither side), when the seam was repaired before, and when both
+   * pictures are already in one strip — the new reading replaces the old one there.
    */
-  async repairSeam(upperKey: string, lowerKey: string, opts: { signal?: AbortSignal } = {}): Promise<boolean> {
+  async repairSeam(upperKey: string, lowerKey: string, opts: { signal?: AbortSignal; force?: boolean } = {}): Promise<boolean> {
     const up = await this.getResult(upperKey);
     const lo = await this.getResult(lowerKey);
     if (!up || !lo || up.generic || lo.generic || up.parts?.length || lo.parts?.length) return false;
-    if (up.seams?.includes(lowerKey) || (up.strip && lo.strip && up.strip.parent === lo.strip.parent)) return false;
+    const together = !!up.strip && !!lo.strip && up.strip.parent === lo.strip.parent;
+    if (!opts.force && (up.seams?.includes(lowerKey) || together)) return false;
     const groupOf = async (r: StoredResult): Promise<StoredResult[] | null> => {
       if (!r.strip) return [r];
       const parent = await this.getResult(r.strip.parent);
@@ -438,10 +442,21 @@ export class TranslateService {
       const all = await Promise.all(parent.parts.map((k) => this.getResult(k)));
       return all.every(Boolean) ? (all as StoredResult[]) : null;
     };
-    const left = await groupOf(up);
-    const right = await groupOf(lo);
-    if (!left || !right || left[left.length - 1].key !== upperKey || right[0].key !== lowerKey) return false;
-    const members = [...left, ...right];
+    // The pictures of the new group, and where the seam is in it (the index of the lower picture).
+    let members: StoredResult[];
+    let at: number;
+    if (together) {
+      const g = await groupOf(up);
+      at = g?.findIndex((m) => m.key === lowerKey) ?? -1;
+      if (!g || at < 1 || g[at - 1].key !== upperKey) return false;
+      members = g;
+    } else {
+      const left = await groupOf(up);
+      const right = await groupOf(lo);
+      if (!left || !right || left[left.length - 1].key !== upperKey || right[0].key !== lowerKey) return false;
+      members = [...left, ...right];
+      at = left.length;
+    }
     const W = up.page.width;
     if (members.some((m) => m.page.width !== W)) return false;
     const H = up.page.height;
@@ -454,10 +469,11 @@ export class TranslateService {
       const near = Math.max(24, Math.round(W * 0.08));
       cutUp = up.page.blocks.filter((b) => touchesEdge(b, H - near, 'bottom'));
       cutLo = lo.page.blocks.filter((b) => touchesEdge(b, lo.page.height, 'top', near));
-      if (!cutUp.length && !cutLo.length) return false;
+      // Asked by the user: the band around the seam is read whatever is seen here.
+      if (!cutUp.length && !cutLo.length && !opts.force) return false;
       const pair = [up.original, lo.original];
-      const plan = await planStrip(this.backend, pair);
-      if (plan.calmAfter[0]) {
+      const plan = opts.force ? null : await planStrip(this.backend, pair);
+      if (plan?.calmAfter[0]) {
         // Calm pixels, but the detector may still see a bubble across the seam (its white middle).
         const { config: cfg } = await this.config(up.seriesKey ?? lo.seriesKey);
         if (!cfg.detector || !this.detector || (await seamFree(this.backend, pair, plan, 0, this.detector))) return false;
@@ -477,8 +493,8 @@ export class TranslateService {
     const keep = <T extends { dispose(): void }>(x: T): T => (owned.push(x), x);
     try {
       const originals = await Promise.all(members.map(async (m) => keep(await TiledImage.fromBytes(this.backend, m.original.bytes, m.original.mime))));
-      const upImg = originals[left.length - 1];
-      const loImg = originals[left.length];
+      const upImg = originals[at - 1];
+      const loImg = originals[at];
       const band = keep(new TiledImage(this.backend, W, hA + hB));
       band.putRegion(upImg.getRegion(0, yA, W, hA), 0, 0);
       band.putRegion(loImg.getRegion(0, 0, W, hB), 0, hA);
@@ -504,7 +520,7 @@ export class TranslateService {
         offsets.push(total);
         total += m.page.height;
       }
-      const seamY = offsets[left.length];
+      const seamY = offsets[at];
       const bandTop = seamY - hA;
       const bandBottom = seamY + hB;
       const ownBlocks = members.flatMap((m, i) => m.page.blocks.filter((b) => !b.continued).map((b) => shiftBlock(b, -offsets[i])));
@@ -529,7 +545,7 @@ export class TranslateService {
         height: total,
         blocks: [...kept, ...fromBand].sort((x, y) => x.bbox[1] - y.bbox[1]),
         usage: out.page.usage,
-        debug: { ...(out.page.debug ?? { answers: [], modelBlocks: [], steps: [] }), steps: [...(out.page.debug?.steps ?? []), `seam between pictures ${left.length} and ${left.length + 1} translated as one band`] },
+        debug: { ...(out.page.debug ?? { answers: [], modelBlocks: [], steps: [] }), steps: [...(out.page.debug?.steps ?? []), `seam between pictures ${at} and ${at + 1} translated as one band${opts.force ? ' (asked by the user)' : ''}`] },
       };
       const rendered = await renderOutput(this.backend, { page, cleaned }, styleDefaultsFor(config, settings.fonts));
       // Everything the strip is made of goes into bytes now; the canvases are let go right after.
@@ -556,16 +572,13 @@ export class TranslateService {
         parts: members.map((m) => m.key),
         seamGroup: true,
       };
-      for (const g of [left, right]) {
-        const old = g[0].strip?.parent;
-        if (old && old !== parentKey) await this.dropResult(old);
-      }
+      for (const old of new Set(members.map((m) => m.strip?.parent))) if (old && old !== parentKey) await this.dropResult(old);
       await this.putResult(parentKey, parent);
       const parts = await this.deriveParts(parent, members.map((m, i) => ({ y: offsets[i], h: m.page.height })));
       // Each picture keeps its own id (the series context knows it by it) and remembers the seam.
       for (const [i, p] of parts.entries()) {
         const m = members[i];
-        await this.putResult(p.key, { ...p, seamGroup: undefined, page: { ...p.page, pageId: m.page.pageId }, original: m.original, seams: [...new Set([...(m.seams ?? []), ...(i === left.length - 1 ? [lowerKey] : i === left.length ? [upperKey] : [])])] });
+        await this.putResult(p.key, { ...p, seamGroup: undefined, page: { ...p.page, pageId: m.page.pageId }, original: m.original, seams: [...new Set([...(m.seams ?? []), ...(i === at - 1 ? [lowerKey] : i === at ? [upperKey] : [])])] });
       }
       await this.recordUsage(out.page.usage, false);
       for (const p of parts) this.onResultChanged?.(p.key);
