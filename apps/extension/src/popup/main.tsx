@@ -244,6 +244,11 @@ function Popup() {
           settings={s}
           update={update}
           compact
+          onConnectCloud={() => {
+            // The form that connects an online model, open in Settings (the popup would close while the key is copied).
+            open('studio.html?view=settings&connect=cloud');
+            window.close();
+          }}
           onPick={(m, next) => {
             if (m !== 'ocr') return;
             // From this click: the browser's translator gets its language packs (the main languages)…

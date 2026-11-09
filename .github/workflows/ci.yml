@@ -74,6 +74,7 @@ jobs:
           xvfb-run -a node e2e/phrasebook.e2e.mjs 2>&1 | tee .test-output/e2e-phrasebook.log
           xvfb-run -a node e2e/race.e2e.mjs 2>&1 | tee .test-output/e2e-race.log
           xvfb-run -a node e2e/seam.e2e.mjs 2>&1 | tee .test-output/e2e-seam.log
+          xvfb-run -a node e2e/cloudmode.e2e.mjs 2>&1 | tee .test-output/e2e-cloudmode.log
           xvfb-run -a node e2e/far.e2e.mjs 2>&1 | tee .test-output/e2e-far.log
           xvfb-run -a node e2e/browsertr.e2e.mjs 2>&1 | tee .test-output/e2e-browsertr.log
           # Chapter tools: 7z/TAR chapters, «Вычитка»; the upscaler from this repository's models-2 release.

@@ -27,9 +27,12 @@ export function aiModeHint(m: AiMode): string {
  * shown greyed out with what it needs. The settings page (`force`) also offers the separate Python
  * engine, as an option for advanced users.
  */
-export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = true, onPick }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; compact?: boolean; force?: boolean; ocrHere?: boolean; onPick?: (m: AiMode, next: AppSettings) => void }) {
+export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = true, onPick, connectOpen = false, onConnectCloud }: { settings: AppSettings; update: (p: Partial<AppSettings>) => void; compact?: boolean; force?: boolean; ocrHere?: boolean; onPick?: (m: AiMode, next: AppSettings) => void; connectOpen?: boolean; onConnectCloud?: () => void }) {
   const platform = useContext(PlatformContext);
-  const [connect, setConnect] = useState(false);
+  const [connect, setConnect] = useState(connectOpen);
+  // Where an online model is connected: in a form right here, else where `onConnectCloud` leads
+  // (the popup is too small for it and closes while the key is being copied from the service's site).
+  const connectHere = !compact && !!platform?.secrets;
   const now = aiModeOf(s);
   const can = { ...aiModesAvailable(s), ...(ocrHere ? {} : { ocr: false }) };
   const need = (m: AiMode) => (m === 'engine' ? tr('Укажите адрес движка в настройках') : m === 'cloud' ? tr('Добавьте онлайн-сервер с моделью, читающей картинки') : m === 'ocr' ? (ocrHere ? tr('Нужен Chrome 138 или новее (встроенный переводчик) либо сервер с моделью для перевода') : tr('Распознавание в браузере доступно в расширении для ПК')) : tr('Добавьте Ollama или LM Studio'));
@@ -38,8 +41,8 @@ export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = tr
       <div className="ait-seg" role="group" aria-label={tr('Режим работы ИИ')}>
         {MODES.map((m) => {
           const enabled = can[m];
-          // «Облако» with no online model yet: the click offers to connect one right here.
-          const offer = m === 'cloud' && !enabled && !compact && !!platform?.secrets;
+          // «Облако» with no online model yet: the click offers to connect one.
+          const offer = m === 'cloud' && !enabled && (connectHere || !!onConnectCloud);
           return (
             <button
               key={m}
@@ -49,7 +52,7 @@ export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = tr
               disabled={!enabled && !offer}
               title={enabled ? aiModeHint(m) : need(m)}
               onClick={() => {
-                if (offer) return setConnect(!connect);
+                if (offer) return connectHere ? setConnect(!connect) : onConnectCloud?.();
                 const patch = applyAiMode(s, m) ?? (m === 'engine' ? { pipeline: 'engine' as const } : null);
                 if (!patch) return;
                 update(patch);
@@ -64,7 +67,7 @@ export function AiModeSwitch({ settings: s, update, compact, force, ocrHere = tr
           );
         })}
       </div>
-      {connect && !can.cloud ? <CloudConnect settings={s} update={update} onDone={() => setConnect(false)} /> : null}
+      {connect && connectHere && !can.cloud ? <CloudConnect settings={s} update={update} onDone={() => setConnect(false)} /> : null}
       {compact ? null : <small className="ait-muted ait-set-hint">{aiModeHint(now)}</small>}
       {now === 'ocr' ? <OcrTranslatorPick settings={s} update={update} /> : null}
       {now === 'ocr' && !compact ? <OcrModelsCard settings={s} /> : null}

@@ -608,7 +608,7 @@ export function SettingsPanel({ settings: s, update }: SettingsProps) {
       {/* The way of working, and only what belongs to it; a switch brings the settings that suit it. */}
       <div className="ait-panel" data-testid="mode-panel">
         <h2>{tr('Режим работы ИИ')}</h2>
-        <AiModeSwitch settings={s} update={update} force ocrHere={!!platform.ocr} />
+        <AiModeSwitch settings={s} update={update} force ocrHere={!!platform.ocr} connectOpen={params.get('connect') === 'cloud'} />
         {mode === 'cloud' ? (
           <Field label={tr('Онлайн-модель')} hint={tr('Добавить сервис или ключ — в разделе «Модели и серверы» ниже')}>
             <select className="ait-select" data-testid="cloud-model" value={s.visionProviderId ?? ''} onChange={(e) => update({ visionProviderId: e.target.value || null })}>
