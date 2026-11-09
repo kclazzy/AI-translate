@@ -70,7 +70,7 @@ const site = createServer((req, res) => {
   res.writeHead(404).end();
 });
 await new Promise((r) => site.listen(18111, '127.0.0.1', r));
-const { server: llm } = await startMockLlm(18110);
+const { server: llm, calls: llmCalls } = await startMockLlm(18110);
 
 const cdp = !!process.env.E2E_CDP_EXTENSIONS;
 const browser = await puppeteer.launch({
@@ -326,6 +326,18 @@ try {
       await studio.keyboard.press('z');
       await studio.keyboard.up('Control');
       studio.on('dialog', (d) => void d.accept().catch(() => {}));
+      // «⇅ Объединить через стык» on a seam of the whole chapter: the band around it goes to the model as one picture.
+      const seams = await studio.$$eval('[data-testid="seam-merge"]', (b) => b.length).catch(() => 0);
+      const from = llmCalls.length;
+      await studio.$eval('[data-testid="seam-merge"]', (b) => b.scrollIntoView({ block: 'center' })).catch(() => {});
+      await new Promise((r) => setTimeout(r, 300));
+      await studio.screenshot({ path: join(OUT, 'editor-seam.png') });
+      await studio.click('[data-testid="seam-merge"]').catch(() => {});
+      const sizes = () => llmCalls.slice(from).map((c) => /The image is (\d+)×(\d+)/.exec(JSON.stringify(c.messages))?.slice(1).map(Number)).filter(Boolean);
+      for (let i = 0; i < 60 && !sizes().length; i++) await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 1500));
+      const text = await studio.evaluate(() => document.body.innerText);
+      check('«⇅ Объединить через стык» in the whole chapter reads the band around that seam with the model', seams >= 1 && sizes().some(([, h]) => h !== 1100 && h < 1100) && !/Что-то пошло не так/.test(text), JSON.stringify({ seams, sizes: sizes() }));
     }
     // «Очистить кэш» removes the pictures but keeps the history: a chapter whose pages are gone
     // (some, then all) still opens, with what is left or a plain message — never the error screen.

@@ -126,6 +126,8 @@ export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose, on
   const [error, setError] = useState<unknown>(null);
   const [title, setTitle] = useState('');
   const [whole, setWhole] = useState(!!initialWhole && !!chapterKeys && chapterKeys.length > 1);
+  /** Bumped after «Объединить через стык»: the pictures were read anew, the strip is loaded again. */
+  const [reload, setReload] = useState(0);
   /** The texts of each picture as last stored (whole chapter): unchanged pictures are not saved again. */
   const saved = useRef(new Map<string, string>());
   useEffect(() => {
@@ -157,7 +159,7 @@ export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose, on
     return () => {
       cancelled = true;
     };
-  }, [platform, resultKey, chapterKeys, whole]);
+  }, [platform, resultKey, chapterKeys, whole, reload]);
   if (error instanceof NotCached) return <p className="ait-notice" data-testid="editor-not-cached">{error.message}</p>;
   if (error) return <ErrorBox error={error} />;
   if (!data) return <p className="ait-muted">{tr('Загрузка страницы…')}</p>;
@@ -176,6 +178,20 @@ export function CachedPageEditor({ resultKey, chapterKeys, settings, onClose, on
       settings={settings}
       onClose={onClose}
       marks={data.segments.length > 1 ? data.segments.slice(1).map((s) => s.y) : undefined}
+      onSeam={async (i) => {
+        // Mark i lies between segments i and i + 1; a segment may be a glued strip: its last / first picture.
+        const [a, b] = [data.segments[i], data.segments[i + 1]];
+        const ra = await platform.service.getResult(a.key);
+        const rb = await platform.service.getResult(b.key);
+        const upper = ra?.parts?.at(-1) ?? a.key;
+        const lower = rb?.parts?.[0] ?? b.key;
+        if (!(await platform.service.repairSeam(upper, lower, { force: true }))) return false;
+        for (const k of [upper, lower]) await changed(k);
+        const r = await platform.service.getResult(upper);
+        if (r?.strip) await changed(r.strip.parent);
+        setReload((n) => n + 1);
+        return true;
+      }}
       reportSource={async () => {
         if (data.segments.length !== 1) return undefined;
         const r = await platform.service.getResult(data.segments[0].key);

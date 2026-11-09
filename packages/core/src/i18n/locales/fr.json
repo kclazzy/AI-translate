@@ -1450,5 +1450,9 @@
  "Удалить блоки ({0})": "Supprimer les blocs ({0})",
  "Удалить набор стилей": "Supprimer un préréglage de style",
  "Форма": "Forme",
- "Эллипс": "Ellipse"
+ "Эллипс": "Ellipse",
+ "Бабл переходит на соседнюю страницу и текст не переведён? Прочитать полосу вокруг этого стыка одним куском": "Une bulle déborde sur la page suivante et son texte n'est pas traduit ? Lire la bande autour de cette jointure d'un seul tenant",
+ "На стыке ничего не прочитано — попробуйте «Ручной OCR» рамкой вокруг текста": "Rien n'a été lu à la jointure — essayez « OCR manuel » avec un cadre autour du texte",
+ "Объединить через стык": "Fusionner à travers la jointure",
+ "Сначала сохранить правки? Без этого они пропадут, когда стык перечитается.": "Enregistrer d'abord les modifications ? Sinon elles seront perdues quand la jointure sera relue."
 }

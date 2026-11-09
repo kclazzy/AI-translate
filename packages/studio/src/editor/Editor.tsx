@@ -27,6 +27,7 @@ import {
   QA_LABELS,
   qaNote,
   SELF_CHECK_NOTES,
+  errorMessage,
 } from '@ait/core';
 import { loadUserFonts, registerUserFont, saveUserFont } from '../fonts';
 import { exportChapterTexts, exportTexts, importTexts } from './texts';
@@ -56,6 +57,11 @@ export interface EditorProps {
   title?: string;
   /** Rows where one picture of the chapter ends and the next begins (whole-chapter mode). */
   marks?: number[];
+  /**
+   * «Объединить через стык» at mark `i`: the band around that seam is read again as one piece (a bubble
+   * cut by it, its text left untranslated). Resolves true when a new reading came in (the page reloads).
+   */
+  onSeam?: (i: number) => Promise<boolean>;
   /** Extra buttons for the toolbar. */
   toolbarExtra?: React.ReactNode;
   /** Texts of every translated page of the chapter, in reading order (for «Скачать весь текст с главы»). */
@@ -101,7 +107,7 @@ function blockRows(b: TextBlock, l: LayoutResult, d: StyleDefaults): [number, nu
 const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((x) => b.has(x));
 const OVERLAY_COLORS = { brush: '', eraser: '#1c6ed8', inpaint: '#c8205f' } as const;
 
-export function Editor({ page, original, cleaned, settings, onSave, onClose, title, marks, toolbarExtra, chapterTexts, onCrop, onDirtyChange, reportSource }: EditorProps) {
+export function Editor({ page, original, cleaned, settings, onSave, onClose, title, marks, onSeam, toolbarExtra, chapterTexts, onCrop, onDirtyChange, reportSource }: EditorProps) {
   const platform = usePlatform();
   const [blocks, setBlocks] = useState<TextBlock[]>(page.blocks);
   const [selected, setSelected] = useState<string | null>(page.blocks[0]?.id ?? null);
@@ -923,6 +929,24 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
 
   // ---- saving and leaving --------------------------------------------------------------------------
   const [saving, setSaving] = useState(false);
+  /** The seam being read again (see onSeam). */
+  const [seamBusy, setSeamBusy] = useState<number | null>(null);
+  const mergeSeam = async (i: number) => {
+    if (!onSeam) return;
+    // The new reading replaces these pictures: unsaved edits are kept by saving them first.
+    if (dirtyRef.current) {
+      if (!confirm(tr('Сначала сохранить правки? Без этого они пропадут, когда стык перечитается.'))) return;
+      if (!(await saveNow())) return;
+    }
+    setSeamBusy(i);
+    try {
+      if (!(await onSeam(i))) toast(tr('На стыке ничего не прочитано — попробуйте «Ручной OCR» рамкой вокруг текста'));
+    } catch (e) {
+      toast(errorMessage(e));
+    } finally {
+      setSeamBusy(null);
+    }
+  };
   const [saveError, setSaveError] = useState<unknown>(null);
   const savePromise = useRef<Promise<boolean> | null>(null);
   const saveNow = (): Promise<boolean> => {
@@ -1221,6 +1245,22 @@ export function Editor({ page, original, cleaned, settings, onSave, onClose, tit
         >
           <div ref={innerRef} className="ait-stage-inner" style={{ width: page.width * zoom, height: page.height * zoom }}>
             {marks?.map((y) => <div key={`m${y}`} className="ait-page-mark" style={{ top: y * zoom }} aria-hidden />)}
+            {onSeam
+              ? marks?.map((y, i) => (
+                  <button
+                    key={`sb${y}`}
+                    className="ait-btn small ait-seam-btn"
+                    style={{ top: y * zoom }}
+                    data-testid="seam-merge"
+                    disabled={seamBusy !== null}
+                    title={tr('Бабл переходит на соседнюю страницу и текст не переведён? Прочитать полосу вокруг этого стыка одним куском')}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => void mergeSeam(i)}
+                  >
+                    {seamBusy === i ? '…' : `⇅ ${tr('Объединить через стык')}`}
+                  </button>
+                ))
+              : null}
             {ocrFrame ? (
               <div className={`ait-ocr-frame ${tool === 'crop' ? 'crop' : ''}`} data-testid="ocr-frame" style={{ left: ocrFrame[0] * zoom, top: ocrFrame[1] * zoom, width: ocrFrame[2] * zoom, height: ocrFrame[3] * zoom }}>
                 <span>{Math.round(ocrFrame[2])}×{Math.round(ocrFrame[3])}</span>
