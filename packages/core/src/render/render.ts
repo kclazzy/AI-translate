@@ -3,7 +3,7 @@ import type { AnyCanvas, ImageBackend, ImageMime } from '../image/backend';
 import type { TiledImage } from '../image/tiled';
 import type { Box, BubbleRows, TextBlock } from '../types';
 import { layoutText, type LayoutResult, type Measurer } from '../typeset/layout';
-import { resolveStyle, targetBox, type StyleDefaults, DEFAULT_STYLE_DEFAULTS } from './style';
+import { resolveStyle, targetBox, type StyleDefaults, DEFAULT_STYLE_DEFAULTS, RENDER_HEADROOM } from './style';
 import { yieldIfBusy } from '../util/yield';
 
 export function ctxMeasurer(ctx: any): Measurer {
@@ -155,7 +155,7 @@ function layoutBlockIn(measurer: Measurer, block: TextBlock, d: StyleDefaults, b
   // «Размер шрифта перевода» in the settings: all automatic sizes scaled (a size set by hand stays).
   const scale = Math.max(0.5, Math.min(2, d.fontScale ?? 1));
   // Never capped below the readable size: small original lettering is no reason for tiny text.
-  const cap = block.fontSizeEstimate > 0 ? Math.max(14, readable, block.fontSizeEstimate * 1.3) * Math.max(1, scale) : undefined;
+  const cap = block.fontSizeEstimate > 0 ? Math.max(14, readable, block.fontSizeEstimate * RENDER_HEADROOM) * Math.max(1, scale) : undefined;
   const input = {
     text: displayText(block, d),
     minSize,

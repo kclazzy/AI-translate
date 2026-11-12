@@ -13,7 +13,7 @@ import type { FetchLike, LlmProvider } from '../llm/types';
 import { memoryKey, mergeContext, rememberedTranslation, withoutPage, type ContextUpdate, type TranslationContext } from '../translate/context';
 import { applyForbiddenFixes, findGlossaryHits, findViolations } from '../translate/glossary';
 import { isDegenerate, parseVisionAnswer, tameRuns, type Look, type VisionAnswer } from '../translate/parse';
-import { FONT_STACKS } from '../render/style';
+import { FONT_STACKS, RENDER_HEADROOM } from '../render/style';
 import { tr } from '../i18n';
 import { buildSystemPrompt, contextData, visionCollageInstruction, visionFullInstruction, visionOcrInstruction, visionPhrasebook, type PromptInput } from '../translate/prompt';
 import { completeFitted, CONTEXT_LEVELS, estimateTokens, growRoom, imageTokens, OCR_LEVEL, windowOf } from '../translate/budget';
@@ -776,7 +776,15 @@ export function fontFromLettering(box: Box, text: string, l: Lettering | undefin
   // The measured height can only lower the area estimate a little: dots and commas («...AND THEN...»,
   // «HAHA!») count as short letters and pull the median down, and the translation came out a third
   // of the original's size.
-  return Math.max(8, Math.min(byArea, Math.max(Math.round(l.letterHeight / ratio), Math.round(byArea * 0.8))));
+  const byHeight = l.letterHeight / ratio;
+  if (byHeight > byArea) {
+    // Letters taller than the area says: a short remark («STOP!», «HA…»), where the area of a tight
+    // one-line box gives little more than half the size, and the translation came out small in its
+    // bubble. Bounded by what one line of this box can be and by how far the area can be off. The
+    // renderer allows 1.3 × the estimate (for the area's under-estimates): a measured size needs none.
+    return Math.max(byArea, Math.round(Math.min(byHeight, box[3] / ratio, byArea * 1.8) / RENDER_HEADROOM));
+  }
+  return Math.max(8, Math.min(byArea, Math.max(Math.round(byHeight), Math.round(byArea * 0.8))));
 }
 
 /** Rough font size from box area and character count. */

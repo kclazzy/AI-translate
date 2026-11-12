@@ -106,3 +106,6 @@ export function targetBox(block: TextBlock, d: StyleDefaults = DEFAULT_STYLE_DEF
   }
   return box;
 }
+
+/** How far over a block's estimated size the renderer may set its translation (the estimate from a box's area runs low). */
+export const RENDER_HEADROOM = 1.3;
