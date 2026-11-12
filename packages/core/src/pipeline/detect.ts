@@ -20,7 +20,7 @@ export interface Detection {
 }
 
 /** Picture (RGBA, any size; the pipeline sends 640×640) → boxes in that picture's pixels. */
-export type TextDetector = (img: PixelData, signal?: AbortSignal) => Promise<{ boxes: Detection[]; ep?: 'webgpu' | 'wasm' | 'engine'; runMs?: number; waitMs?: number }>;
+export type TextDetector = (img: PixelData, signal?: AbortSignal) => Promise<{ boxes: Detection[]; ep?: 'webgpu' | 'wasm' | 'engine'; epWhy?: string; runMs?: number; waitMs?: number }>;
 
 /** Where the detector's time went on one page (journal, ⓘ): computing, waiting its turn on the video card. */
 export interface DetectorStats {
@@ -28,6 +28,8 @@ export interface DetectorStats {
   runMs: number;
   waitMs: number;
   ep?: 'webgpu' | 'wasm' | 'engine';
+  /** On the processor although a video card was tried: what the card's attempt failed with. */
+  epWhy?: string;
 }
 
 /** The model's input side. */
@@ -187,6 +189,7 @@ export async function detectPage(image: TiledImage, detect: TextDetector, backen
       stats.runMs += Math.round(res.runMs ?? 0);
       stats.waitMs += Math.round(res.waitMs ?? 0);
       if (res.ep) stats.ep = res.ep;
+      if (res.epWhy) stats.epWhy = res.epWhy;
     }
     const sx = win.w / px.width;
     const sy = win.h / px.height;

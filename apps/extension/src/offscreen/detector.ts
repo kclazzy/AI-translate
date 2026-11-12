@@ -59,6 +59,7 @@ function load(prefer?: 'wasm'): Promise<Loaded> {
           return { s, ort, image, sizes, ep: s.remote ? ('engine' as const) : ep, url };
         } catch (e) {
           last = e;
+          if (ep === 'webgpu') cardError = why(e);
         }
       }
     }
@@ -106,6 +107,7 @@ export const textDetector: TextDetector = (img) => {
       if (L?.ep !== 'webgpu' && L?.ep !== 'engine') throw e;
       // …and the card is not tried again (a lost device fails every run after it).
       gpuBroken = true;
+      cardError = why(e);
       await releaseDetector();
       await load('wasm');
       return runOnce(img);
@@ -113,7 +115,10 @@ export const textDetector: TextDetector = (img) => {
   }).catch((e: unknown) => {
     // The card stopped answering: that session is not used again, the next pictures go on the
     // processor (the pipeline goes on without the detector for this one).
-    if (e instanceof GpuTimeout) abandon();
+    if (e instanceof GpuTimeout) {
+      cardError = why(e);
+      abandon();
+    }
     throw e;
   }));
   chain = job.catch(() => undefined);
@@ -124,9 +129,13 @@ export const textDetector: TextDetector = (img) => {
   // Where the time goes (journal, ⓘ): waiting for the video card (Ollama on it) or computing, and where.
   return job.then(async (boxes) => {
     const ep = (await session?.catch(() => null))?.ep;
-    return { boxes, waitMs: started ? started - queued : 0, runMs: started ? performance.now() - started : 0, ...(ep ? { ep } : {}) };
+    return { boxes, waitMs: started ? started - queued : 0, runMs: started ? performance.now() - started : 0, ...(ep ? { ep } : {}), ...(ep === 'wasm' && cardError ? { epWhy: cardError } : {}) };
   });
 };
+
+/** What the video card's attempt failed with (for the journal: why the detector is on the processor). */
+let cardError: string | undefined;
+const why = (e: unknown): string => String((e as Error)?.message ?? e).replace(/\s+/g, ' ').slice(0, 200);
 
 /** After a run on the card stopped answering: on the processor from now on (until the extension restarts). */
 let gpuBroken = false;

@@ -159,6 +159,8 @@ export interface PageTimings {
   detectorWaitMs?: number;
   detectorWindows?: number;
   detectorEp?: 'webgpu' | 'wasm' | 'engine';
+  /** The detector ran on the processor after the video card failed: the card's error (short). */
+  detectorEpWhy?: string;
   /** Typesetting the translation and encoding the tiles (selfCheckMs included). */
   renderMs?: number;
   /** The check after typesetting (pipeline/selfcheck.ts), part of renderMs. */

@@ -1522,7 +1522,7 @@ export async function runStandalonePipeline(req: PipelineRequest, deps: Standalo
         ...(blocksOut.length && tCleanStart && tJoined > tCleanStart ? { overlapMs: Math.max(0, Math.round(Math.min(tTranslated, tCleanPause) - tCleanStart)) } : {}),
         inpaintMs,
         ...(detectorMs ? { detectorMs } : {}),
-        ...(prep.detectorStats?.windows ? { detectorRunMs: prep.detectorStats.runMs, detectorWaitMs: prep.detectorStats.waitMs, detectorWindows: prep.detectorStats.windows, ...(prep.detectorStats.ep ? { detectorEp: prep.detectorStats.ep } : {}) } : {}),
+        ...(prep.detectorStats?.windows ? { detectorRunMs: prep.detectorStats.runMs, detectorWaitMs: prep.detectorStats.waitMs, detectorWindows: prep.detectorStats.windows, ...(prep.detectorStats.ep ? { detectorEp: prep.detectorStats.ep } : {}), ...(prep.detectorStats.epWhy ? { detectorEpWhy: prep.detectorStats.epWhy } : {}) } : {}),
         totalMs: Math.round(performance.now() - t0),
         ...(prepared ? { prefetched: true } : {}),
       },
