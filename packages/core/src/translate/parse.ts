@@ -350,3 +350,11 @@ export function parseTranslationAnswer(raw: string, expected: { id: string; text
     ...(repaired ? { repaired } : {}),
   };
 }
+
+/**
+ * Words written half in Cyrillic, half in Latin letters («Урgh»): a word the model began to
+ * translate and left. Words joined by a hyphen are judged apart («USB-кабель» is fine).
+ */
+export function mixedScriptWords(text: string): string[] {
+  return (text.match(/[A-Za-zА-Яа-яЁё]+/g) ?? []).filter((w) => /[A-Za-z]/.test(w) && /[А-Яа-яЁё]/.test(w));
+}

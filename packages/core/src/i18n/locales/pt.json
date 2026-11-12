@@ -1454,5 +1454,6 @@
  "Бабл переходит на соседнюю страницу и текст не переведён? Прочитать полосу вокруг этого стыка одним куском": "Um balão passa para a página seguinte e o texto não foi traduzido? Ler a faixa em volta desta junção como uma peça só",
  "На стыке ничего не прочитано — попробуйте «Ручной OCR» рамкой вокруг текста": "Nada foi lido na junção — tente «OCR manual» com uma moldura em volta do texto",
  "Объединить через стык": "Unir pela junção",
- "Сначала сохранить правки? Без этого они пропадут, когда стык перечитается.": "Salvar as edições primeiro? Senão elas se perdem quando a junção for relida."
+ "Сначала сохранить правки? Без этого они пропадут, когда стык перечитается.": "Salvar as edições primeiro? Senão elas se perdem quando a junção for relida.",
+ "Слово «{0}» написано наполовину латиницей.": "A palavra «{0}» está escrita pela metade em letras latinas."
 }

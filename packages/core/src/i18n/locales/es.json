@@ -1454,5 +1454,6 @@
  "Бабл переходит на соседнюю страницу и текст не переведён? Прочитать полосу вокруг этого стыка одним куском": "¿Un globo pasa a la página siguiente y su texto no está traducido? Leer la franja alrededor de esta unión como una sola pieza",
  "На стыке ничего не прочитано — попробуйте «Ручной OCR» рамкой вокруг текста": "No se leyó nada en la unión: pruebe «OCR manual» con un marco alrededor del texto",
  "Объединить через стык": "Unir a través de la unión",
- "Сначала сохранить правки? Без этого они пропадут, когда стык перечитается.": "¿Guardar antes los cambios? Si no, se perderán al volver a leer la unión."
+ "Сначала сохранить правки? Без этого они пропадут, когда стык перечитается.": "¿Guardar antes los cambios? Si no, se perderán al volver a leer la unión.",
+ "Слово «{0}» написано наполовину латиницей.": "La palabra «{0}» está escrita a medias en letras latinas."
 }

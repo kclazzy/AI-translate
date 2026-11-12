@@ -1454,5 +1454,6 @@
  "Бабл переходит на соседнюю страницу и текст не переведён? Прочитать полосу вокруг этого стыка одним куском": "Eine Sprechblase läuft auf die nächste Seite und ihr Text ist nicht übersetzt? Den Streifen um diese Naht als ein Stück lesen",
  "На стыке ничего не прочитано — попробуйте «Ручной OCR» рамкой вокруг текста": "An der Naht wurde nichts gelesen — versuchen Sie «Manuelles OCR» mit einem Rahmen um den Text",
  "Объединить через стык": "Über die Naht zusammenfügen",
- "Сначала сохранить правки? Без этого они пропадут, когда стык перечитается.": "Erst die Änderungen speichern? Sonst gehen sie verloren, wenn die Naht neu gelesen wird."
+ "Сначала сохранить правки? Без этого они пропадут, когда стык перечитается.": "Erst die Änderungen speichern? Sonst gehen sie verloren, wenn die Naht neu gelesen wird.",
+ "Слово «{0}» написано наполовину латиницей.": "Das Wort „{0}“ ist zur Hälfte in lateinischen Buchstaben geschrieben."
 }

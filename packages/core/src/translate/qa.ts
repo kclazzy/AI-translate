@@ -5,7 +5,7 @@ import type { LlmProvider } from '../llm/types';
 import type { TextBlock, Usage } from '../types';
 import type { TranslationContext } from './context';
 import { findGlossaryHits, type GlossaryEntry } from './glossary';
-import { extractJson, isDegenerate, jsonData, sanitizeLine, sanitizeText } from './parse';
+import { extractJson, isDegenerate, jsonData, mixedScriptWords, sanitizeLine, sanitizeText } from './parse';
 import { usageFrom } from './translator';
 import { isLocalProvider } from '../llm/privacy';
 import { lazyStrings, tr, uiLang } from '../i18n';
@@ -72,6 +72,7 @@ export function ruleChecks(b: TextBlock, targetLang: string, glossary: GlossaryE
   const cjkTarget = ['ja', 'zh', 'zh-TW', 'ko'].includes(targetLang);
   if (!cjkTarget && CJK.test(dst)) issues.push({ kind: 'untranslated', severity: 'major', note: tr('В переводе остались иероглифы или кана.'), code: 'В переводе остались иероглифы или кана.', by: 'rules' });
   if (targetLang === 'ru' && LATIN.test(dst) && !/[А-Яа-яЁё]/.test(dst) && dst.length > 3) issues.push({ kind: 'untranslated', severity: 'major', note: tr('Текст не переведён на русский.'), code: 'Текст не переведён на русский.', by: 'rules' });
+  for (const w of mixedScriptWords(dst)) issues.push({ kind: 'untranslated', severity: 'major', note: tr('Слово «{0}» написано наполовину латиницей.', w), code: 'Слово «{0}» написано наполовину латиницей.', args: [w], by: 'rules' });
   const end = (s: string) => (/[?？]/.test(s.slice(-3)) ? '?' : /[!！]/.test(s.slice(-3)) ? '!' : /(\.\.\.|…|・・・)$/.test(s) ? '…' : '');
   const e1 = end(src);
   const e2 = end(dst);

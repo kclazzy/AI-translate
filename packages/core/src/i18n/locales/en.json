@@ -1454,5 +1454,6 @@
  "Бабл переходит на соседнюю страницу и текст не переведён? Прочитать полосу вокруг этого стыка одним куском": "A bubble runs onto the next page and its text is not translated? Read the band around this seam as one piece",
  "На стыке ничего не прочитано — попробуйте «Ручной OCR» рамкой вокруг текста": "Nothing was read on the seam — try «Manual OCR» with a frame around the text",
  "Объединить через стык": "Merge across the seam",
- "Сначала сохранить правки? Без этого они пропадут, когда стык перечитается.": "Save your edits first? Otherwise they are lost when the seam is read again."
+ "Сначала сохранить правки? Без этого они пропадут, когда стык перечитается.": "Save your edits first? Otherwise they are lost when the seam is read again.",
+ "Слово «{0}» написано наполовину латиницей.": "The word “{0}” is written half in Latin letters."
 }

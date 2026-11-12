@@ -7,7 +7,7 @@ import type { ChatMessage, CompletionResult, LlmProvider } from '../llm/types';
 import type { TextType, Usage } from '../types';
 import { withRetry } from '../util/retry';
 import { applyForbiddenFixes, findGlossaryHits, findViolations, type GlossaryHit } from './glossary';
-import { isDegenerate, parseTranslationAnswer, tameRuns } from './parse';
+import { isDegenerate, mixedScriptWords, parseTranslationAnswer, tameRuns } from './parse';
 import { isAllCaps, sentenceCase, unshout } from './caseNorm';
 import { learnCharacters, namesIn } from './names';
 import { continuesNext } from './continuation';
@@ -200,6 +200,7 @@ function collectProblems(translations: Map<string, { text: string }>, hitsByBloc
   for (const [id, t] of translations) {
     const src = sources?.get(id);
     if (src && isDegenerate(t.text, src)) problems.push(`Block ${id}: "${t.text.slice(0, 24)}…" is not a translation of "${src}". Translate the word itself; a drawn-out word stays a word with a few repeated letters (e.g. "COOOME…" → the target word for "come" with one vowel drawn out, like "Иди-и-и…" in Russian).`);
+    for (const w of mixedScriptWords(t.text)) problems.push(`Block ${id}: "${w}" mixes Cyrillic and Latin letters in one word. Write the whole word in the target language's alphabet.`);
     for (const v of findViolations(t.text, hitsByBlock.get(id) ?? [])) {
       problems.push(`Block ${id}: "${v.found}" is forbidden, use "${v.entry.target}" for "${v.entry.source}"`);
     }
