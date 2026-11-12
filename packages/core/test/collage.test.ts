@@ -6,27 +6,8 @@ import { pieceBoxes, pieceScale, planCollage, withPieceBoxes } from '../src/pipe
 import { detectorWindows, type Detection, type TextDetector } from '../src/pipeline/detect';
 import type { PixelData } from '../src/image/backend';
 import type { Box } from '../src/types';
-import { mockOpenAi, napiBackend } from './helpers';
+import { fakeDetector, mockOpenAi, napiBackend } from './helpers';
 
-function fakeDetector(page: Detection[], W: number, H: number): TextDetector {
-  const wins = detectorWindows(W, H);
-  let calls = 0;
-  return (async (img: PixelData) => {
-    const win = wins[calls++ % wins.length];
-    const sx = img.width / win.w;
-    const sy = img.height / win.h;
-    const boxes: Detection[] = [];
-    for (const d of page) {
-      const x0 = Math.max(d.box[0], win.x);
-      const y0 = Math.max(d.box[1], win.y);
-      const x1 = Math.min(d.box[0] + d.box[2], win.x + win.w);
-      const y1 = Math.min(d.box[1] + d.box[3], win.y + win.h);
-      if (x1 <= x0 || y1 <= y0) continue;
-      boxes.push({ kind: d.kind, score: d.score, box: [(x0 - win.x) * sx, (y0 - win.y) * sy, (x1 - x0) * sx, (y1 - y0) * sy] });
-    }
-    return { boxes };
-  }) as TextDetector;
-}
 
 const W = 800;
 const H = 1400;

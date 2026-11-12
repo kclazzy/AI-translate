@@ -1,4 +1,6 @@
 import { existsSync } from 'node:fs';
+import { detectorWindows, type Detection, type TextDetector } from '../src/pipeline/detect';
+import type { PixelData } from '../src/image/backend';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createCanvas, GlobalFonts, loadImage } from '@napi-rs/canvas';
 import type { ImageBackend } from '../src/image/backend';
@@ -118,4 +120,25 @@ export function mockOpenAi(answer: (body: any, call: number) => string | Respons
 /** Convert page-pixel boxes to the 0–1000 space used by the vision prompt. */
 export function toNorm(box: [number, number, number, number], w: number, h: number): [number, number, number, number] {
   return [Math.round((box[0] / w) * 1000), Math.round((box[1] / h) * 1000), Math.round(((box[0] + box[2]) / w) * 1000), Math.round(((box[1] + box[3]) / h) * 1000)];
+}
+
+/** A detector that "finds" the given page boxes: each window gets the parts of them inside it. */
+export function fakeDetector(page: Detection[], W: number, H: number): TextDetector {
+  const wins = detectorWindows(W, H);
+  let calls = 0;
+  return async (img: PixelData) => {
+    const win = wins[calls++ % wins.length];
+    const sx = img.width / win.w;
+    const sy = img.height / win.h;
+    const boxes: Detection[] = [];
+    for (const d of page) {
+      const x0 = Math.max(d.box[0], win.x);
+      const y0 = Math.max(d.box[1], win.y);
+      const x1 = Math.min(d.box[0] + d.box[2], win.x + win.w);
+      const y1 = Math.min(d.box[1] + d.box[3], win.y + win.h);
+      if (x1 <= x0 || y1 <= y0) continue;
+      boxes.push({ kind: d.kind, score: d.score, box: [(x0 - win.x) * sx, (y0 - win.y) * sy, (x1 - x0) * sx, (y1 - y0) * sy] });
+    }
+    return { boxes };
+  };
 }

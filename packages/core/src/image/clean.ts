@@ -579,6 +579,17 @@ export interface Walls {
   right?: boolean;
 }
 
+/** The share of the page box `box` that the flood (found in the analysed `region`) covers. */
+function floodShareIn(flood: FloodResult, region: Box, box: Box): number {
+  const x0 = Math.max(flood.box[0], box[0] - region[0]);
+  const y0 = Math.max(flood.box[1], box[1] - region[1]);
+  const x1 = Math.min(flood.box[0] + flood.box[2], box[0] + box[2] - region[0]);
+  const y1 = Math.min(flood.box[1] + flood.box[3], box[1] + box[3] - region[1]);
+  let n = 0;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) n += flood.mask[y * region[2] + x];
+  return n / Math.max(1, boxArea(box));
+}
+
 /**
  * Pixels not in `region` that are fully enclosed by it (the glyphs inside a bubble). A side in
  * `walls` closes the region too: letters cut in half by the picture's edge are glyphs as well.
@@ -1400,8 +1411,12 @@ export function cleanBlock(image: TiledImage, bbox: Box, opts: CleanOptions = {}
       const m = (v: number) => Math.round(6 + v * 0.06);
       const lim = expandBox(known, m(known[2]), m(known[3]));
       const [fx, fy, fw, fh] = [flood.box[0] + region[0], flood.box[1] + region[1], flood.box[2], flood.box[3]];
-      if (fx < lim[0] || fy < lim[1] || fx + fw > lim[0] + lim[2] || fy + fh > lim[1] + lim[3]) return false;
-      if (flood.area >= boxArea(known) * 0.3 && flood.area >= floodArea * 0.4) return true;
+      const out = fx < lim[0] || fy < lim[1] || fx + fw > lim[0] + lim[2] || fy + fh > lim[1] + lim[3];
+      // …unless the detector boxed only a part of one drawn shape (two caption boxes in one stepped
+      // frame): a flood that fills the detector's box and is not much bigger is that shape, judged
+      // as without the detector. (Refused, its frame would be erased as lettering over the art.)
+      if (out && !(floodArea <= boxArea(known) * 4 && floodShareIn(flood, region, known) >= 0.6)) return false;
+      if (!out && flood.area >= boxArea(known) * 0.3 && flood.area >= floodArea * 0.4) return true;
     }
     if (floodArea > Math.max(boxArea(local) * 30, 40_000)) {
       // Much bigger than its text: only an oval around it (a panel or the sky is a rectangle or
